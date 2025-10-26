@@ -1,0 +1,12 @@
+7d554aade19ebf86e9cad37ed2de705e  usr/bin/zorin-optimizer
+c97aa54295d19167d67e3df890422b63  usr/lib/python3/dist-packages/zorin_optim_tool/__init__.py
+fd9de8b21229fa0e34ee6589df9563f7  usr/lib/python3/dist-packages/zorin_optim_tool/app.py
+f8f9c9610096d7480c77d2cfd63df99b  usr/lib/python3/dist-packages/zorin_optim_tool/config/apps.json
+24b82c2868f862b724c15451859c0d5a  usr/lib/python3/dist-packages/zorin_optim_tool/config/presets.json
+c72246579c4437c07cebb86fbcbc6d90  usr/lib/python3/dist-packages/zorin_optimizer-0.1.0.dist-info/INSTALLER
+7803714f6ec81bace6922f7a7ae4de8f  usr/lib/python3/dist-packages/zorin_optimizer-0.1.0.dist-info/METADATA
+a227bf38fb17005b3bdb56ccc428b1bb  usr/lib/python3/dist-packages/zorin_optimizer-0.1.0.dist-info/WHEEL
+7aadea79fd6236964ffd242b87af17be  usr/lib/python3/dist-packages/zorin_optimizer-0.1.0.dist-info/entry_points.txt
+dfd882bda6f5304141f51d24cbc011d7  usr/lib/python3/dist-packages/zorin_optimizer-0.1.0.dist-info/top_level.txt
+40e60e324ea98769928c658fc643e0b1  usr/share/applications/zorin-optimizer.desktop
+b836acdb363d09650042a8836d420749  usr/share/doc/zorin-optimizer/changelog.gz

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Zorin Optimizer
+Comment=Optimize and set up Zorin OS quickly
+Exec=zorin-optimizer
+Icon=utilities-system-monitor
+Terminal=false
+Categories=System;Settings;
+StartupWMClass=Zorin Optimizer

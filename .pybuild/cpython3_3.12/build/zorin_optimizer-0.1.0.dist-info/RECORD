@@ -1,0 +1,10 @@
+../scripts/zorin-optimizer,sha256=s-KdzRyQQMTzYGDHorz4V4uF71N109RONJBrePwF06c,219
+zorin_optim_tool/__init__.py,sha256=da1PTClDMl-IBkrSvq6JC1lnS-K_BASzCvxVhNxN5Ls,13
+zorin_optim_tool/app.py,sha256=0HqEek_PHCk7WosjnqpPXftWznfnjFZUA8I4uCTUsGw,20733
+zorin_optim_tool/config/apps.json,sha256=y8-r7UorkGHIIx67_Z8JTTgXX57Yqeka3WKjh6wn538,4031
+zorin_optim_tool/config/presets.json,sha256=ahqR_DDIUvtXNWQhkerVyIcpJ5MyCuCqIXy3RfjquiU,298
+zorin_optimizer-0.1.0.dist-info/METADATA,sha256=yTGxtjTH0LdrCewDGhoRJ67vntv03fdGTjZzcw6PqYE,1623
+zorin_optimizer-0.1.0.dist-info/WHEEL,sha256=oiQVh_5PnQM0E3gPdiz09WCNmwiHDMaGer_elqB3coM,92
+zorin_optimizer-0.1.0.dist-info/entry_points.txt,sha256=tIjYB6rL1ArIHWQAByT7E4nnkfurglHXDvK_U38r110,62
+zorin_optimizer-0.1.0.dist-info/top_level.txt,sha256=V5Cry0_pZ__Ovv2UnvAwUgBvSe-8iWsxay2hE3EQR_Y,17
+zorin_optimizer-0.1.0.dist-info/RECORD,,

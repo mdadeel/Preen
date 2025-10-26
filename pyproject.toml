@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zorin-optimizer"
+version = "0.1.0"
+description = "Lightweight ZorinOS optimization and app installation tool"
+authors = [{ name = "Zorin Optimizer" }]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+  "psutil>=5.9",
+]
+
+[project.scripts]
+zorin-optimizer = "zorin_optim_tool.app:main"
+
+[tool.setuptools]
+packages = ["zorin_optim_tool"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+zorin_optim_tool = ["config/*.json"]

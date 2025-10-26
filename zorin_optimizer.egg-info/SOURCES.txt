@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+zorin_optim_tool/__init__.py
+zorin_optim_tool/app.py
+zorin_optim_tool/config/apps.json
+zorin_optim_tool/config/presets.json
+zorin_optimizer.egg-info/PKG-INFO
+zorin_optimizer.egg-info/SOURCES.txt
+zorin_optimizer.egg-info/dependency_links.txt
+zorin_optimizer.egg-info/entry_points.txt
+zorin_optimizer.egg-info/requires.txt
+zorin_optimizer.egg-info/top_level.txt

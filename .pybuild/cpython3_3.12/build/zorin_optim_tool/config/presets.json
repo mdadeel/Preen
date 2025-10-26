@@ -1,0 +1,6 @@
+{
+  "Developer Pack": ["code", "git", "node", "python3"],
+  "Gamer Pack": ["com.valvesoftware.Steam", "net.lutris.Lutris", "org.freedesktop.Platform.VulkanLayer.MangoHud"],
+  "Creative Pack": ["gimp", "org.kde.krita", "obs", "org.inkscape.Inkscape"],
+  "Minimalist Pack": ["stacer", "timeshift"]
+}

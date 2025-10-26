@@ -1,0 +1,2 @@
+[console_scripts]
+zorin-optimizer = zorin_optim_tool.app:main
