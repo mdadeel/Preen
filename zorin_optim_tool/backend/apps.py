@@ -75,50 +75,111 @@ def list_installed_flatpak() -> List[Dict]:
 
 
 def list_installed_apt() -> List[Dict]:
-    # List installed packages; this can be large
-    code, out, _ = run_cmd(["dpkg-query", "-W", "-f=${Package}\t${Status}\n"])
+    import glob
+    # 1. Glob all .desktop files
+    desktop_files = glob.glob("/usr/share/applications/*.desktop")
+    if not desktop_files:
+        return []
+    
+    # 2. Get packages owning those desktop files in a single dpkg query
+    desktop_to_pkg = {}
+    try:
+        code, out, _ = run_cmd(["dpkg", "-S"] + desktop_files)
+        if code in (0, 1):
+            for line in out.splitlines():
+                if ":" in line:
+                    parts = line.split(":", 1)
+                    pkg_names = parts[0].strip()
+                    file_path = parts[1].strip()
+                    # A file can be owned by multiple packages (comma-separated), take the first one
+                    pkg = pkg_names.split(",")[0].strip()
+                    desktop_to_pkg[file_path] = pkg
+    except Exception:
+        pass
+
+    # 3. Parse desktop files to get human-readable Name
     items = []
-    if code == 0:
-        for line in out.splitlines():
-            try:
-                pkg, status = line.split("\t", 1)
-            except ValueError:
-                continue
-            if "install ok installed" in status:
-                items.append({"source": "apt", "id": pkg, "name": pkg})
+    seen_packages = set()
+    for path in desktop_files:
+        pkg = desktop_to_pkg.get(path)
+        if not pkg:
+            continue
+        if pkg in seen_packages:
+            continue
+        
+        name = pkg
+        is_app = False
+        no_display = False
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                in_entry = False
+                for line in f:
+                    line = line.strip()
+                    if line == "[Desktop Entry]":
+                        in_entry = True
+                    elif line.startswith("[") and line.endswith("]"):
+                        in_entry = False
+                    elif in_entry:
+                        if line.startswith("Name="):
+                            name = line.split("=", 1)[1].strip()
+                        elif line.startswith("Type="):
+                            is_app = (line.split("=", 1)[1].strip().lower() == "application")
+                        elif line.startswith("NoDisplay="):
+                            no_display = (line.split("=", 1)[1].strip().lower() == "true")
+                        elif line.startswith("Hidden="):
+                            no_display = no_display or (line.split("=", 1)[1].strip().lower() == "true")
+        except Exception:
+            continue
+            
+        if is_app and not no_display:
+            seen_packages.add(pkg)
+            items.append({"source": "apt", "id": pkg, "name": name})
+            
+    items.sort(key=lambda x: x["name"].lower())
     return items
 
 
 def uninstall_installed(entries: List[Dict], log=None):
+    flatpaks = []
+    apts = []
     for it in entries:
         src = it.get("source")
         ident = it.get("id")
         if src == "flatpak":
-            cmd = ["flatpak", "uninstall", "-y", ident]
-            if log: log.append(f"[flatpak] {' '.join(cmd)}\n")
-            run_cmd(cmd, mutate=True)
+            flatpaks.append(ident)
         elif src == "apt":
-            cmd = ["pkexec", "apt-get", "remove", "-y", ident]
-            if log: log.append(f"[apt] {' '.join(cmd)}\n")
-            run_cmd(cmd, mutate=True)
+            apts.append(ident)
+    
+    if flatpaks:
+        cmd = ["flatpak", "uninstall", "-y"] + flatpaks
+        if log: log.append(f"[flatpak] {' '.join(cmd)}\n")
+        run_cmd(cmd, mutate=True)
+    if apts:
+        cmd = ["pkexec", "apt-get", "remove", "-y"] + apts
+        if log: log.append(f"[apt] {' '.join(cmd)}\n")
+        run_cmd(cmd, mutate=True)
+
 
 def update_installed(entries: List[Dict], log=None):
-    # Update specific installed entries
-    apt_updated_index = False
+    flatpaks = []
+    apts = []
     for it in entries:
         src = it.get("source")
         ident = it.get("id")
         if src == "flatpak":
-            cmd = ["flatpak", "update", "-y", ident]
-            if log: log.append(f"[flatpak] {' '.join(cmd)}\n")
-            run_cmd(cmd, mutate=True)
+            flatpaks.append(ident)
         elif src == "apt":
-            if not apt_updated_index:
-                run_cmd(["pkexec", "apt-get", "update"], mutate=True)
-                apt_updated_index = True
-            cmd = ["pkexec", "apt-get", "install", "--only-upgrade", "-y", ident]
-            if log: log.append(f"[apt] {' '.join(cmd)}\n")
-            run_cmd(cmd, mutate=True)
+            apts.append(ident)
+            
+    if flatpaks:
+        cmd = ["flatpak", "update", "-y"] + flatpaks
+        if log: log.append(f"[flatpak] {' '.join(cmd)}\n")
+        run_cmd(cmd, mutate=True)
+    if apts:
+        run_cmd(["pkexec", "apt-get", "update"], mutate=True)
+        cmd = ["pkexec", "apt-get", "install", "--only-upgrade", "-y"] + apts
+        if log: log.append(f"[apt] {' '.join(cmd)}\n")
+        run_cmd(cmd, mutate=True)
 
 
 def install_apps(app_ids: List[str], source: str, log=None):
@@ -126,29 +187,54 @@ def install_apps(app_ids: List[str], source: str, log=None):
     apps = load_apps()
     # Flatten list
     all_items = {item["id"]: item for cat in apps.values() for item in cat}
+    
+    flatpaks_to_install = []
+    apts_to_install = []
+    
     for aid in app_ids:
         item = all_items.get(aid)
         if not item:
             continue
-        if source == "flatpak" and "flatpak" in item:
-            ref = item["flatpak"]
-            if _flatpak_installed(ref):
-                if log: log.append(f"[install] {item['name']} already installed (Flatpak)\n")
-                continue
-            cmd = ["flatpak", "install", "-y", "flathub", ref]
-            if log: log.append(f"[flatpak] {' '.join(cmd)}\n")
-            run_cmd(cmd, mutate=True)
-        elif source == "apt" and "apt" in item:
-            pkg = item["apt"]
-            if _apt_installed(pkg):
-                if log: log.append(f"[install] {item['name']} already installed (APT)\n")
-                continue
-            run_cmd(["pkexec", "apt-get", "update"], mutate=True)  # escalate for apt
-            cmd = ["pkexec", "apt-get", "install", "-y", pkg]
-            if log: log.append(f"[apt] install {' '.join(cmd)}\n")
-            run_cmd(cmd, mutate=True)
-        else:
-            if log: log.append(f"[skip] {item.get('name', aid)} unsupported source {source}\n")
+        
+        has_flat = bool(item.get("flatpak"))
+        has_apt = bool(item.get("apt"))
+        
+        if source == "flatpak":
+            if has_flat:
+                ref = item["flatpak"]
+                if not _flatpak_installed(ref):
+                    flatpaks_to_install.append(ref)
+                else:
+                    if log: log.append(f"[install] {item['name']} already installed (Flatpak)\n")
+            elif has_apt:
+                pkg = item["apt"]
+                if not _apt_installed(pkg):
+                    apts_to_install.append(pkg)
+                else:
+                    if log: log.append(f"[install] {item['name']} already installed (APT)\n")
+        else:  # source == "apt"
+            if has_apt:
+                pkg = item["apt"]
+                if not _apt_installed(pkg):
+                    apts_to_install.append(pkg)
+                else:
+                    if log: log.append(f"[install] {item['name']} already installed (APT)\n")
+            elif has_flat:
+                ref = item["flatpak"]
+                if not _flatpak_installed(ref):
+                    flatpaks_to_install.append(ref)
+                else:
+                    if log: log.append(f"[install] {item['name']} already installed (Flatpak)\n")
+                    
+    if flatpaks_to_install:
+        cmd = ["flatpak", "install", "-y", "flathub"] + flatpaks_to_install
+        if log: log.append(f"[flatpak] {' '.join(cmd)}\n")
+        run_cmd(cmd, mutate=True)
+    if apts_to_install:
+        run_cmd(["pkexec", "apt-get", "update"], mutate=True)
+        cmd = ["pkexec", "apt-get", "install", "-y"] + apts_to_install
+        if log: log.append(f"[apt] install {' '.join(cmd)}\n")
+        run_cmd(cmd, mutate=True)
 
 
 def update_all(source: str, log=None):
@@ -166,47 +252,104 @@ def update_all(source: str, log=None):
 def update_apps(app_ids: List[str], source: str, log=None):
     apps = load_apps()
     all_items = {item["id"]: item for cat in apps.values() for item in cat}
-    if source == "flatpak":
-        for aid in app_ids:
-            item = all_items.get(aid)
-            if not item or not item.get("flatpak"):
-                continue
-            cmd = ["flatpak", "update", "-y", item["flatpak"]]
-            if log: log.append(f"[flatpak] {' '.join(cmd)}\n")
-            run_cmd(cmd, mutate=True)
-    elif source == "apt":
+    
+    flatpaks_to_update = []
+    apts_to_update = []
+    
+    for aid in app_ids:
+        item = all_items.get(aid)
+        if not item:
+            continue
+            
+        has_flat = bool(item.get("flatpak"))
+        has_apt = bool(item.get("apt"))
+        
+        if source == "flatpak":
+            if has_flat:
+                flatpaks_to_update.append(item["flatpak"])
+            elif has_apt:
+                apts_to_update.append(item["apt"])
+        else:  # source == "apt"
+            if has_apt:
+                apts_to_update.append(item["apt"])
+            elif has_flat:
+                flatpaks_to_update.append(item["flatpak"])
+                
+    if flatpaks_to_update:
+        cmd = ["flatpak", "update", "-y"] + flatpaks_to_update
+        if log: log.append(f"[flatpak] {' '.join(cmd)}\n")
+        run_cmd(cmd, mutate=True)
+    if apts_to_update:
         run_cmd(["pkexec", "apt-get", "update"], mutate=True)
-        for aid in app_ids:
-            item = all_items.get(aid)
-            if not item or not item.get("apt"):
-                continue
-            cmd = ["pkexec", "apt-get", "install", "--only-upgrade", "-y", item["apt"]]
-            if log: log.append(f"[apt] {' '.join(cmd)}\n")
-            run_cmd(cmd, mutate=True)
+        cmd = ["pkexec", "apt-get", "install", "--only-upgrade", "-y"] + apts_to_update
+        if log: log.append(f"[apt] {' '.join(cmd)}\n")
+        run_cmd(cmd, mutate=True)
 
 
 def uninstall_apps(app_ids: List[str], source: str, log=None):
     apps = load_apps()
     all_items = {item["id"]: item for cat in apps.values() for item in cat}
+    
+    flatpaks_to_uninstall = []
+    apts_to_uninstall = []
+    
     for aid in app_ids:
         item = all_items.get(aid)
         if not item:
             continue
-        if source == "flatpak" and "flatpak" in item:
-            ref = item["flatpak"]
-            if not _flatpak_installed(ref):
-                if log: log.append(f"[uninstall] {item['name']} not installed (Flatpak)\n")
-                continue
-            cmd = ["flatpak", "uninstall", "-y", ref]
-            if log: log.append(f"[flatpak] {' '.join(cmd)}\n")
-            run_cmd(cmd, mutate=True)
-        elif source == "apt" and "apt" in item:
-            pkg = item["apt"]
-            if not _apt_installed(pkg):
-                if log: log.append(f"[uninstall] {item['name']} not installed (APT)\n")
-                continue
-            cmd = ["pkexec", "apt-get", "remove", "-y", pkg]
-            if log: log.append(f"[apt] {' '.join(cmd)}\n")
-            run_cmd(cmd, mutate=True)
+            
+        has_flat = bool(item.get("flatpak"))
+        has_apt = bool(item.get("apt"))
+        
+        if source == "flatpak":
+            if has_flat:
+                ref = item["flatpak"]
+                if _flatpak_installed(ref):
+                    flatpaks_to_uninstall.append(ref)
+                else:
+                    if log: log.append(f"[uninstall] {item['name']} not installed (Flatpak)\n")
+            elif has_apt:
+                pkg = item["apt"]
+                if _apt_installed(pkg):
+                    apts_to_uninstall.append(pkg)
+                else:
+                    if log: log.append(f"[uninstall] {item['name']} not installed (APT)\n")
+        else:  # source == "apt"
+            if has_apt:
+                pkg = item["apt"]
+                if _apt_installed(pkg):
+                    apts_to_uninstall.append(pkg)
+                else:
+                    if log: log.append(f"[uninstall] {item['name']} not installed (APT)\n")
+            elif has_flat:
+                ref = item["flatpak"]
+                if _flatpak_installed(ref):
+                    flatpaks_to_uninstall.append(ref)
+                else:
+                    if log: log.append(f"[uninstall] {item['name']} not installed (Flatpak)\n")
+                    
+    if flatpaks_to_uninstall:
+        cmd = ["flatpak", "uninstall", "-y"] + flatpaks_to_uninstall
+        if log: log.append(f"[flatpak] {' '.join(cmd)}\n")
+        run_cmd(cmd, mutate=True)
+    if apts_to_uninstall:
+        cmd = ["pkexec", "apt-get", "remove", "-y"] + apts_to_uninstall
+        if log: log.append(f"[apt] {' '.join(cmd)}\n")
+        run_cmd(cmd, mutate=True)
+
+
+def get_status_label_map() -> Dict[str, str]:
+    apps = load_apps()
+    all_items = {item["id"]: item for cat in apps.values() for item in cat}
+    status = {}
+    for aid, item in all_items.items():
+        formats = []
+        if item.get("flatpak") and _flatpak_installed(item["flatpak"]):
+            formats.append("Flatpak")
+        if item.get("apt") and _apt_installed(item["apt"]):
+            formats.append("APT")
+        if formats:
+            status[aid] = f"Installed ({', '.join(formats)})"
         else:
-            if log: log.append(f"[skip] {item.get('name', aid)} unsupported source {source}\n")
+            status[aid] = "Not installed"
+    return status

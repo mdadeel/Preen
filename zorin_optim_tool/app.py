@@ -185,17 +185,42 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self.chk_cleanup = Gtk.CheckButton.new_with_label("Run cleanup (APT and Flatpak)")
         self.chk_animations = Gtk.CheckButton.new_with_label("Disable GNOME animations")
-        self.chk_animations.set_active(False)
+        
+        # Initialize animations checkbox (active if animations are currently disabled)
+        try:
+            self.chk_animations.set_active(not system_backend.are_animations_enabled())
+        except Exception:
+            self.chk_animations.set_active(False)
 
         self.chk_swap = Gtk.CheckButton.new_with_label("Enable swapfile (2G)")
+        try:
+            self.chk_swap.set_active(perf_backend.is_swapfile_active())
+        except Exception:
+            self.chk_swap.set_active(False)
+
         self.chk_zram = Gtk.CheckButton.new_with_label("Enable ZRAM (if supported)")
+        try:
+            self.chk_zram.set_active(perf_backend.is_zram_active())
+        except Exception:
+            self.chk_zram.set_active(False)
 
         power_box = Gtk.Box(spacing=8)
         power_box.pack_start(Gtk.Label(label="Power profile:"), False, False, 0)
         self.cmb_power = Gtk.ComboBoxText()
-        for profile in ["balanced", "power-saver", "performance"]:
+        profiles = ["balanced", "power-saver", "performance"]
+        for profile in profiles:
             self.cmb_power.append_text(profile)
+        
+        # Initialize power profile active selection
         self.cmb_power.set_active(0)
+        if perf_backend.has_command("powerprofilesctl"):
+            try:
+                code, out, _ = utils.run_cmd(["powerprofilesctl", "get"])
+                if code == 0 and out.strip() in profiles:
+                    self.cmb_power.set_active(profiles.index(out.strip()))
+            except Exception:
+                pass
+        
         power_box.pack_start(self.cmb_power, False, False, 0)
 
         btn_run = Gtk.Button(label="Run Optimization")
@@ -443,11 +468,9 @@ class MainWindow(Gtk.ApplicationWindow):
         return False
 
     def on_refresh_status(self, _btn):
-        source = self.install_source.get_active_text().lower()
-        status = apps_backend.get_status_map(source)
+        status = apps_backend.get_status_label_map()
         for aid, lbl in self.app_status_labels.items():
-            inst = status.get(aid, False)
-            lbl.set_text("Installed" if inst else "Not installed")
+            lbl.set_text(status.get(aid, "Not installed"))
 
     def on_apply_preset(self, _btn):
         idx = self.cmb_presets.get_active()
