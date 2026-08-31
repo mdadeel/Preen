@@ -21,32 +21,30 @@ def enable_swapfile(size_gb: int = 2, log=None):
     if out.strip():
         if log: log.append("[swap] swap already active\n")
         return
-    # Create swapfile using pkexec
+    # Create swapfile using a single pkexec bash command to avoid prompt fatigue
     size_mb = size_gb * 1024
-    cmds = [
-        ["pkexec", "bash", "-lc", f"fallocate -l {size_mb}M {SWAPFILE}"],
-        ["pkexec", "bash", "-lc", f"chmod 600 {SWAPFILE}"],
-        ["pkexec", "bash", "-lc", f"mkswap {SWAPFILE}"],
-        ["pkexec", "bash", "-lc", f"swapon {SWAPFILE}"],
-        ["pkexec", "bash", "-lc", f"grep -q '{SWAPFILE}' /etc/fstab || echo '{SWAPFILE} none swap sw 0 0' >> /etc/fstab"],
-    ]
-    for c in cmds:
-        if log: log.append(f"[swap] {' '.join(c)}\n")
-        run_cmd(c, mutate=True)
+    cmd_str = (
+        f"fallocate -l {size_mb}M {SWAPFILE} && "
+        f"chmod 600 {SWAPFILE} && "
+        f"mkswap {SWAPFILE} && "
+        f"swapon {SWAPFILE} && "
+        f"(grep -q '{SWAPFILE}' /etc/fstab || echo '{SWAPFILE} none swap sw 0 0' >> /etc/fstab)"
+    )
+    cmd = ["pkexec", "bash", "-c", cmd_str]
+    if log: log.append(f"[swap] { ' '.join(cmd) }\n")
+    run_cmd(cmd, mutate=True)
 
 
 def disable_swapfile(log=None):
-    # Turn off swap and remove /swapfile line from fstab
-    if log: log.append("[swap] swapoff -a\n")
-    run_cmd(["pkexec", "swapoff", "-a"], mutate=True)  # may error if none; ignore
-    # Remove swapfile and fstab entry
-    cmds = [
-        ["pkexec", "bash", "-lc", f"sed -i.bak '\\|{SWAPFILE}|d' /etc/fstab"],
-        ["pkexec", "bash", "-lc", f"[ -f {SWAPFILE} ] && rm -f {SWAPFILE} || true"],
-    ]
-    for c in cmds:
-        if log: log.append(f"[swap] {' '.join(c)}\n")
-        run_cmd(c, mutate=True)
+    # Turn off swap and remove /swapfile line from fstab using a single pkexec command
+    cmd_str = (
+        f"swapoff {SWAPFILE} 2>/dev/null || true; "
+        f"sed -i.bak '\\|{SWAPFILE}|d' /etc/fstab; "
+        f"[ -f {SWAPFILE} ] && rm -f {SWAPFILE} || true"
+    )
+    cmd = ["pkexec", "bash", "-c", cmd_str]
+    if log: log.append(f"[swap] { ' '.join(cmd) }\n")
+    run_cmd(cmd, mutate=True)
 
 
 ZRAM_CFG = "/etc/systemd/zram-generator.conf"
@@ -70,10 +68,17 @@ def disable_zram(log=None):
     if not os.path.exists(ZRAM_CFG):
         if log: log.append("[zram] config not present\n")
         return
-    cmds = [
-        ["pkexec", "bash", "-lc", "swapoff /dev/zram0 || true"],
-        ["pkexec", "bash", "-lc", f"rm -f {ZRAM_CFG} && systemctl daemon-reload"],
-    ]
-    for c in cmds:
-        if log: log.append(f"[zram] {' '.join(c)}\n")
-        run_cmd(c, mutate=True)
+    cmd_str = f"swapoff /dev/zram0 2>/dev/null || true; rm -f {ZRAM_CFG} && systemctl daemon-reload"
+    cmd = ["pkexec", "bash", "-c", cmd_str]
+    if log: log.append(f"[zram] { ' '.join(cmd) }\n")
+    run_cmd(cmd, mutate=True)
+
+
+def is_swapfile_active() -> bool:
+    code, out, _ = run_cmd(["swapon", "--show"])
+    return code == 0 and SWAPFILE in out
+
+
+def is_zram_active() -> bool:
+    code, out, _ = run_cmd(["swapon", "--show"])
+    return code == 0 and "zram" in out
