@@ -6,10 +6,9 @@ from .utils import run_cmd
 
 
 def run_cleanup(log=None):
-    if log: log.append("[cleanup] apt-get autoremove -y\n")
-    run_cmd(["pkexec", "apt-get", "autoremove", "-y"], mutate=True)  # may be no-op
-    if log: log.append("[cleanup] apt-get autoclean -y\n")
-    run_cmd(["pkexec", "apt-get", "autoclean", "-y"], mutate=True)  # may be no-op
+    if log: log.append("[cleanup] apt-get autoremove -y && apt-get autoclean -y\n")
+    cmd = ["pkexec", "bash", "-c", "apt-get autoremove -y && apt-get autoclean -y"]
+    run_cmd(cmd, mutate=True)
     if log: log.append("[cleanup] flatpak uninstall --unused -y\n")
     run_cmd(["flatpak", "uninstall", "--unused", "-y"], mutate=True)  # user scope
 
@@ -60,3 +59,8 @@ def set_startup_app(path: str, enabled: bool, log=None) -> bool:
     ok = set_autostart_hidden(user_path, hidden=not enabled)
     if log: log.append(f"[autostart] {'enable' if enabled else 'disable'} {base}: {'ok' if ok else 'fail'}\n")
     return ok
+
+
+def are_animations_enabled() -> bool:
+    code, out, _ = run_cmd(["gsettings", "get", "org.gnome.desktop.interface", "enable-animations"])
+    return code == 0 and "true" in out.lower()
