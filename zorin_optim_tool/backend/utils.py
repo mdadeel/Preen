@@ -31,14 +31,22 @@ def run_cmd(args: List[str], use_pkexec: bool = False, check: bool = False, env:
     - If use_pkexec is True, run via pkexec for privilege escalation.
     - If mutate is True and simulate mode is on, do not execute and return success.
     """
+    import os
+    is_root = (os.geteuid() == 0)
     if use_pkexec:
-        if not has_command("pkexec"):
-            raise RuntimeError("pkexec is required for elevated operations. Please install polkit.")
-        args = ["pkexec"] + args
+        if not is_root:
+            if not has_command("pkexec"):
+                raise RuntimeError("pkexec is required for elevated operations. Please install polkit.")
+            args = ["pkexec"] + args
+    if len(args) > 0 and args[0] == "pkexec" and is_root:
+        args = args[1:]
     if mutate and is_simulate():
         # Simulate successful execution
         return 0, "[simulated] " + " ".join(shlex.quote(a) for a in args), ""
-    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+    try:
+        proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+    except FileNotFoundError as e:
+        return 127, "", f"[error] command not found: {args[0]} ({e})"
     try:
         out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
