@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build artifacts (none of these belong in git)
+build/
+dist/
+.pybuild/
+*.whl
+*.deb
+*.tar.gz
+.venv/
+venv/
+
+# Debian packaging output
+debian/zorin-optimizer/
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+debian/*.substvars
+debian/*.debhelper
+debian/*.debhelper.log
+
+# Local config / secrets
+.env
+*.log

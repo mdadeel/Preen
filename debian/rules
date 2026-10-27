@@ -2,3 +2,8 @@
 
 %:
 	dh $@ --buildsystem=pybuild --with python3
+
+# The test suite uses fake system binaries and is meant for development/CI,
+# not for running inside a package build chroot.
+override_dh_auto_test:
+	@echo "Skipping upstream test suite during package build (use: pytest -q)"

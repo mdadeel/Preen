@@ -4,21 +4,30 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zorin-optimizer"
-version = "0.1.0"
+version = "0.2.0"
 description = "Lightweight ZorinOS optimization and app installation tool"
 authors = [{ name = "Zorin Optimizer" }]
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
-  "psutil>=5.9",
+  "psutil>=5.9; platform_system == 'Linux'",
 ]
 
 [project.scripts]
 zorin-optimizer = "zorin_optim_tool.app:main"
 
-[tool.setuptools]
-packages = ["zorin_optim_tool"]
-include-package-data = true
+[project.optional-dependencies]
+dev = ["pytest>=7", "build>=0.10"]
+
+[tool.setuptools.packages.find]
+# The previous explicit list contained only the top-level package, so the
+# shipped wheel/.deb had NO backend/ directory at all. Discover all of them.
+include = ["zorin_optim_tool*"]
+namespaces = false
 
 [tool.setuptools.package-data]
 zorin_optim_tool = ["config/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
