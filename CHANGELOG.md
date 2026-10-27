@@ -4,6 +4,40 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-28
+
+Rebrand to **Preen** — system setup, deep cleaning and tuning for Linux
+(formerly "Zorin Optimizer") — plus two new feature pages and a visual pass.
+
+### Added
+
+- **Deep Clean page**: sized scan of the APT cache, systemd journal,
+  thumbnail cache and trash; every item shows how much space it reclaims
+  *before* anything is deleted. Cleaning is gated by Simulate mode and batched
+  into one polkit prompt for root items.
+- **Services & Boot page**: boot-time breakdown via `systemd-analyze`, the
+  slowest units, and a searchable systemd service list with
+  start/stop/enable/disable (unit names are validated before they reach
+  `systemctl`).
+- Frosted-glass theme: translucent cards, sidebar and footer over a soft
+  window gradient; follows the system light/dark theme.
+
+### Changed
+
+- Renamed: Python module `zorin_optim_tool` → `preen_tool`, executable/script
+  `preen` (the old `zorin-optimizer` command still works as an alias),
+  `.deb` package `preen`, desktop entry `preen.desktop`.
+- Preferences moved to `~/.config/preen/settings.json`; 0.2.x settings are
+  migrated automatically on first launch.
+- 9-page sidebar with colored System-Settings-style tiles; header bar is now
+  flat and compact with Preferences/Help/About under one ⋮ menu; progress and
+  errors moved to a bottom status bar.
+
+### Fixed
+
+- The GUI crashed on startup on systems shipping Gdk 4.0 — `Gdk` is now
+  pinned to 3.0 before import.
+
 ## [0.2.0] - 2026-10-27
 
 Reliability rewrite plus a UX and repository clean-up pass. The full audit of
