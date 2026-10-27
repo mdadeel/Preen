@@ -25,16 +25,30 @@ every action before anything touches your system.
 
 ## Quick start
 
+**Easiest — download a ready-made build** from
+[Releases](https://github.com/mdadeel/ZorinOS-Optimizer/releases/latest):
+
+```bash
+# .deb (Ubuntu / Zorin / Debian)
+sudo apt install ./preen_0.3.0_all.deb
+preen
+
+# or the AppImage (any distro, no install)
+chmod +x Preen-0.3.0-x86_64.AppImage
+./Preen-0.3.0-x86_64.AppImage
+```
+
+**Or build it yourself:**
+
 ```bash
 # 1. System dependencies
 sudo apt update
 sudo apt install -y python3-gi gir1.2-gtk-3.0 python3-psutil \
   flatpak gsettings-desktop-schemas polkitd tar xz-utils
 
-# 2. Build and install the .deb
-cd ZorinOS-Optimizer
-DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -us -uc --no-sign
-sudo apt install -y ../preen_0.3.0_all.deb
+# 2. Build the .deb (no debhelper needed)
+./packaging/build_deb.sh
+sudo apt install -y ./dist/preen_*_all.deb
 
 # 3. Launch
 preen
@@ -52,6 +66,23 @@ python3 -m preen_tool.app
 > run — nothing is changed.
 
 Everything is also available through `make`: run `make help`.
+
+---
+
+## About
+
+Preen keeps a Linux desktop fast, clean and tidy from one window. It was built
+for people who want the power of the terminal without memorising it: every
+action shows what it will do, dangerous things are clearly marked, and the
+**Simulate switch** dry-runs anything before you commit. Core system packages
+are locked so you cannot break your desktop by accident, service names are
+validated before they reach `systemctl`, and every command it runs — or would
+run — is written to the Logs page with its exit code.
+
+- **Safe by default** — simulate mode, confirmations for destructive actions, batched polkit prompts
+- **Honest numbers** — Deep Clean shows exactly how many GB each item reclaims *before* deleting
+- **Small and honest tech** — Python 3 + GTK 3, no daemons, no telemetry, ~1 MB AppImage
+- MIT licensed, free forever.
 
 ---
 
@@ -101,7 +132,8 @@ make check       # validate catalogue
 make test        # 57 tests, no root / GTK / network
 make doctor      # headless diagnostics
 make wheel       # build a wheel (runs check + test first)
-make deb         # build the Debian package
+./packaging/build_deb.sh       # build the .deb (no debhelper needed)
+./packaging/build_appimage.sh  # build the AppImage
 make clean       # remove generated artefacts
 ```
 
