@@ -25,18 +25,18 @@ against the shipped files, and every fix has a test in `tests/`.
 
 ```toml
 [tool.setuptools]
-packages = ["zorin_optim_tool"]
+packages = ["preen_tool"]
 ```
 
 That ships `app.py` and `config/*.json`. It does **not** ship
-`zorin_optim_tool/backend/`. The committed build output proves it:
+`preen_tool/backend/`. The committed build output proves it:
 
 ```
 $ unzip -l .pybuild/.../zorin_optimizer-0.1.0-py3-none-any.whl
-zorin_optim_tool/__init__.py
-zorin_optim_tool/app.py
-zorin_optim_tool/config/apps.json
-zorin_optim_tool/config/presets.json
+preen_tool/__init__.py
+preen_tool/app.py
+preen_tool/config/apps.json
+preen_tool/config/presets.json
 ...                       # ← no backend/, at all
 ```
 
@@ -81,10 +81,10 @@ saw zero mutating commands and zero new files.
 
 ```python
 btn_snap.connect("clicked", lambda _b: self._run_async(
-    __import__('zorin_optim_tool.backend.backup', fromlist=['']).backup.timeshift_snapshot))
+    __import__('preen_tool.backend.backup', fromlist=['']).backup.timeshift_snapshot))
 ```
 
-`__import__(...)` returns the module `zorin_optim_tool.backend.backup`. That
+`__import__(...)` returns the module `preen_tool.backend.backup`. That
 module has no attribute `backup`. `AttributeError` at click time, in the main
 thread. Both "Create Timeshift Snapshot" and "Open Timeshift GUI" were dead on
 arrival, and there were **two** of these lines. Meanwhile the file imports

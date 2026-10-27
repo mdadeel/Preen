@@ -1,3 +1,11 @@
+preen (0.3.0) stable; urgency=medium
+
+  * Rebranded to Preen — system setup for Linux (module preen_tool, script `preen`).
+  * New Deep Clean page with per-item size preview and Services/Boot page.
+  * Frosted-glass theme pass; 0.2.x settings migrate to ~/.config/preen.
+
+ -- Preen contributors <noreply@example.com>  Tue, 28 Oct 2026 00:00:00 +0000
+
 zorin-optimizer (0.2.0) stable; urgency=medium
 
   * Reliability rewrite: ship the backend package in the wheel/.deb (the

@@ -18,8 +18,8 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from zorin_optim_tool.backend import settings as settings_backend  # noqa: E402
-from zorin_optim_tool.backend import utils  # noqa: E402
+from preen_tool.backend import settings as settings_backend  # noqa: E402
+from preen_tool.backend import utils  # noqa: E402
 
 
 class FakeTextBuffer:
@@ -167,6 +167,14 @@ class Widget:
         return None
 
 
+class FakeImage(Widget):
+    """Gtk.Image needs a class-level constructor the plain Widget lacks."""
+
+    @classmethod
+    def new_from_icon_name(cls, *_args):
+        return cls()
+
+
 class FakeGtk:
     ApplicationWindow = Widget
     Application = Widget
@@ -178,10 +186,12 @@ class FakeGtk:
     FileChooserDialog = Widget
     Grid = Widget
     HeaderBar = Widget
+    Image = FakeImage
     Label = Widget
     ListBox = Widget
     ListBoxRow = Widget
     MessageDialog = Widget
+    ProgressBar = Widget
     ScrolledWindow = Widget
     SearchEntry = Widget
     Separator = Widget
@@ -202,7 +212,8 @@ class FakeGtk:
             return None
 
     Orientation = SimpleNamespace(HORIZONTAL=0, VERTICAL=1)
-    SelectionMode = SimpleNamespace(NONE=0)
+    SelectionMode = SimpleNamespace(NONE=0, SINGLE=1)
+    Align = SimpleNamespace(CENTER=3, START=0)
     StackTransitionType = SimpleNamespace(CROSSFADE=0)
     MessageType = SimpleNamespace(INFO=0, WARNING=1, ERROR=2)
     ButtonsType = SimpleNamespace(CLOSE=1, OK_CANCEL=2)
@@ -257,9 +268,9 @@ class GuiRuntimeTest(unittest.TestCase):
         self.patch = mock.patch.dict(sys.modules, {"gi": gi, "gi.repository": repo})
         self.patch.start()
         self.addCleanup(self.patch.stop)
-        sys.modules.pop("zorin_optim_tool.gui", None)
-        self.gui = importlib.import_module("zorin_optim_tool.gui")
-        self.addCleanup(lambda: sys.modules.pop("zorin_optim_tool.gui", None))
+        sys.modules.pop("preen_tool.gui", None)
+        self.gui = importlib.import_module("preen_tool.gui")
+        self.addCleanup(lambda: sys.modules.pop("preen_tool.gui", None))
         self.simulate_patch = mock.patch.object(utils, "_simulate", True)
         self.simulate_patch.start()
         self.addCleanup(self.simulate_patch.stop)
@@ -277,13 +288,13 @@ class GuiRuntimeTest(unittest.TestCase):
             self.addCleanup(patch.stop)
 
     def test_window_builds_and_all_pages_exist(self):
-        window = self.gui.MainWindow(self.gui.ZorinOptimizerApp())
-        self.assertEqual(len(window.stack.get_children()), 7)
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        self.assertEqual(len(window.stack.get_children()), 9)
         self.assertIn("code", window.app_rows)
         self.assertTrue(window.log_buf.lines)
 
     def test_handlers_run_without_exceptions(self):
-        window = self.gui.MainWindow(self.gui.ZorinOptimizerApp())
+        window = self.gui.MainWindow(self.gui.PreenApp())
         # Select two apps, apply a preset, then exercise every page's handlers.
         window.app_rows["vlc"].chk.set_active(True)
         window.app_rows["git"].chk.set_active(True)

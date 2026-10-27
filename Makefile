@@ -17,22 +17,22 @@ install-dev:  ## Install dev-only Python tooling
 	$(PYTHON) -m pip install -e '.[dev]'
 
 run:  ## Launch the GUI from this checkout
-	$(PYTHON) -m zorin_optim_tool.app
+	$(PYTHON) -m preen_tool.app
 
 simulate:  ## Launch the GUI with dry-run mode enabled
-	$(PYTHON) -m zorin_optim_tool.app --simulate
+	$(PYTHON) -m preen_tool.app --simulate
 
 doctor:  ## Check installation, dependencies and catalogue (no GTK needed)
-	$(PYTHON) -m zorin_optim_tool.app --doctor
+	$(PYTHON) -m preen_tool.app --doctor
 
 check:  ## Validate the app catalogue and presets
-	$(PYTHON) -m zorin_optim_tool.app --check-catalog
+	$(PYTHON) -m preen_tool.app --check-catalog
 
 test:  ## Run the full regression suite (no root/GTK/network needed)
 	$(PYTHON) -m unittest discover -s tests -v
 
 lint:  ## Syntax-check every Python file
-	$(PYTHON) -m compileall -q zorin_optim_tool tests
+	$(PYTHON) -m compileall -q preen_tool tests
 
 wheel: check test  ## Build a wheel after validating the catalogue and tests
 	$(PYTHON) -m pip wheel . --no-deps -w dist

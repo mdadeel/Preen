@@ -120,7 +120,7 @@ def inspect_archive(src_tar: str):
 def timeshift_snapshot(comment: str = None, log=None) -> Outcome:
     if not has_command("timeshift"):
         return fail("Timeshift is not installed. Install it first (sudo apt install timeshift).")
-    comment = comment or "Zorin Optimizer {}".format(time.strftime("%Y-%m-%d %H:%M"))
+    comment = comment or "Preen {}".format(time.strftime("%Y-%m-%d %H:%M"))
     result = run_cmd(["timeshift", "--create", "--comments", comment, "--tags", "D"],
                      use_pkexec=True, mutate=True, log=log, timeout=utils.DEFAULT_TIMEOUT)
     if not result.ok and not result.simulated:

@@ -10,7 +10,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from zorin_optim_tool.backend import settings  # noqa: E402
+from preen_tool.backend import settings  # noqa: E402
 
 
 class SettingsTest(unittest.TestCase):

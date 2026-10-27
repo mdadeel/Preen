@@ -3,10 +3,10 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "zorin-optimizer"
-version = "0.2.0"
-description = "Lightweight ZorinOS optimization and app installation tool"
-authors = [{ name = "Zorin Optimizer" }]
+name = "preen"
+version = "0.3.0"
+description = "Preen — system setup, deep cleaning and tuning for Linux"
+authors = [{ name = "Preen contributors" }]
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
@@ -14,19 +14,20 @@ dependencies = [
 ]
 
 [project.scripts]
-zorin-optimizer = "zorin_optim_tool.app:main"
+preen = "preen_tool.app:main"
+# Compatibility alias for 0.2.x users; drop in 0.4.
+zorin-optimizer = "preen_tool.app:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "build>=0.10"]
 
 [tool.setuptools.packages.find]
-# The previous explicit list contained only the top-level package, so the
-# shipped wheel/.deb had NO backend/ directory at all. Discover all of them.
-include = ["zorin_optim_tool*"]
+# Discover every package so the shipped wheel/.deb always contains backend/.
+include = ["preen_tool*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-zorin_optim_tool = ["config/*.json"]
+preen_tool = ["config/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

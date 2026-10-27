@@ -29,7 +29,7 @@ Launch it from the app menu (**Zorin Optimizer**) or run `zorin-optimizer`.
 
 ```bash
 python3 -m pip install -e .
-python3 -m zorin_optim_tool.app
+python3 -m preen_tool.app
 ```
 
 ### Optional tools

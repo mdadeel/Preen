@@ -29,11 +29,11 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). The short version:
 
 | Path | Purpose |
 |---|---|
-| `zorin_optim_tool/app.py` | GTK-free launcher and CLI flags |
-| `zorin_optim_tool/gui.py` | all GTK widgets and UI logic |
-| `zorin_optim_tool/cli.py` | `--doctor`, `--check-catalog` |
-| `zorin_optim_tool/backend/` | headless logic, no GTK imports |
-| `zorin_optim_tool/config/` | `apps.json` catalogue and `presets.json` |
+| `preen_tool/app.py` | GTK-free launcher and CLI flags |
+| `preen_tool/gui.py` | all GTK widgets and UI logic |
+| `preen_tool/cli.py` | `--doctor`, `--check-catalog` |
+| `preen_tool/backend/` | headless logic, no GTK imports |
+| `preen_tool/config/` | `apps.json` catalogue and `presets.json` |
 | `tests/` | unittest suite with a fake Linux userspace |
 
 ## 3. Rules that must not be broken
@@ -57,7 +57,7 @@ constants, `from __future__ import annotations` at the top of modules.
 
 ## 4. Adding an app to the catalogue
 
-Edit `zorin_optim_tool/config/apps.json`:
+Edit `preen_tool/config/apps.json`:
 
 ```json
 {"id": "myapp", "name": "My App", "flatpak": "org.example.MyApp", "apt": "myapp"}

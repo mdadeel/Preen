@@ -1,7 +1,8 @@
 """Persistent user preferences.
 
-Stored in ``~/.config/zorin-optimizer/settings.json``. Everything is validated
-on read so a corrupted or hand-edited file can never crash the GUI.
+Stored in ``~/.config/preen/settings.json``. Everything is validated on read
+so a corrupted or hand-edited file can never crash the GUI. Settings written
+by 0.2.x under ``~/.config/zorin-optimizer/`` are migrated on first load.
 """
 from __future__ import annotations
 
@@ -10,12 +11,14 @@ import os
 import threading
 from typing import Any, Dict
 
-CONFIG_DIR = os.path.expanduser("~/.config/zorin-optimizer")
+CONFIG_DIR = os.path.expanduser("~/.config/preen")
+LEGACY_CONFIG_DIR = os.path.expanduser("~/.config/zorin-optimizer")
 SETTINGS_PATH = os.path.join(CONFIG_DIR, "settings.json")
 
 VALID_SOURCES = ("flatpak", "apt")
 VALID_REFRESH = (0, 10, 15, 30, 60)
-VALID_PAGES = ("dashboard", "install", "manage", "optimize", "customize", "backup", "logs")
+VALID_PAGES = ("dashboard", "install", "manage", "optimize", "customize",
+               "backup", "logs", "deepclean", "services")
 
 DEFAULTS: Dict[str, Any] = {
     "simulate_on_startup": False,
@@ -56,8 +59,20 @@ def validate(values: Dict[str, Any]) -> Dict[str, Any]:
     return clean
 
 
+def _migrate_legacy_dir() -> None:
+    """Move 0.2.x settings into ~/.config/preen (once; never overwrite)."""
+    if os.path.exists(CONFIG_DIR) or not os.path.isdir(LEGACY_CONFIG_DIR):
+        return
+    try:
+        os.makedirs(os.path.dirname(CONFIG_DIR), exist_ok=True)
+        os.rename(LEGACY_CONFIG_DIR, CONFIG_DIR)
+    except OSError:
+        pass
+
+
 def load() -> Dict[str, Any]:
     with _lock:
+        _migrate_legacy_dir()
         try:
             with open(SETTINGS_PATH, "r", encoding="utf-8") as handle:
                 data = json.load(handle)
