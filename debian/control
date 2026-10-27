@@ -2,13 +2,17 @@ Source: zorin-optimizer
 Section: utils
 Priority: optional
 Maintainer: Zorin Optimizer <noreply@example.com>
-Build-Depends: debhelper-compat (= 13), dh-python, python3, python3-all, python3-psutil, python3-gi, gir1.2-gtk-3.0, pybuild-plugin-pyproject
+Build-Depends: debhelper-compat (= 13), dh-python, python3, python3-all, python3-psutil, python3-gi, gir1.2-gtk-3.0, python3-setuptools, pybuild-plugin-pyproject
 Standards-Version: 4.6.2
-Homepage: https://example.local
+Homepage: https://github.com/mdadeel/ZorinOS-Optimizer
 Rules-Requires-Root: no
 
 Package: zorin-optimizer
 Architecture: all
-Depends: ${python3:Depends}, ${misc:Depends}, python3-gi, gir1.2-gtk-3.0, python3-psutil, flatpak, gsettings-desktop-schemas, policykit-1
+Depends: ${python3:Depends}, ${misc:Depends}, python3-gi, gir1.2-gtk-3.0, python3-psutil, flatpak, gsettings-desktop-schemas, polkitd | policykit-1
+Recommends: power-profiles-daemon, systemd-zram-generator
+Suggests: timeshift
 Description: ZorinOS optimization and app-installation tool
- A lightweight tool to install apps, optimize system settings, and customize UI on ZorinOS.
+ Install and remove APT/Flatpak apps, clean up packages, tune power profiles,
+ swap and ZRAM, and back up user configuration from a single GTK interface.
+ Includes a Simulate mode that dry-runs every mutating action.

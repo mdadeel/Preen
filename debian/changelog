@@ -1,3 +1,23 @@
+zorin-optimizer (0.2.0) stable; urgency=medium
+
+  * Reliability rewrite: ship the backend package in the wheel/.deb (the
+    0.1.0 package could not start at all).
+  * Simulate mode now gates every mutating action, including gsettings,
+    file writes, icon packs and config import/export.
+  * Fix Timeshift buttons, the double-executing async runner, GTK updates
+    from worker threads, and ignored command exit codes.
+  * Two-query installed-state detection instead of ~60 subprocesses on the
+    UI thread; batch APT/Flatpak commands behind one polkit prompt.
+  * Correct the app catalogue (removed five un-installable Flatpak IDs),
+    validate IDs and presets, and add APT alternatives.
+  * Optimize page is diff-based: it no longer deletes an existing swapfile
+    or ZRAM config on every run.
+  * Harden tar extraction against traversal/links, atomic .desktop and CSS
+    edits, psutil-independent dashboard.
+  * Add headless doctor CLI, GUI smoke tests and 25 regression tests.
+
+ -- Zorin Optimizer <noreply@example.com>  Tue, 27 Oct 2026 12:00:00 +0000
+
 zorin-optimizer (0.1.0) stable; urgency=medium
 
   * Initial release (MVP).

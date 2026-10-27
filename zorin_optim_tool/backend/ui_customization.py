@@ -1,126 +1,217 @@
+"""Light/dark theme, icon packs and rounded-corner CSS.
+
+Everything here used to bypass Simulate mode and write files even during a
+"dry run". Icon pack extraction also used a bare ``tar.extractall`` (path
+traversal) and guessed the theme name from directory mtimes.
+"""
+from __future__ import annotations
+
 import os
 import shutil
 import tarfile
+import tempfile
+from typing import List, Optional, Set
 
-from .utils import run_cmd
+from . import utils
+from .utils import Outcome, fail, has_command, is_simulate, ok, run_cmd
 
-
-def apply_theme_mode(mode: str, log=None):
-    # GNOME 42+: org.gnome.desktop.interface color-scheme 'prefer-dark'/'default'
-    val = "prefer-dark" if mode == "dark" else "default"
-    if log: log.append(f"[gsettings] set color-scheme {val}\n")
-    run_cmd(["gsettings", "set", "org.gnome.desktop.interface", "color-scheme", val])
-    
-    # GTK Theme toggle
-    code, current_theme_raw, _ = run_cmd(["gsettings", "get", "org.gnome.desktop.interface", "gtk-theme"])
-    if code == 0:
-        current_theme = current_theme_raw.strip().strip("'\"")
-        new_theme = current_theme
-        if mode == "dark":
-            if not current_theme.lower().endswith("dark"):
-                if current_theme.endswith("-Light"):
-                    new_theme = current_theme[:-6] + "-Dark"
-                elif current_theme.endswith("-light"):
-                    new_theme = current_theme[:-6] + "-dark"
-                elif current_theme.endswith("Light"):
-                    new_theme = current_theme[:-5] + "Dark"
-                else:
-                    new_theme = current_theme + "-dark"
-        else:  # light mode
-            if current_theme.lower().endswith("dark"):
-                if current_theme.endswith("-Dark"):
-                    new_theme = current_theme[:-5] + "-Light"
-                elif current_theme.endswith("-dark"):
-                    new_theme = current_theme[:-5]
-                    if new_theme.endswith("-"):
-                        new_theme = new_theme[:-1]
-                elif current_theme.endswith("Dark"):
-                    new_theme = current_theme[:-4] + "Light"
-                else:
-                    new_theme = current_theme.replace("-dark", "").replace("-Dark", "").replace("dark", "").replace("Dark", "")
-        
-        # Test if the new theme exists before applying
-        theme_exists = os.path.exists(f"/usr/share/themes/{new_theme}") or os.path.exists(os.path.expanduser(f"~/.themes/{new_theme}"))
-        if not theme_exists:
-            # Fallback to standard Ubuntu/Zorin themes
-            if mode == "dark":
-                for fb in ["Yaru-dark", "Adwaita-dark", "ZorinBlue-Dark"]:
-                    if os.path.exists(f"/usr/share/themes/{fb}"):
-                        new_theme = fb
-                        break
-            else:
-                for fb in ["Yaru", "Adwaita", "ZorinBlue-Light"]:
-                    if os.path.exists(f"/usr/share/themes/{fb}"):
-                        new_theme = fb
-                        break
-                    
-        if log: log.append(f"[gsettings] set gtk-theme {new_theme}\n")
-        run_cmd(["gsettings", "set", "org.gnome.desktop.interface", "gtk-theme", new_theme])
+CSS_DIR = os.path.expanduser("~/.config/gtk-3.0")
+CSS_PATH = os.path.join(CSS_DIR, "gtk.css")
+START_GUARD = "/* BEGIN ZORIN_OPTIMIZER_ROUNDED_CORNERS */\n"
+END_GUARD = "/* END ZORIN_OPTIMIZER_ROUNDED_CORNERS */\n"
+CSS_RULE = "window, dialog, .background { border-radius: 10px; }\n"
 
 
-def install_icon_pack(tar_path: str, log=None):
-    # Extract into ~/.icons and set with gsettings icon-theme if possible
-    dest = os.path.expanduser("~/.icons")
-    os.makedirs(dest, exist_ok=True)
-    if log: log.append(f"[icons] extract {tar_path} -> {dest}\n")
-    try:
-        with tarfile.open(tar_path, "r:xz") as tar:
-            tar.extractall(dest)
-    except tarfile.ReadError:
-        if log: log.append("[icons] not a valid .tar.xz file\n")
-        return
-    # Guess theme dir name as last directory added
-    names = [n for n in os.listdir(dest) if os.path.isdir(os.path.join(dest, n))]
-    if not names:
-        return
-    theme = sorted(names, key=lambda x: os.path.getmtime(os.path.join(dest, x)))[-1]
-    if log: log.append(f"[icons] set icon theme {theme}\n")
-    run_cmd(["gsettings", "set", "org.gnome.desktop.interface", "icon-theme", theme])
+def _theme_roots() -> List[str]:
+    return [
+        "/usr/share/themes",
+        os.path.expanduser("~/.themes"),
+        os.path.expanduser("~/.local/share/themes"),
+    ]
 
 
-def set_rounded_corners(enable: bool, log=None):
-    css_dir = os.path.expanduser("~/.config/gtk-3.0")
-    os.makedirs(css_dir, exist_ok=True)
-    css_path = os.path.join(css_dir, "gtk.css")
-    
-    start_guard = "/* BEGIN ZORIN_OPTIMIZER_ROUNDED_CORNERS */\n"
-    end_guard = "/* END ZORIN_OPTIMIZER_ROUNDED_CORNERS */\n"
-    css_rule = "window, dialog, .background { border-radius: 10px; }\n"
-    full_block = f"{start_guard}{css_rule}{end_guard}"
-
-    content = ""
-    if os.path.exists(css_path):
+def _installed_themes() -> Set[str]:
+    themes: Set[str] = set()
+    for root in _theme_roots():
         try:
-            with open(css_path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
-        except Exception:
-            pass
+            themes.update(
+                name for name in os.listdir(root)
+                if os.path.isdir(os.path.join(root, name))
+            )
+        except OSError:
+            continue
+    return themes
 
-    if enable:
-        if start_guard in content:
-            if log: log.append("[css] rounded corners rule already exists\n")
-            return
-        try:
-            with open(css_path, "a", encoding="utf-8") as f:
-                f.write(full_block)
-            if log: log.append(f"[css] appended rounded corners to {css_path}\n")
-        except Exception as e:
-            if log: log.append(f"[css] error writing css: {e}\n")
+
+def _current_gtk_theme() -> str:
+    if not has_command("gsettings"):
+        return ""
+    result = run_cmd(["gsettings", "get", "org.gnome.desktop.interface", "gtk-theme"], quiet=True)
+    return result.out.strip().strip("'\"") if result.ok else ""
+
+
+def get_theme_mode() -> str:
+    if not has_command("gsettings"):
+        return "light"
+    result = run_cmd(["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"], quiet=True)
+    value = result.out.strip().strip("'\"").lower()
+    if value == "prefer-dark":
+        return "dark"
+    if value == "default":
+        return "light"
+    return "dark" if _current_gtk_theme().lower().endswith("dark") else "light"
+
+
+def _pick_theme(mode: str) -> Optional[str]:
+    """Only ever return a theme that really exists on disk."""
+    installed = _installed_themes()
+    current = _current_gtk_theme()
+    if mode == "dark":
+        candidates = [current, current + "-dark", current + "-Dark",
+                      "Yaru-dark", "Adwaita-dark", "ZorinBlue-Dark", "HighContrast"]
+        wanted = lambda name: "dark" in name.lower()  # noqa: E731
     else:
-        if start_guard in content:
-            # Safely strip our block out of the file
-            parts = content.split(start_guard, 1)
-            before = parts[0]
-            after = ""
-            if end_guard in parts[1]:
-                after = parts[1].split(end_guard, 1)[1]
-            else:
-                after = parts[1] # fallback
+        candidates = [current, current.replace("-dark", "").replace("-Dark", ""),
+                      "Yaru", "Adwaita", "ZorinBlue-Light"]
+        wanted = lambda name: "dark" not in name.lower()  # noqa: E731
+    if current in installed and wanted(current):
+        return current
+    for candidate in candidates:
+        if candidate and candidate in installed and wanted(candidate):
+            return candidate
+    return None
+
+
+def apply_theme_mode(mode: str, log=None) -> Outcome:
+    mode = (mode or "light").lower()
+    if mode not in ("light", "dark"):
+        return fail("Unknown theme mode {!r}.".format(mode))
+    if not has_command("gsettings"):
+        return fail("gsettings is not available.")
+    value = "prefer-dark" if mode == "dark" else "default"
+    if is_simulate():
+        if log:
+            log.append("[simulate] would set color-scheme={}\n".format(value))
+        return ok("Would apply the {} theme.".format(mode))
+
+    result = run_cmd(["gsettings", "set", "org.gnome.desktop.interface",
+                      "color-scheme", value], mutate=True, log=log)
+    if not result.ok:
+        return fail("Could not set color-scheme: {}".format(result.detail()))
+
+    theme = _pick_theme(mode)
+    if theme and theme != _current_gtk_theme():
+        theme_result = run_cmd(["gsettings", "set", "org.gnome.desktop.interface",
+                               "gtk-theme", theme], mutate=True, log=log)
+        if not theme_result.ok:
+            return fail("Color scheme changed, but gtk-theme failed: {}".format(theme_result.detail()))
+    elif log and not theme:
+        log.append("[theme] no installed GTK theme matches '{}'; kept current gtk-theme\n".format(mode))
+    return ok("Applied the {} theme.".format(mode))
+
+
+# ---------------------------------------------------------------------------
+# Icon packs
+# ---------------------------------------------------------------------------
+def install_icon_pack(tar_path: str, log=None) -> Outcome:
+    if not os.path.isfile(tar_path):
+        return fail("Archive not found: {}".format(tar_path))
+    if is_simulate():
+        if log:
+            log.append("[simulate] would install icon pack {}\n".format(tar_path))
+        return ok("Would install icon pack from {}.".format(os.path.basename(tar_path)))
+
+    dest_root = os.path.expanduser("~/.icons")
+    tmp_dir = tempfile.mkdtemp(prefix="zoptim-icons-")
+    try:
+        try:
+            tar = tarfile.open(tar_path, "r:*")
+        except (tarfile.TarError, OSError) as exc:
+            return fail("Not a readable tar archive: {}".format(exc))
+        with tar:
+            members, rejected = utils.safe_tar_members(tar)
+            if rejected:
+                if log:
+                    log.append("[icons] refused {} unsafe archive entries\n".format(len(rejected)))
+                return fail("Archive contains unsafe entries (path traversal, links or devices): {}".format(
+                    ", ".join(rejected[:5])))
+            if not members:
+                return fail("Archive is empty.")
             try:
-                with open(css_path, "w", encoding="utf-8") as f:
-                    f.write(before + after)
-                if log: log.append(f"[css] removed rounded corners from {css_path}\n")
-            except Exception as e:
-                if log: log.append(f"[css] error clearing css: {e}\n")
-        else:
-            if log: log.append("[css] rounded corners rule not found in gtk.css\n")
+                tar.extractall(path=tmp_dir, members=members, filter="data")
+            except TypeError:  # Python < 3.12
+                tar.extractall(path=tmp_dir, members=members)
+
+        theme_dirs = set()
+        for root, _dirs, files in os.walk(tmp_dir):
+            if "index.theme" in files:
+                rel = os.path.relpath(root, tmp_dir)
+                if rel != ".":
+                    theme_dirs.add(rel.split(os.sep)[0])
+        if not theme_dirs:
+            return fail("No icon theme found (expected a folder containing index.theme).")
+        theme = sorted(theme_dirs)[0]
+        source = os.path.join(tmp_dir, theme)
+        os.makedirs(dest_root, exist_ok=True)
+        target = os.path.join(dest_root, theme)
+        if os.path.exists(target):
+            shutil.rmtree(target)
+        shutil.copytree(source, target)
+    except (OSError, tarfile.TarError, shutil.Error) as exc:
+        return fail("Could not install icon pack: {}".format(exc))
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    if has_command("gsettings"):
+        result = run_cmd(["gsettings", "set", "org.gnome.desktop.interface",
+                          "icon-theme", theme], mutate=True, log=log)
+        if not result.ok:
+            return fail("Installed theme {!r}, but could not activate it: {}".format(
+                theme, result.detail()))
+    elif log:
+        log.append("[icons] gsettings missing; theme installed but not activated\n")
+    return ok("Installed and activated icon theme {}.".format(theme))
+
+
+# ---------------------------------------------------------------------------
+# Rounded corners
+# ---------------------------------------------------------------------------
+def are_rounded_corners_enabled() -> bool:
+    try:
+        with open(CSS_PATH, "r", encoding="utf-8", errors="ignore") as handle:
+            return START_GUARD in handle.read()
+    except OSError:
+        return False
+
+
+def set_rounded_corners(enable: bool, log=None) -> Outcome:
+    if is_simulate():
+        if log:
+            log.append("[simulate] would {} rounded-corner CSS\n".format("enable" if enable else "disable"))
+        return ok("Would {} rounded corners.".format("enable" if enable else "disable"))
+    try:
+        content = ""
+        if os.path.exists(CSS_PATH):
+            with open(CSS_PATH, "r", encoding="utf-8", errors="ignore") as handle:
+                content = handle.read()
+        start = content.find(START_GUARD)
+        if start != -1:
+            end = content.find(END_GUARD, start)
+            if end != -1:
+                content = content[:start] + content[end + len(END_GUARD):]
+            else:
+                content = content[:start]
+        if enable:
+            if content and not content.endswith("\n"):
+                content += "\n"
+            content += START_GUARD + CSS_RULE + END_GUARD
+        os.makedirs(CSS_DIR, exist_ok=True)
+        tmp = CSS_PATH + ".zoptim.tmp"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        os.replace(tmp, CSS_PATH)
+    except OSError as exc:
+        return fail("Could not update gtk.css: {}".format(exc))
+    if log:
+        log.append("[css] rounded corners {}\n".format("enabled" if enable else "disabled"))
+    return ok("Rounded corners {}.".format("enabled" if enable else "disabled"))

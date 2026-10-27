@@ -1,5 +1,9 @@
 # ZorinOS Optimizer - Fix Implementation Plan
 
+> **Historical document (v0.1.0 plan).** All five items were implemented, and
+> v0.2.0 went considerably further. See **[ROAST.md](ROAST.md)** for the
+> current audit and **[README.md](../README.md)** for how to run the tests.
+
 This document outlines the plans to fix the identified bugs, security flaws, performance bottlenecks, and UX issues in ZorinOS-Optimizer.
 
 ---

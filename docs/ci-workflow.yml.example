@@ -1,0 +1,41 @@
+# Copy this file to .github/workflows/ci.yml to enable CI.
+# (Kept here as a template because the Arena GitHub App token cannot push
+# workflow files without the `workflows` scope.)
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install build/test tooling
+        run: python -m pip install --upgrade pip setuptools wheel
+      - name: Validate the app catalogue
+        run: python -m zorin_optim_tool.app --check-catalog
+      - name: Doctor (headless, no GTK)
+        run: python -m zorin_optim_tool.app --doctor
+      - name: Regression tests
+        run: python -m unittest discover -s tests -v
+      - name: Verify the wheel contains the backend
+        run: |
+          python -m pip wheel . --no-deps --no-build-isolation -w dist
+          python - <<'PY'
+          import glob, zipfile
+          wheel = glob.glob("dist/*.whl")[0]
+          names = set(zipfile.ZipFile(wheel).namelist())
+          for required in ("zorin_optim_tool/backend/apps.py",
+                           "zorin_optim_tool/gui.py",
+                           "zorin_optim_tool/config/apps.json"):
+              assert required in names, "wheel is missing " + required
+          print("wheel layout OK:", wheel)
+          PY
