@@ -134,3 +134,24 @@ def _has_gi() -> bool:
         return True
     except ImportError:
         return False
+
+
+def feature_warnings() -> List[str]:
+    """Plain-language explanations of which features are unavailable.
+
+    The GUI shows these once at startup instead of silently disabling buttons
+    and letting the user discover a broken feature by clicking it.
+    """
+    warnings: List[str] = []
+    checks = [
+        ("flatpak", "Flatpak is not installed — Flatpak installs and the Flatpak half of Manage Apps are unavailable."),
+        ("apt-get", "APT was not found — package management is unavailable."),
+        ("pkexec", "pkexec (polkit) is missing — APT, swapfile and ZRAM changes cannot be authorised."),
+        ("gsettings", "gsettings is unavailable — theme, icon and animation options will not apply."),
+        ("powerprofilesctl", "power-profiles-daemon is missing — the power profile selector is disabled."),
+        ("timeshift", "Timeshift is not installed — snapshot buttons will report an error."),
+    ]
+    for command, message in checks:
+        if not has_command(command):
+            warnings.append(message)
+    return warnings

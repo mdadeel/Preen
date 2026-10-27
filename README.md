@@ -1,128 +1,128 @@
 # ZorinOS Optimizer
 
-A GTK 3 tool to install/remove APT and Flatpak apps, clean up packages, tune
-power/swap/ZRAM, customise the look, and back up your config on Zorin OS.
+A small GTK 3 app for Zorin OS that installs and removes APT/Flatpak apps,
+cleans up packages, tunes power/swap/ZRAM, customises the look, and backs up
+your settings — with a **Simulate switch** that previews every action before
+anything touches your system.
 
-> Version **0.2.0** is a reliability rewrite. See [`docs/ROAST.md`](docs/ROAST.md)
-> for the (brutal) audit of v0.1.0 and the full list of fixes.
-
----
-
-## ✨ Features
-
-- **Install Apps** — 45 curated apps with real Flathub IDs, APT alternatives,
-  search, status badges, presets, install / update / uninstall / update-all.
-- **Manage Apps** — scan installed Flatpak apps and *graphical* APT packages;
-  bulk update/uninstall; core desktop packages are locked.
-- **Optimize System** — APT/Flatpak cleanup, GNOME animations, startup apps,
-  power profiles, swapfile, ZRAM. Only settings you actually changed are applied.
-- **Customize Look** — light/dark theme, safe icon-pack installer, rounded
-  corners with reversible CSS.
-- **Backup & Restore** — Timeshift snapshots, export/import `~/.config`.
-- **Dashboard & Logs** — live CPU/RAM/disk/OS info, saveable live log.
-- **Simulate mode** — dry-runs **every** mutating action, including gsettings,
-  file writes, icon packs and backups.
+> v0.2.0 is a reliability rewrite plus a UX and repo clean-up pass. See
+> [the audit](docs/ROAST.md) for what was broken in v0.1.0.
 
 ---
 
-## ✅ Prerequisites
+## Start here
+
+| I want to… | Go to |
+|---|---|
+| Use the app | [User Guide](docs/USER_GUIDE.md) |
+| Install it | [Quick start](#quick-start) |
+| Change the code | [Architecture](docs/ARCHITECTURE.md) + [Contributing](CONTRIBUTING.md) |
+| See what changed | [Changelog](CHANGELOG.md) |
+| Browse all docs | [Docs index](docs/README.md) |
+
+---
+
+## Quick start
 
 ```bash
+# 1. System dependencies
 sudo apt update
 sudo apt install -y python3-gi gir1.2-gtk-3.0 python3-psutil \
-  flatpak gsettings-desktop-schemas 'polkitd | policykit-1' \
-  tar xz-utils
-sudo apt install -y power-profiles-daemon systemd-zram-generator  # optional features
-flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-```
+  flatpak gsettings-desktop-schemas polkitd tar xz-utils
 
-`pkexec` is used for APT, fstab and systemd changes; you will get one polkit
-prompt per batch, not one per package.
-
----
-
-## 🚀 Install and run
-
-```bash
+# 2. Build and install the .deb
 cd ZorinOS-Optimizer
 DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -us -uc --no-sign
 sudo apt install -y ../zorin-optimizer_0.2.0_all.deb
+
+# 3. Launch
 zorin-optimizer
 ```
 
-Or run from a checkout:
+Or run straight from a checkout:
 
 ```bash
-python3 -m pip install -e .      # or: sudo apt install python3-psutil
+python3 -m pip install -e .
 python3 -m zorin_optim_tool.app
 ```
 
-### Headless diagnostics (no GTK, no display needed)
+> **First time?** Launch with `zorin-optimizer --simulate`, turn on the
+> Simulate switch, and click through the pages. The Logs page shows exactly
+> what would have run — nothing is changed.
+
+Everything is also available through `make`: run `make help`.
+
+---
+
+## What's inside
+
+| Page | What it does |
+|---|---|
+| **Dashboard** | Welcome guide, live CPU/RAM/disk/OS stats, and a clear list of missing tools |
+| **Install Apps** | 45 curated apps, search, status badges, presets, APT/Flatpak fallback, bulk actions |
+| **Manage Apps** | Installed Flatpak apps + graphical APT packages; protected core packages |
+| **Optimize System** | Cleanup, animations, startup apps, power profile, swapfile, ZRAM — diff-based |
+| **Customize Look** | Light/dark theme, icon packs, reversible rounded-corner CSS |
+| **Backup & Restore** | Timeshift snapshots, safe `~/.config` export/import |
+| **Logs** | Every command, exit code and error; saveable and searchable by eye |
+
+Header bar: **Simulate** switch, **Preferences**, **Help**, **About**.
+Preferences persist to `~/.config/zorin-optimizer/settings.json`.
+
+---
+
+## Command line
 
 ```bash
-zorin-optimizer --doctor           # dependency + installation report
+zorin-optimizer --doctor           # installation + dependency report, no GTK
 zorin-optimizer --doctor --json    # machine-readable
 zorin-optimizer --check-catalog    # validate apps.json / presets.json
 zorin-optimizer --version
 zorin-optimizer --simulate         # start the GUI in dry-run mode
 ```
 
-`--doctor` exits non-zero if the catalogue is broken or the installed package
-layout is incomplete. Missing external binaries (flatpak, timeshift, …) are
-reported as warnings because they only disable the features that need them.
+Missing optional tools (flatpak, timeshift, …) only disable the features that
+need them; the Dashboard explains which ones.
 
 ---
 
-## 🧪 Tests
-
-The suite uses fake system binaries, so it never installs or deletes anything:
+## Development
 
 ```bash
-python3 -m unittest discover -s tests -v
-# or: pytest -q
+make setup       # system deps + editable install
+make check       # validate catalogue
+make test        # 36 tests, no root / GTK / network
+make doctor      # headless diagnostics
+make wheel       # build a wheel (runs check + test first)
+make deb         # build the Debian package
+make clean       # remove generated artefacts
 ```
 
-It covers the wheel contents, catalogue validity, two-query status detection,
-command batching, polkit handling, simulate mode for all 19 mutating actions,
-tar path-traversal defence, desktop-entry edits, CSS idempotency, and the GUI
-import surface.
-
-A ready-made GitHub Actions workflow lives at
-[`docs/ci-workflow.yml.example`](docs/ci-workflow.yml.example); copy it to
-`.github/workflows/ci.yml` to run those checks on every push.
+The test suite uses a fake Linux userspace (`tests/fakes.py`) and a fake GTK,
+so it is safe to run anywhere. Details in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
-## 🧭 Usage tips
+## Safety
 
-- Turn on **Simulate** in the header before trying anything you are unsure
-  about. The Logs page shows the exact argv that would have run.
-- The source selector is a *preference*: if an app has no Flatpak it falls back
-  to APT (and says so in the log), and vice versa.
-- Uninstall acts on the format that is really installed, not just the selected
-  source.
-- "Manage Apps" lists packages owning `.desktop` launchers, not all 2,000+
-  installed libraries.
+- **Simulate mode** gates all 19 mutating actions — installs, removals,
+  gsettings, file writes, icon packs and config import/export.
+- Commands are **batched** into one polkit prompt and their exit codes are
+  checked; failures appear in a dismissible banner and in Logs.
+- Core system packages are locked; untrusted archives are checked for path
+  traversal, links and device nodes.
+- Optimisation only applies settings you actually changed, so it will not
+  delete a swapfile you already had.
 
----
-
-## 📦 Packaging notes
-
-- Debian packaging lives in `debian/`; the Python wheel is built from
-  `pyproject.toml` using automatic package discovery, so `backend/` and
-  `config/*.json` are actually shipped.
-- Desktop launcher: `data/zorin-optimizer.desktop`.
-- Build outputs, `__pycache__`, egg-info and virtualenvs are gitignored.
+See [docs/ROAST.md](docs/ROAST.md) for the full list of fixes and
+[docs/USER_GUIDE.md](docs/USER_GUIDE.md#6-troubleshooting) for troubleshooting.
 
 ---
 
-## 🛣️ Roadmap
+## Contributing & licence
 
-- CPU frequency graph and per-app sizes
-- Accent colour picker with persistence
-- Debloat helper (orphan/large/unused app suggestions)
-- Driver/kernel helpers (HWE/LTS)
+PRs are welcome — read [CONTRIBUTING.md](CONTRIBUTING.md) first. Add an app to
+the catalogue? Run `make check` afterwards.
 
-## 📄 License
-
-MIT
+MIT — see [LICENSE](LICENSE).

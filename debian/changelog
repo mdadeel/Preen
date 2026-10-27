@@ -14,7 +14,16 @@ zorin-optimizer (0.2.0) stable; urgency=medium
     or ZRAM config on every run.
   * Harden tar extraction against traversal/links, atomic .desktop and CSS
     edits, psutil-independent dashboard.
-  * Add headless doctor CLI, GUI smoke tests and 25 regression tests.
+  * Add headless doctor CLI, GUI smoke tests and 36 regression tests.
+  * UX pass: Dashboard landing page with a getting-started guide and tool
+    availability panel, dismissible notification banner, progress spinner,
+    persistent Simulate banner, search filters and empty states, selection
+    counters, Select all / Clear, Preferences, Help and About dialogs.
+  * Add persistent validated preferences and plain-language dependency
+    warnings.
+  * Repository clean-up: LICENSE, CONTRIBUTING.md, CHANGELOG.md, Makefile,
+    .editorconfig, USER_GUIDE.md, ARCHITECTURE.md, docs index, and an
+    archive/ for historical documents.
 
  -- Zorin Optimizer <noreply@example.com>  Tue, 27 Oct 2026 12:00:00 +0000
 

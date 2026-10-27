@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -17,6 +18,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from zorin_optim_tool.backend import settings as settings_backend  # noqa: E402
 from zorin_optim_tool.backend import utils  # noqa: E402
 
 
@@ -46,6 +48,17 @@ class FakeTextBuffer:
         return None
 
     def set_text(self, *_args):
+        return None
+
+
+class FakeStyleContext:
+    def add_class(self, _name):
+        return None
+
+    def remove_class(self, _name):
+        return None
+
+    def add_provider(self, *_args):
         return None
 
 
@@ -102,6 +115,9 @@ class Widget:
 
     def get_buffer(self):
         return self._buffer
+
+    def get_style_context(self):
+        return FakeStyleContext()
 
     # values
     def connect(self, signal, handler, *_args):
@@ -174,6 +190,16 @@ class FakeGtk:
     Switch = Widget
     TextView = Widget
     TextBuffer = FakeTextBuffer
+    InfoBar = Widget
+    Spinner = Widget
+    Frame = Widget
+    AboutDialog = Widget
+    CssProvider = Widget
+
+    class StyleContext:
+        @staticmethod
+        def add_provider_for_screen(*_args):
+            return None
 
     Orientation = SimpleNamespace(HORIZONTAL=0, VERTICAL=1)
     SelectionMode = SimpleNamespace(NONE=0)
@@ -223,6 +249,8 @@ class GuiRuntimeTest(unittest.TestCase):
         repo = types.ModuleType("gi.repository")
         repo.Gtk = FakeGtk()
         repo.GLib = FakeGLib()
+        repo.Gdk = SimpleNamespace(
+            Screen=SimpleNamespace(get_default=lambda: object()))
         repo.Pango = SimpleNamespace(
             EllipsizeMode=SimpleNamespace(END=3))
         gi.repository = repo
@@ -238,6 +266,15 @@ class GuiRuntimeTest(unittest.TestCase):
         self.thread_patch = mock.patch.object(self.gui.threading, "Thread", SyncThread)
         self.thread_patch.start()
         self.addCleanup(self.thread_patch.stop)
+        # Keep preferences/reads inside a temporary directory.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        settings_dir = Path(tmp.name) / "zorin-optimizer"
+        for target, value in (("CONFIG_DIR", str(settings_dir)),
+                              ("SETTINGS_PATH", str(settings_dir / "settings.json"))):
+            patch = mock.patch.object(settings_backend, target, value)
+            patch.start()
+            self.addCleanup(patch.stop)
 
     def test_window_builds_and_all_pages_exist(self):
         window = self.gui.MainWindow(self.gui.ZorinOptimizerApp())
@@ -276,11 +313,26 @@ class GuiRuntimeTest(unittest.TestCase):
             window._refresh_stats,
             window._refresh_settings,
             window.on_save_log,
+            # new UX surfaces
+            window.on_select_all,
+            window.on_select_none,
+            window.on_preferences,
+            window.on_help,
+            window.on_about,
+            window.on_open_logs_page,
+            window.on_clear_log,
+            window._dismiss_banner,
         ]
         for handler in handlers:
             with self.subTest(handler=handler.__name__):
                 handler(None)
         window.on_toggle_simulate(window.sim_switch, None)
+        window.on_toggle_auto_scroll(window.sim_switch, None)
+        window._notify("Something needs your attention", "warning")
+        window._notify("Nothing selected", "warning")
+        window._require_selection()
+        window._on_install_search_changed(None)
+        window._on_manage_search_changed(None)
         window._fill_manage_rows([
             {"source": "flatpak", "id": "com.spotify.Client", "name": "Spotify", "protected": False},
             {"source": "apt", "id": "gnome-shell", "name": "GNOME Shell", "protected": True},

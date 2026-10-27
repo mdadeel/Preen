@@ -4,6 +4,14 @@ An audit of **v0.1.0** (commit `68356a5`), written while fixing it. This is
 about the code, not the person who wrote it. Every claim below was verified
 against the shipped files, and every fix has a test in `tests/`.
 
+> **Update (2026-10-27):** after the reliability rewrite below, the repo got a
+> UX and cleanliness pass — Dashboard landing page, getting-started guide,
+> non-modal notifications, spinner, persistent Simulate banner, empty states,
+> selection counters, Preferences/Help/About, dependency warnings, plus
+> `LICENSE`, `CONTRIBUTING.md`, `CHANGELOG.md`, `Makefile`, `.editorconfig`,
+> `docs/USER_GUIDE.md`, `docs/ARCHITECTURE.md`, a docs index and an `archive/`
+> for stale documents. See the [changelog](../CHANGELOG.md).
+
 > **TL;DR:** the app you installed from the `.deb` literally could not start,
 > the app you ran from the repo froze on launch, "Simulate" simulated nothing
 > for most of the UI, and "Optimize" sometimes deleted your swapfile. It was a
@@ -255,7 +263,8 @@ malicious tarballs and assert nothing escapes.
   existed. Now normalised once: one pkexec, none when root, clear error when
   polkit is absent.
 - `docs/code_review.md` still claims the presets are broken; they were already
-  fixed. The audit doc was auditing a ghost.
+  fixed. The audit doc was auditing a ghost. (It now lives in
+  [`archive/code_review.md`](archive/code_review.md) for historical context.)
 - The repo committed `build/`, `.pybuild/`, `*.pyc`, `zorin_optimizer.egg-info/`,
   a complete staged `debian/zorin-optimizer/` tree, **and a `.venv/` whose
   `pyvenv.cfg` contains `/home/moft/Music/zorin-optimizer/.venv`**. Someone
@@ -276,15 +285,18 @@ malicious tarballs and assert nothing escapes.
 | GUI | new `gui.py` with serialised task runner, all UI updates on the main thread, searchable lists, confirmations, error dialogs, live status, saveable log |
 | CLI | `app.py` is GTK-free; `--doctor`, `--doctor --json`, `--check-catalog`, `--version`, `--simulate` |
 | Safety | Simulate covers all mutations; theme/icon/CSS/backup/gsettings/startup gated; tar traversal blocked |
-| Tests | 29 tests (backend, packaging, CLI, GUI construction + 21 handlers) with a fake Linux userspace; runs in <1 s with no root, no GTK, no network. A ready-to-use GitHub Actions workflow is included as [`docs/ci-workflow.yml.example`](ci-workflow.yml.example) for Python 3.9/3.11/3.12 — copy it to `.github/workflows/ci.yml` to enable CI. |
+| UX | Dashboard landing page with a 3-step guide and tool-availability panel; dismissible info/warning/error banner instead of modal spam; progress spinner; persistent Simulate banner; search + empty states; Select all / Clear; selection counters; Preferences (persistent, validated), Help and About; primary/destructive button styling. |
+| Repository | `LICENSE`, `CONTRIBUTING.md`, `CHANGELOG.md`, `Makefile`, `.editorconfig`, docs index, `USER_GUIDE.md`, `ARCHITECTURE.md`; historical docs moved to `docs/archive/`; generated build output gitignored. |
+| Tests | 36 tests (backend, settings, packaging, CLI, GUI construction + all handlers) with a fake Linux userspace and fake GTK; runs in ~1 s with no root, no display, no network. A ready-to-use GitHub Actions workflow is included as [`docs/ci-workflow.yml.example`](ci-workflow.yml.example) for Python 3.9/3.11/3.12 — copy it to `.github/workflows/ci.yml` to enable CI. |
 
 ## 🔍 Verify it yourself
 
 ```bash
-python3 -m unittest discover -s tests -v
-python3 -m zorin_optim_tool.app --doctor
-python3 -m zorin_optim_tool.app --check-catalog
-python3 -m pip wheel . --no-deps -w /tmp/wheel && unzip -l /tmp/wheel/*.whl
+make test      # 36 regression tests
+make doctor    # installation + dependency report
+make check     # catalogue validation
+make wheel     # builds a wheel, then: unzip -l dist/*.whl
+make help      # everything else
 ```
 
 Then, on a real Zorin desktop, launch with `--simulate` and click everything.

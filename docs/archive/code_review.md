@@ -3,7 +3,7 @@
 > **Historical document (v0.1.0 audit).** Most items below were addressed in
 > that release; several claims (notably the preset keys) were already stale
 > when this file was committed. For the current, verified audit and the full
-> fix list see **[ROAST.md](ROAST.md)**.
+> fix list see **[ROAST.md](../ROAST.md)**.
 
 A detailed code review of the **ZorinOS Optimizer** project, detailing critical security vulnerabilities, functional bugs, responsiveness issues, and suggested architectural fixes.
 

@@ -49,15 +49,22 @@ def _capability_rows() -> List[Dict[str, str]]:
 def collect_report() -> Dict:
     problems = list(apps_backend.validate_catalog())
     warnings = []
+    # feature_warnings() explains these in plain language, so do not print the
+    # same thing twice as a generic "X is missing" line.
+    explained_by_notes = {
+        "flatpak", "APT / dpkg", "gsettings", "pkexec (polkit)",
+        "power-profiles-daemon", "Timeshift",
+    }
     for row in _capability_rows():
-        if row["status"] == "missing":
-            text = "{} is missing{}".format(row["name"], ": " + row["detail"] if row["detail"] else "")
-            # A broken install layout or too-old Python is fatal; absent
-            # external binaries only disable the features that need them.
-            if row["name"].startswith(("Installed package layout", "Python")):
-                problems.append(text)
-            else:
-                warnings.append(text)
+        if row["status"] != "missing":
+            continue
+        text = "{} is missing{}".format(row["name"], ": " + row["detail"] if row["detail"] else "")
+        # A broken install layout or too-old Python is fatal; absent external
+        # binaries only disable the features that need them.
+        if row["name"].startswith(("Installed package layout", "Python")):
+            problems.append(text)
+        elif row["name"] not in explained_by_notes:
+            warnings.append(text)
     return {
         "version": __version__,
         "simulate": os.environ.get("ZOPTIM_SIMULATE") == "1",
@@ -67,6 +74,7 @@ def collect_report() -> Dict:
         "capabilities": _capability_rows(),
         "problems": problems,
         "warnings": warnings,
+        "feature_warnings": dashboard.feature_warnings(),
     }
 
 
@@ -82,6 +90,11 @@ def print_report(report: Dict) -> None:
     print("-" * 64)
     for warning in report["warnings"]:
         print("warning: " + warning)
+    for warning in report["feature_warnings"]:
+        print("note: " + warning)
+    if not report["feature_warnings"] and not report["warnings"]:
+        print("All optional tools are available.")
+    print("-" * 64)
     if report["problems"]:
         for problem in report["problems"]:
             print("ERROR: " + problem)

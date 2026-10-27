@@ -116,6 +116,7 @@ class BackendTestCase(unittest.TestCase):
             "zorin_optim_tool/cli.py",
             "zorin_optim_tool/backend/apps.py",
             "zorin_optim_tool/backend/utils.py",
+            "zorin_optim_tool/backend/settings.py",
             "zorin_optim_tool/backend/performance.py",
             "zorin_optim_tool/backend/backup.py",
             "zorin_optim_tool/backend/ui_customization.py",
@@ -438,6 +439,13 @@ class BackendTestCase(unittest.TestCase):
         self.assertGreater(report["catalog_entries"], 40)
         self.assertTrue(any(row["name"] == "Installed package layout"
                             and row["status"] == "ok" for row in report["capabilities"]))
+
+    def test_feature_warnings_explain_missing_tools_in_plain_language(self):
+        with mock.patch.object(dashboard, "has_command", return_value=False):
+            warnings = dashboard.feature_warnings()
+        self.assertTrue(any("Flatpak" in w for w in warnings))
+        self.assertTrue(any("polkit" in w for w in warnings))
+        self.assertTrue(any("Timeshift" in w for w in warnings))
 
     def test_dashboard_works_without_psutil(self):
         with mock.patch.object(dashboard, "psutil", None):
