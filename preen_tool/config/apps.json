@@ -1,65 +1,337 @@
 {
   "Browsers": [
-    {"id": "org.mozilla.firefox", "name": "Firefox", "flatpak": "org.mozilla.firefox", "apt": "firefox", "note": "Published by Mozilla on Flathub. On Ubuntu/Zorin the APT package is a Snap shim - prefer Flatpak for a native package."},
-    {"id": "com.google.Chrome", "name": "Google Chrome", "flatpak": "com.google.Chrome"},
-    {"id": "com.brave.Browser", "name": "Brave", "flatpak": "com.brave.Browser"}
+    {
+      "id": "org.mozilla.firefox",
+      "name": "Firefox",
+      "flatpak": "org.mozilla.firefox",
+      "apt": "firefox",
+      "note": "Published by Mozilla on Flathub. On Ubuntu/Zorin the APT package is a Snap shim - prefer Flatpak for a native package."
+    },
+    {
+      "id": "com.google.Chrome",
+      "name": "Google Chrome",
+      "flatpak": "com.google.Chrome"
+    },
+    {
+      "id": "com.brave.Browser",
+      "name": "Brave",
+      "flatpak": "com.brave.Browser"
+    }
   ],
   "Dev Tools": [
-    {"id": "code", "name": "VS Code", "flatpak": "com.visualstudio.code"},
-    {"id": "git", "name": "Git", "apt": "git"},
-    {"id": "node", "name": "Node.js & npm", "apt": ["nodejs", "npm"], "note": "APT only. Node.js is a runtime/SDK extension on Flatpak, not an installable app."},
-    {"id": "python3", "name": "Python 3", "apt": "python3"},
-    {"id": "postman", "name": "Postman", "flatpak": "com.getpostman.Postman"},
-    {"id": "dbeaver", "name": "DBeaver Community", "flatpak": "io.dbeaver.DBeaverCommunity"},
-    {"id": "jetbrains-idea", "name": "IntelliJ IDEA Community", "flatpak": "com.jetbrains.IntelliJ-IDEA-Community", "note": "Replaces the old JetBrains Toolbox entry, which does not exist on Flathub."}
+    {
+      "id": "code",
+      "name": "VS Code",
+      "flatpak": "com.visualstudio.code"
+    },
+    {
+      "id": "git",
+      "name": "Git",
+      "apt": "git"
+    },
+    {
+      "id": "node",
+      "name": "Node.js & npm",
+      "apt": [
+        "nodejs",
+        "npm"
+      ],
+      "note": "APT only. Node.js is a runtime/SDK extension on Flatpak, not an installable app."
+    },
+    {
+      "id": "python3",
+      "name": "Python 3",
+      "apt": "python3"
+    },
+    {
+      "id": "postman",
+      "name": "Postman",
+      "flatpak": "com.getpostman.Postman"
+    },
+    {
+      "id": "dbeaver",
+      "name": "DBeaver Community",
+      "flatpak": "io.dbeaver.DBeaverCommunity"
+    },
+    {
+      "id": "jetbrains-idea",
+      "name": "IntelliJ IDEA Community",
+      "flatpak": "com.jetbrains.IntelliJ-IDEA-Community",
+      "note": "Replaces the old JetBrains Toolbox entry, which does not exist on Flathub."
+    }
   ],
   "Media": [
-    {"id": "vlc", "name": "VLC", "flatpak": "org.videolan.VLC", "apt": "vlc"},
-    {"id": "gimp", "name": "GIMP", "flatpak": "org.gimp.GIMP", "apt": "gimp"},
-    {"id": "obs", "name": "OBS Studio", "flatpak": "com.obsproject.Studio", "apt": "obs-studio"},
-    {"id": "inkscape", "name": "Inkscape", "flatpak": "org.inkscape.Inkscape", "apt": "inkscape"},
-    {"id": "krita", "name": "Krita", "flatpak": "org.kde.krita", "apt": "krita"}
+    {
+      "id": "vlc",
+      "name": "VLC",
+      "flatpak": "org.videolan.VLC",
+      "apt": "vlc"
+    },
+    {
+      "id": "gimp",
+      "name": "GIMP",
+      "flatpak": "org.gimp.GIMP",
+      "apt": "gimp"
+    },
+    {
+      "id": "obs",
+      "name": "OBS Studio",
+      "flatpak": "com.obsproject.Studio",
+      "apt": "obs-studio"
+    },
+    {
+      "id": "inkscape",
+      "name": "Inkscape",
+      "flatpak": "org.inkscape.Inkscape",
+      "apt": "inkscape"
+    },
+    {
+      "id": "krita",
+      "name": "Krita",
+      "flatpak": "org.kde.krita",
+      "apt": "krita"
+    },
+    {
+      "id": "org.gnome.Loupe",
+      "name": "Loupe Image Viewer",
+      "flatpak": "org.gnome.Loupe",
+      "apt": "loupe",
+      "note": "Default GNOME image viewer on recent releases."
+    }
   ],
   "Gaming": [
-    {"id": "steam", "name": "Steam", "flatpak": "com.valvesoftware.Steam"},
-    {"id": "lutris", "name": "Lutris", "flatpak": "net.lutris.Lutris", "apt": "lutris"},
-    {"id": "mangohud", "name": "MangoHud (Vulkan overlay)", "apt": "mangohud", "note": "APT only. The Flatpak MangoHud refs are runtime extensions, not standalone apps."}
+    {
+      "id": "steam",
+      "name": "Steam",
+      "flatpak": "com.valvesoftware.Steam"
+    },
+    {
+      "id": "lutris",
+      "name": "Lutris",
+      "flatpak": "net.lutris.Lutris",
+      "apt": "lutris"
+    },
+    {
+      "id": "mangohud",
+      "name": "MangoHud (Vulkan overlay)",
+      "apt": "mangohud",
+      "note": "APT only. The Flatpak MangoHud refs are runtime extensions, not standalone apps."
+    }
   ],
   "Social & Chat": [
-    {"id": "discord", "name": "Discord", "flatpak": "com.discordapp.Discord"},
-    {"id": "telegram", "name": "Telegram", "flatpak": "org.telegram.desktop", "apt": "telegram-desktop"},
-    {"id": "slack", "name": "Slack", "flatpak": "com.slack.Slack"},
-    {"id": "zoom", "name": "Zoom", "flatpak": "us.zoom.Zoom"}
+    {
+      "id": "discord",
+      "name": "Discord",
+      "flatpak": "com.discordapp.Discord"
+    },
+    {
+      "id": "telegram",
+      "name": "Telegram",
+      "flatpak": "org.telegram.desktop",
+      "apt": "telegram-desktop"
+    },
+    {
+      "id": "slack",
+      "name": "Slack",
+      "flatpak": "com.slack.Slack"
+    },
+    {
+      "id": "zoom",
+      "name": "Zoom",
+      "flatpak": "us.zoom.Zoom"
+    }
+  ],
+  "Productivity": [
+    {
+      "id": "md.obsidian.Obsidian",
+      "name": "Obsidian",
+      "flatpak": "md.obsidian.Obsidian",
+      "note": "Private markdown notes and knowledge base."
+    },
+    {
+      "id": "org.libreoffice.LibreOffice",
+      "name": "LibreOffice",
+      "flatpak": "org.libreoffice.LibreOffice",
+      "apt": "libreoffice"
+    },
+    {
+      "id": "com.bitwarden.desktop",
+      "name": "Bitwarden",
+      "flatpak": "com.bitwarden.desktop",
+      "note": "Open source password manager."
+    }
   ],
   "Music & Video": [
-    {"id": "spotify", "name": "Spotify", "flatpak": "com.spotify.Client"}
+    {
+      "id": "spotify",
+      "name": "Spotify",
+      "flatpak": "com.spotify.Client"
+    }
   ],
   "System Tools": [
-    {"id": "timeshift", "name": "Timeshift", "apt": "timeshift", "note": "APT only. Ubuntu/Zorin users may need the Timeshift PPA: sudo add-apt-repository -y ppa:teejee2008/timeshift"},
-    {"id": "system-monitoring-center", "name": "System Monitoring Center", "flatpak": "io.github.hakandundar34coding.system-monitoring-center", "note": "Replaces the old Stacer entry, which is not on Flathub."},
-    {"id": "docker", "name": "Docker Engine", "apt": "docker.io"},
-    {"id": "ubuntu-restricted-extras", "name": "Multimedia codecs", "apt": "ubuntu-restricted-extras"},
-    {"id": "gparted", "name": "GParted", "apt": "gparted"},
-    {"id": "bleachbit", "name": "BleachBit", "flatpak": "org.bleachbit.BleachBit", "apt": "bleachbit"},
-    {"id": "tlp", "name": "TLP (laptop power management)", "apt": "tlp"},
-    {"id": "htop", "name": "htop", "apt": "htop"}
+    {
+      "id": "timeshift",
+      "name": "Timeshift",
+      "apt": "timeshift",
+      "note": "APT only. Ubuntu/Zorin users may need the Timeshift PPA: sudo add-apt-repository -y ppa:teejee2008/timeshift"
+    },
+    {
+      "id": "system-monitoring-center",
+      "name": "System Monitoring Center",
+      "flatpak": "io.github.hakandundar34coding.system-monitoring-center",
+      "note": "Replaces the old Stacer entry, which is not on Flathub."
+    },
+    {
+      "id": "docker",
+      "name": "Docker Engine",
+      "apt": "docker.io"
+    },
+    {
+      "id": "ubuntu-restricted-extras",
+      "name": "Multimedia codecs",
+      "apt": "ubuntu-restricted-extras"
+    },
+    {
+      "id": "gparted",
+      "name": "GParted",
+      "apt": "gparted"
+    },
+    {
+      "id": "bleachbit",
+      "name": "BleachBit",
+      "flatpak": "org.bleachbit.BleachBit",
+      "apt": "bleachbit"
+    },
+    {
+      "id": "tlp",
+      "name": "TLP (laptop power management)",
+      "apt": "tlp"
+    },
+    {
+      "id": "htop",
+      "name": "htop",
+      "apt": "htop"
+    },
+    {
+      "id": "com.github.tchx84.Flatseal",
+      "name": "Flatseal",
+      "flatpak": "com.github.tchx84.Flatseal",
+      "note": "Review and edit Flatpak app permissions."
+    },
+    {
+      "id": "com.mattjakeman.ExtensionManager",
+      "name": "Extension Manager",
+      "flatpak": "com.mattjakeman.ExtensionManager",
+      "note": "Browse and manage GNOME Shell extensions."
+    },
+    {
+      "id": "io.missioncenter.MissionCenter",
+      "name": "Mission Center",
+      "flatpak": "io.missioncenter.MissionCenter",
+      "note": "Activity Monitor style task manager."
+    },
+    {
+      "id": "net.nokyan.Resources",
+      "name": "Resources",
+      "flatpak": "net.nokyan.Resources",
+      "note": "Resource monitor with process and GPU graphs."
+    },
+    {
+      "id": "io.github.flattool.Warehouse",
+      "name": "Warehouse",
+      "flatpak": "io.github.flattool.Warehouse",
+      "note": "Manage installed Flatpak apps and runtimes."
+    },
+    {
+      "id": "com.rustdesk.RustDesk",
+      "name": "RustDesk",
+      "flatpak": "com.rustdesk.RustDesk",
+      "note": "Open source remote desktop and remote support."
+    }
   ],
   "Open Source Essentials": [
-    {"id": "org.kde.kdenlive", "name": "Kdenlive", "flatpak": "org.kde.kdenlive", "apt": "kdenlive"},
-    {"id": "org.audacityteam.Audacity", "name": "Audacity", "flatpak": "org.audacityteam.Audacity", "apt": "audacity"},
-    {"id": "fr.handbrake.ghb", "name": "HandBrake", "flatpak": "fr.handbrake.ghb", "apt": "handbrake"},
-    {"id": "org.qbittorrent.qBittorrent", "name": "qBittorrent", "flatpak": "org.qbittorrent.qBittorrent", "apt": "qbittorrent"},
-    {"id": "com.transmissionbt.Transmission", "name": "Transmission", "flatpak": "com.transmissionbt.Transmission", "apt": "transmission-gtk"},
-    {"id": "org.flameshot.Flameshot", "name": "Flameshot", "flatpak": "org.flameshot.Flameshot", "apt": "flameshot"},
-    {"id": "org.keepassxc.KeePassXC", "name": "KeePassXC", "flatpak": "org.keepassxc.KeePassXC", "apt": "keepassxc"},
-    {"id": "org.mozilla.Thunderbird", "name": "Thunderbird", "flatpak": "org.mozilla.Thunderbird", "apt": "thunderbird"},
-    {"id": "org.gnome.Boxes", "name": "GNOME Boxes", "flatpak": "org.gnome.Boxes", "apt": "gnome-boxes"},
-    {"id": "org.gnome.DejaDup", "name": "Déjà Dup Backups", "flatpak": "org.gnome.DejaDup", "apt": "deja-dup"},
-    {"id": "gufw", "name": "GUFW Firewall", "apt": "gufw", "note": "APT only. There is no GUFW package on Flathub."}
+    {
+      "id": "org.kde.kdenlive",
+      "name": "Kdenlive",
+      "flatpak": "org.kde.kdenlive",
+      "apt": "kdenlive"
+    },
+    {
+      "id": "org.audacityteam.Audacity",
+      "name": "Audacity",
+      "flatpak": "org.audacityteam.Audacity",
+      "apt": "audacity"
+    },
+    {
+      "id": "fr.handbrake.ghb",
+      "name": "HandBrake",
+      "flatpak": "fr.handbrake.ghb",
+      "apt": "handbrake"
+    },
+    {
+      "id": "org.qbittorrent.qBittorrent",
+      "name": "qBittorrent",
+      "flatpak": "org.qbittorrent.qBittorrent",
+      "apt": "qbittorrent"
+    },
+    {
+      "id": "com.transmissionbt.Transmission",
+      "name": "Transmission",
+      "flatpak": "com.transmissionbt.Transmission",
+      "apt": "transmission-gtk"
+    },
+    {
+      "id": "org.flameshot.Flameshot",
+      "name": "Flameshot",
+      "flatpak": "org.flameshot.Flameshot",
+      "apt": "flameshot"
+    },
+    {
+      "id": "org.keepassxc.KeePassXC",
+      "name": "KeePassXC",
+      "flatpak": "org.keepassxc.KeePassXC",
+      "apt": "keepassxc"
+    },
+    {
+      "id": "org.mozilla.Thunderbird",
+      "name": "Thunderbird",
+      "flatpak": "org.mozilla.Thunderbird",
+      "apt": "thunderbird"
+    },
+    {
+      "id": "org.gnome.Boxes",
+      "name": "GNOME Boxes",
+      "flatpak": "org.gnome.Boxes",
+      "apt": "gnome-boxes"
+    },
+    {
+      "id": "org.gnome.DejaDup",
+      "name": "D\u00e9j\u00e0 Dup Backups",
+      "flatpak": "org.gnome.DejaDup",
+      "apt": "deja-dup"
+    },
+    {
+      "id": "gufw",
+      "name": "GUFW Firewall",
+      "apt": "gufw",
+      "note": "APT only. There is no GUFW package on Flathub."
+    }
   ],
   "Game Tools": [
-    {"id": "com.heroicgameslauncher.hgl", "name": "Heroic Games Launcher", "flatpak": "com.heroicgameslauncher.hgl"},
-    {"id": "net.davidotek.pupgui2", "name": "ProtonUp-Qt", "flatpak": "net.davidotek.pupgui2"},
-    {"id": "com.usebottles.bottles", "name": "Bottles", "flatpak": "com.usebottles.bottles"}
+    {
+      "id": "com.heroicgameslauncher.hgl",
+      "name": "Heroic Games Launcher",
+      "flatpak": "com.heroicgameslauncher.hgl"
+    },
+    {
+      "id": "net.davidotek.pupgui2",
+      "name": "ProtonUp-Qt",
+      "flatpak": "net.davidotek.pupgui2"
+    },
+    {
+      "id": "com.usebottles.bottles",
+      "name": "Bottles",
+      "flatpak": "com.usebottles.bottles"
+    }
   ]
 }

@@ -429,7 +429,7 @@ def install_apps(app_ids: List[str], source: str, log=None) -> Outcome:
     for note in notes:
         report.note("[install] " + note)
     if not flatpaks and not apts:
-        return ok("Nothing to install — everything selected is already installed.")
+        return ok("Nothing to install. Everything selected is already installed.")
     _run_batches(report, flatpaks, apts, "install", ensure_remote=bool(flatpaks))
     outcome = report.finish(
         "Installed {} Flatpak app(s) and {} APT package(s).".format(len(flatpaks), len(apts)),
@@ -448,7 +448,7 @@ def update_apps(app_ids: List[str], source: str, log=None) -> Outcome:
     for note in notes:
         report.note("[update] " + note)
     if not flatpaks and not apts:
-        return ok("Nothing to update — none of the selected apps are installed.")
+        return ok("Nothing to update. None of the selected apps are installed.")
     _run_batches(report, flatpaks, apts, "upgrade")
     invalidate_state()
     return report.finish(

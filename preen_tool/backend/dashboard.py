@@ -39,6 +39,30 @@ def _uptime_text(seconds: float) -> str:
     return "{}m".format(minutes)
 
 
+def _load_average_text() -> str:
+    try:
+        load = os.getloadavg()
+    except (OSError, AttributeError):
+        return ""
+    return "{:.2f}, {:.2f}, {:.2f}".format(load[0], load[1], load[2])
+
+
+def _fallback_swap():
+    try:
+        values = {}
+        with open("/proc/meminfo", "r", encoding="utf-8") as handle:
+            for line in handle:
+                key, value = line.split(":", 1)
+                values[key] = int(value.strip().split()[0]) * 1024
+        total = values.get("SwapTotal", 0)
+        free = values.get("SwapFree", 0)
+        used = max(0, total - free)
+        percent = round(100.0 * used / total, 1) if total else 0.0
+        return percent, used, total
+    except (OSError, ValueError, IndexError):
+        return 0.0, 0, 0
+
+
 def _fallback_memory():
     try:
         values = {}
@@ -61,11 +85,14 @@ def get_system_info() -> Dict[str, str]:
         mem_percent, mem_used, mem_total = mem.percent, mem.used, mem.total
         disk = psutil.disk_usage("/")
         disk_percent, disk_used, disk_total = disk.percent, disk.used, disk.total
+        swap = psutil.swap_memory()
+        swap_percent, swap_used, swap_total = swap.percent, swap.used, swap.total
         uptime = time.time() - psutil.boot_time()
         cores = psutil.cpu_count(logical=True) or 1
     else:
         cpu, cores = 0.0, 1
         mem_percent, mem_used, mem_total = _fallback_memory()
+        swap_percent, swap_used, swap_total = _fallback_swap()
         disk_percent, disk_used, disk_total = 0.0, 0, 0
         try:
             stat = os.statvfs("/")
@@ -93,6 +120,9 @@ def get_system_info() -> Dict[str, str]:
         "mem_used": "{:.1f} / {:.1f} GiB".format(mem_used / gib, mem_total / gib),
         "disk_percent": str(round(disk_percent, 1)),
         "disk_used": "{:.1f} / {:.1f} GiB".format(disk_used / gib, disk_total / gib),
+        "swap_percent": str(round(swap_percent, 1)),
+        "swap_used": "{:.1f} / {:.1f} GiB".format(swap_used / gib, swap_total / gib),
+        "load_average": _load_average_text(),
         "os": _os_pretty_name(),
         "kernel": platform.uname().release,
         "uptime": _uptime_text(uptime),
@@ -144,12 +174,12 @@ def feature_warnings() -> List[str]:
     """
     warnings: List[str] = []
     checks = [
-        ("flatpak", "Flatpak is not installed — Flatpak installs and the Flatpak half of Manage Apps are unavailable."),
-        ("apt-get", "APT was not found — package management is unavailable."),
-        ("pkexec", "pkexec (polkit) is missing — APT, swapfile and ZRAM changes cannot be authorised."),
-        ("gsettings", "gsettings is unavailable — theme, icon and animation options will not apply."),
-        ("powerprofilesctl", "power-profiles-daemon is missing — the power profile selector is disabled."),
-        ("timeshift", "Timeshift is not installed — snapshot buttons will report an error."),
+        ("flatpak", "Flatpak is not installed. Flatpak installs and the Flatpak half of Manage Apps are unavailable."),
+        ("apt-get", "APT was not found, so package management is unavailable."),
+        ("pkexec", "pkexec (polkit) is missing, so APT, swapfile and ZRAM changes cannot be authorised."),
+        ("gsettings", "gsettings is unavailable, so theme, icon and animation options will not apply."),
+        ("powerprofilesctl", "power-profiles-daemon is missing, so the power profile selector is disabled."),
+        ("timeshift", "Timeshift is not installed, so snapshot buttons will report an error."),
     ]
     for command, message in checks:
         if not has_command(command):

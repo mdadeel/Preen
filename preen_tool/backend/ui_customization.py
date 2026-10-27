@@ -111,6 +111,51 @@ def apply_theme_mode(mode: str, log=None) -> Outcome:
 
 
 # ---------------------------------------------------------------------------
+# Text scaling (macOS-style "larger text" accessibility setting)
+# ---------------------------------------------------------------------------
+SCALING_SCHEMA = "org.gnome.desktop.interface"
+SCALING_KEY = "text-scaling-factor"
+SCALING_MIN, SCALING_MAX = 0.8, 2.0
+
+
+def get_text_scaling() -> float:
+    """Current GNOME text scaling factor; 1.0 when it cannot be read."""
+    if not has_command("gsettings"):
+        return 1.0
+    result = run_cmd(["gsettings", "get", SCALING_SCHEMA, SCALING_KEY], quiet=True)
+    if not result.ok:
+        return 1.0
+    try:
+        factor = float(result.out.strip().strip("'\""))
+    except ValueError:
+        return 1.0
+    if SCALING_MIN <= factor <= SCALING_MAX:
+        return factor
+    return 1.0
+
+
+def set_text_scaling(factor: float, log=None) -> Outcome:
+    try:
+        factor = float(factor)
+    except (TypeError, ValueError):
+        return fail("Invalid text scaling factor.")
+    if not SCALING_MIN <= factor <= SCALING_MAX:
+        return fail("Text scaling must be between {} and {}.".format(SCALING_MIN, SCALING_MAX))
+    if not has_command("gsettings"):
+        return fail("gsettings is not available; cannot change text scaling.")
+    value = "{:.2f}".format(factor)
+    if is_simulate():
+        if log:
+            log.append("[simulate] would set {} to {}\n".format(SCALING_KEY, value))
+        return ok("Would set text scaling to {}x.".format(value))
+    result = run_cmd(["gsettings", "set", SCALING_SCHEMA, SCALING_KEY, value],
+                     mutate=True, log=log)
+    if not result.ok:
+        return fail("Could not set text scaling: {}".format(result.detail()))
+    return ok("Text scaling set to {}x.".format(value))
+
+
+# ---------------------------------------------------------------------------
 # Icon packs
 # ---------------------------------------------------------------------------
 def install_icon_pack(tar_path: str, log=None) -> Outcome:

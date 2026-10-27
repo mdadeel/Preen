@@ -1,7 +1,35 @@
 {
-  "Developer Pack": ["code", "git", "node", "python3"],
-  "Gamer Pack": ["steam", "lutris", "net.davidotek.pupgui2"],
-  "Creative Pack": ["gimp", "krita", "obs", "inkscape"],
-  "Minimalist Pack": ["bleachbit", "htop"],
-  "Open Source Essentials": ["org.kde.kdenlive", "org.audacityteam.Audacity", "org.keepassxc.KeePassXC", "org.flameshot.Flameshot"]
+  "Developer Pack": [
+    "code",
+    "git",
+    "node",
+    "python3"
+  ],
+  "Gamer Pack": [
+    "steam",
+    "lutris",
+    "net.davidotek.pupgui2"
+  ],
+  "Creative Pack": [
+    "gimp",
+    "krita",
+    "obs",
+    "inkscape"
+  ],
+  "Minimalist Pack": [
+    "bleachbit",
+    "htop"
+  ],
+  "Open Source Essentials": [
+    "org.kde.kdenlive",
+    "org.audacityteam.Audacity",
+    "org.keepassxc.KeePassXC",
+    "org.flameshot.Flameshot"
+  ],
+  "Flatpak Toolkit": [
+    "com.github.tchx84.Flatseal",
+    "com.mattjakeman.ExtensionManager",
+    "io.missioncenter.MissionCenter",
+    "io.github.flattool.Warehouse"
+  ]
 }

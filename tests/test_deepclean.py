@@ -93,6 +93,23 @@ class CleanUserPathsTest(unittest.TestCase):
             self.assertTrue(deepclean.clean_user_paths(["thumbnails"]).ok)
 
 
+class ScanContentsTest(unittest.TestCase):
+    def test_pip_cache_is_a_known_user_cleanable(self):
+        self.assertIn("pip_cache", deepclean.USER_CLEAN_PATHS)
+        self.assertIn("pip_cache", deepclean.USER_CLEAN_INFO)
+        keys = {item["key"] for item in deepclean.scan_cleanable()}
+        self.assertEqual(
+            keys, {"apt_cache", "journal", "thumbnails", "pip_cache", "trash"})
+
+    def test_pip_cache_is_grouped_with_other_user_cleans(self):
+        actions = deepclean.build_clean_actions([
+            {"key": "pip_cache", "root": False},
+            {"key": "thumbnails", "root": False},
+        ])
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0][2], (["pip_cache", "thumbnails"],))
+
+
 class BuildCleanActionsTest(unittest.TestCase):
     def test_root_items_get_own_steps_and_user_items_are_batched(self):
         actions = deepclean.build_clean_actions([

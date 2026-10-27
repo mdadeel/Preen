@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Preen contributors <noreply@example.com>
 Build-Depends: debhelper-compat (= 13), dh-python, python3, python3-all, python3-psutil, python3-gi, gir1.2-gtk-3.0, python3-setuptools, pybuild-plugin-pyproject
 Standards-Version: 4.6.2
-Homepage: https://github.com/mdadeel/ZorinOS-Optimizer
+Homepage: https://github.com/mdadeel/Preen
 Rules-Requires-Root: no
 
 Package: preen

@@ -1,3 +1,18 @@
+preen (0.4.0) stable; urgency=medium
+
+  * macOS-inspired design pass: grouped sidebar sections, segmented source
+    control, softer frosted cards, refined typography and status colours.
+  * Fix the task runner dropping queued startup reads (boot info, services,
+    cleanable scan, snapshots and preferences now always load).
+  * Dashboard gains a swap card plus load average; Deep Clean adds the pip
+    cache, select-all and a live selected-size counter.
+  * Services gains Restart, a running-only filter and result counts.
+  * Customize gains desktop text scaling; Optimize gains a swap size choice.
+  * Backup lists Timeshift snapshots; Logs gains a text filter.
+  * Catalogue grows to 55 curated apps and 6 presets.
+
+ -- Preen contributors <noreply@example.com>  Tue, 27 Oct 2026 12:00:00 +0000
+
 preen (0.3.0) stable; urgency=medium
 
   * Rebranded to Preen — system setup for Linux (module preen_tool, script `preen`).
