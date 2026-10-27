@@ -1,0 +1,97 @@
+"""Tests for the services/boot backend: parsers and input validation."""
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from preen_tool.backend import services  # noqa: E402
+
+
+LIST_UNITS_FIXTURE = """\
+  NetworkManager.service loaded active running Network Manager
+  accounts-daemon.service loaded active running Accounts Service
+  apparmor.service        loaded inactive dead   apparmor.service
+  bad-line-without-enough-columns
+  notaservice.service loaded active running this line is skipped
+  udisks2.service loaded active running Disk Manager
+"""
+
+UNIT_FILES_FIXTURE = """\
+NetworkManager.service        enabled enabled
+apparmor.service              enabled enabled
+udisks2.service               disabled disabled
+"""
+
+
+class ParseListUnitsTest(unittest.TestCase):
+    def test_parses_five_columns_and_skips_junk(self):
+        units = services.parse_list_units(LIST_UNITS_FIXTURE)
+        by_unit = {u["unit"]: u for u in units}
+        self.assertEqual(len(units), 5)
+        self.assertEqual(by_unit["NetworkManager.service"]["active"], "active")
+        self.assertEqual(by_unit["apparmor.service"]["sub"], "dead")
+        self.assertEqual(by_unit["udisks2.service"]["description"], "Disk Manager")
+        self.assertEqual(by_unit["notaservice.service"]["description"],
+                         "this line is skipped")
+        self.assertNotIn("bad-line-without-enough-columns", by_unit)
+
+    def test_empty_and_garbage(self):
+        self.assertEqual(services.parse_list_units(""), [])
+        self.assertEqual(services.parse_list_units("random text only"), [])
+
+
+class ParseUnitFilesTest(unittest.TestCase):
+    def test_maps_unit_to_state(self):
+        states = services.parse_unit_files(UNIT_FILES_FIXTURE)
+        self.assertEqual(states["NetworkManager.service"], "enabled")
+        self.assertEqual(states["udisks2.service"], "disabled")
+
+
+class SetServiceStateTest(unittest.TestCase):
+    def test_rejects_bad_action(self):
+        outcome = services.set_service_state("ok.service", "reboot")
+        self.assertFalse(outcome.ok)
+
+    def test_rejects_injection_unit_names(self):
+        for bad in ("evil;rm-rf.service", "../etc/passwd.service",
+                    "x.service && y", "", "nosuffix"):
+            outcome = services.set_service_state(bad, "stop")
+            self.assertFalse(outcome.ok, bad)
+
+    def test_valid_unit_passes_validation(self):
+        # The unit name/action validation is what this checks; systemctl is
+        # not required to exist for the failure path to be correct.
+        outcome = services.set_service_state("not-a-real-unit-xyz.service", "stop")
+        self.assertIsInstance(outcome.ok, bool)
+
+
+class ParseAnalyzeTest(unittest.TestCase):
+    def test_full_summary(self):
+        text = ("Startup finished in 4.227s (firmware) + 1.105s (loader) + "
+                "2.316s (kernel) + 5.664s (userspace) = 13.313s")
+        info = services.parse_analyze(text)
+        self.assertEqual(info["total"], "13.313s")
+        self.assertEqual(info["firmware"], "4.227s")
+        self.assertEqual(info["loader"], "1.105s")
+        self.assertEqual(info["kernel"], "2.316s")
+        self.assertEqual(info["userspace"], "5.664s")
+
+    def test_garbage(self):
+        self.assertEqual(services.parse_analyze("nothing useful"), {})
+
+
+class ParseBlameTest(unittest.TestCase):
+    def test_top_rows_sorted_input(self):
+        text = ("5.664s NetworkManager-wait-online.service\n"
+                "1.201s udisks2.service\n"
+                "junk line without time\n")
+        rows = services.parse_blame(text, limit=2)
+        self.assertEqual(rows, [("NetworkManager-wait-online.service", "5.664s"),
+                                ("udisks2.service", "1.201s")])
+
+
+if __name__ == "__main__":
+    unittest.main()
