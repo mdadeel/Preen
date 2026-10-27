@@ -25,7 +25,9 @@ from .backend import (  # noqa: E402
     apps as apps_backend,
     backup as backup_backend,
     dashboard as dash_backend,
+    deepclean as deepclean_backend,
     performance as perf_backend,
+    services as services_backend,
     settings as settings_backend,
     system as system_backend,
     ui_customization as ui_backend,
@@ -303,6 +305,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self._busy_lock = threading.Lock()
         self.action_widgets = []
         self.app_rows = {}
+        self.clean_checkbuttons = {}
+        self.selected_service_row = None
         self.baseline = {
             "animations_off": False, "swap": False, "zram": False,
             "power": "balanced", "theme": "light", "round": False,
@@ -409,6 +413,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self._build_manage_page()
         self._build_optimize_page()
         self._build_customize_page()
+        self._build_deepclean_page()
+        self._build_services_page()
         self._build_backup_page()
         self._build_logs_page()
         self._populate_sidebar()
@@ -599,9 +605,11 @@ class MainWindow(Gtk.ApplicationWindow):
         ("dashboard", "Dashboard", "computer-symbolic", "tile-blue"),
         ("install", "Install Apps", "system-software-install-symbolic", "tile-green"),
         ("manage", "Manage Apps", "application-x-executable-symbolic", "tile-purple"),
-        ("optimize", "Optimize System", "speedometer-symbolic", "tile-orange"),
-        ("customize", "Customize Look", "preferences-desktop-appearance", "tile-pink"),
-        ("backup", "Backup & Restore", "drive-multidisk-symbolic", "tile-teal"),
+        ("deepclean", "Deep Clean", "user-trash-symbolic", "tile-orange"),
+        ("optimize", "Optimize System", "speedometer-symbolic", "tile-pink"),
+        ("services", "Services", "system-run-symbolic", "tile-teal"),
+        ("customize", "Customize Look", "preferences-desktop-appearance", "tile-blue"),
+        ("backup", "Backup & Restore", "drive-multidisk-symbolic", "tile-purple"),
         ("logs", "Logs", "document-open-recent-symbolic", "tile-slate"),
     ]
 
@@ -708,6 +716,9 @@ class MainWindow(Gtk.ApplicationWindow):
 
         def after_stats(info):
             self._apply_stats(info)
+            self.submit(deepclean_backend.scan_cleanable, done=self._apply_clean_scan)
+            self.submit(services_backend.boot_info, done=self._apply_boot)
+            self.submit(services_backend.list_services, done=self._apply_services)
             self.submit(self._read_settings, done=self._apply_settings)
 
         def after_status(result):
@@ -1515,6 +1526,233 @@ class MainWindow(Gtk.ApplicationWindow):
         dialog.destroy()
         if response == Gtk.ResponseType.OK and path:
             self.submit(ui_backend.install_icon_pack, path)
+
+    # ------------------------------------------------------------------
+    # Deep Clean page
+    # ------------------------------------------------------------------
+    def _build_deepclean_page(self):
+        page = self._page(
+            "deepclean", "Deep Clean", "Deep Clean",
+            "See exactly how much space each item reclaims before anything is deleted. "
+            "Root items need your password via polkit; Simulate mode previews every step.",
+            icon="user-trash-symbolic")
+
+        scan_card, scan_inner = self._frame(
+            "Reclaimable space", icon="drive-harddisk-symbolic")
+        self.clean_rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.clean_total = self._hint("Press Scan Now to measure what can be reclaimed.")
+        scan_inner.pack_start(self.clean_rows, False, False, 0)
+        scan_inner.pack_start(self.clean_total, False, False, 0)
+        page.pack_start(scan_card, False, False, 0)
+
+        page.pack_start(self._row(
+            self._button("Scan Now", self.on_scan_cleanable,
+                         "Measure reclaimable space", primary=True,
+                         icon="edit-find-symbolic"),
+            self._button("Clean Selected", self.on_clean_selected,
+                         "Delete the ticked items (honours Simulate mode)",
+                         icon="user-trash-symbolic"),
+        ), False, False, 0)
+        page.pack_start(self._hint(
+            "Thumbnails are regenerated automatically; trash cleaning empties "
+            "the wastebasket. The journal keeps its most recent 100 MB."),
+            False, False, 0)
+
+    def _apply_clean_scan(self, items):
+        if not isinstance(items, list):
+            return
+        for child in list(self.clean_rows.get_children()):
+            self.clean_rows.remove(child)
+        self.clean_checkbuttons = {}
+        for item in items:
+            line = Gtk.Box(spacing=10)
+            chk = Gtk.CheckButton()
+            chk.set_valign(Gtk.Align.CENTER)
+            line.pack_start(chk, False, False, 0)
+            text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+            name = Gtk.Label(label=item["label"])
+            name.set_xalign(0)
+            text_box.pack_start(name, False, False, 0)
+            detail = Gtk.Label(label=item["detail"])
+            detail.set_xalign(0)
+            detail.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            detail.get_style_context().add_class("hint-label")
+            text_box.pack_start(detail, False, False, 0)
+            size = Gtk.Label(label=deepclean_backend.format_size(item["size"]))
+            size.get_style_context().add_class("chip")
+            if item["size"] > 0:
+                size.get_style_context().add_class("chip-ok")
+            line.pack_start(text_box, True, True, 0)
+            line.pack_start(size, False, False, 0)
+            self.clean_rows.pack_start(line, False, False, 0)
+            self.clean_checkbuttons[item["key"]] = (chk, item)
+        self.clean_rows.show_all()
+        self.clean_total.set_text("Total reclaimable: {}".format(
+            deepclean_backend.format_size(deepclean_backend.total_size(items))))
+
+    def on_scan_cleanable(self, _btn=None):
+        self.submit(deepclean_backend.scan_cleanable, done=self._apply_clean_scan)
+
+    def on_clean_selected(self, _btn):
+        selected = [item for chk, item in self.clean_checkbuttons.values()
+                    if chk.get_active()]
+        if not selected:
+            self._notify("Tick at least one item to clean.", "warning")
+            return
+        actions = deepclean_backend.build_clean_actions(selected)
+        if not actions:
+            self._notify("Nothing selected can be cleaned.", "warning")
+            return
+        if not self._confirm(
+                "Clean {} item(s)?".format(len(selected)),
+                "Deletes the selected caches and trash contents. This cannot be undone."):
+            return
+        self.submit(utils.run_actions, actions,
+                    done=lambda _r: self.on_scan_cleanable())
+
+    # ------------------------------------------------------------------
+    # Services & Boot page
+    # ------------------------------------------------------------------
+    def _build_services_page(self):
+        page = self._page(
+            "services", "Services", "Services & Boot",
+            "See what slows down your boot and manage systemd services. Changes need "
+            "your password via polkit; core services can affect your desktop.",
+            icon="system-run-symbolic")
+
+        boot_card, boot_inner = self._frame("Boot time", icon="system-shutdown-symbolic")
+        self.lbl_boot = Gtk.Label(label="Measuring boot time…")
+        self.lbl_boot.set_xalign(0)
+        self.lbl_boot.get_style_context().add_class("hint-label")
+        self.boot_blame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        boot_inner.pack_start(self.lbl_boot, False, False, 0)
+        boot_inner.pack_start(self.boot_blame, False, False, 0)
+        page.pack_start(boot_card, False, False, 0)
+
+        services_card, services_inner = self._frame(
+            "System services", icon="system-run-symbolic")
+        toolbar = Gtk.Box(spacing=8)
+        self.services_search = Gtk.SearchEntry()
+        self.services_search.set_placeholder_text("Search services…")
+        self.services_search.set_hexpand(True)
+        self.services_search.connect("search-changed",
+                                     lambda _e: self.services_listbox.invalidate_filter())
+        toolbar.pack_start(self.services_search, True, True, 0)
+        toolbar.pack_start(self._button("Refresh", self.on_refresh_services,
+                                        "Re-read the service list", icon="view-refresh-symbolic"),
+                           False, False, 0)
+        services_inner.pack_start(toolbar, False, False, 0)
+
+        self.services_listbox = Gtk.ListBox()
+        self.services_listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.services_listbox.set_filter_func(self._services_filter, None)
+        self.services_listbox.connect("row_selected", self._on_service_row_selected)
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_min_content_height(260)
+        scroller.add(self.services_listbox)
+        services_inner.pack_start(scroller, True, True, 0)
+        page.pack_start(services_card, True, True, 0)
+
+        page.pack_start(self._row(
+            self._button("Start", lambda b: self.on_service_action("start"),
+                         "Start the selected service now"),
+            self._button("Stop", lambda b: self.on_service_action("stop"),
+                         "Stop the selected service"),
+            self._button("Enable", lambda b: self.on_service_action("enable"),
+                         "Enable at boot"),
+            self._button("Disable", lambda b: self.on_service_action("disable"),
+                         "Do not start at boot"),
+        ), False, False, 0)
+        page.pack_start(self._hint(
+            "green = active, red = inactive, grey = inactive (dead). Only change "
+            "services you understand — some are needed for sound, networking or the desktop."),
+            False, False, 0)
+
+    def _services_filter(self, row, _data):
+        query = self.services_search.get_text().strip().lower()
+        return not query or query in getattr(row, "search_text", "")
+
+    def _on_service_row_selected(self, _box, row):
+        self.selected_service_row = row
+
+    def _apply_services(self, entries):
+        if not isinstance(entries, list):
+            return
+        for child in list(self.services_listbox.get_children()):
+            self.services_listbox.remove(child)
+        for entry in entries:
+            row = Gtk.ListBoxRow()
+            row.unit = entry["unit"]
+            row.search_text = (entry["unit"] + " " + entry["description"]).lower()
+            row.get_style_context().add_class("app-row")
+            line = Gtk.Box(spacing=10)
+            text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+            name = Gtk.Label(label=entry["unit"].replace(".service", ""))
+            name.set_xalign(0)
+            text_box.pack_start(name, False, False, 0)
+            desc = Gtk.Label(label=entry["description"])
+            desc.set_xalign(0)
+            desc.set_ellipsize(Pango.EllipsizeMode.END)
+            desc.get_style_context().add_class("hint-label")
+            text_box.pack_start(desc, False, False, 0)
+            line.pack_start(text_box, True, True, 0)
+            active_chip = Gtk.Label(label=entry["active"] + " · " + entry["sub"])
+            active_chip.get_style_context().add_class("chip")
+            if entry["active"] == "active":
+                active_chip.get_style_context().add_class("chip-ok")
+            elif entry["active"] in ("inactive", "failed"):
+                active_chip.get_style_context().add_class("chip-bad")
+            line.pack_start(active_chip, False, False, 0)
+            if entry.get("unit_state"):
+                state = Gtk.Label(label=entry["unit_state"])
+                state.get_style_context().add_class("badge")
+                line.pack_start(state, False, False, 0)
+            row.add(line)
+            self.services_listbox.add(row)
+        self.services_listbox.show_all()
+
+    def _apply_boot(self, info):
+        if not isinstance(info, dict) or not info.get("total"):
+            self.lbl_boot.set_text(
+                "Boot-time data is not available on this system (systemd-analyze missing).")
+            return
+        phases = "  ·  ".join(
+            "{} {}".format(info[key], key) for key in
+            ("firmware", "loader", "kernel", "userspace") if info.get(key))
+        self.lbl_boot.set_text(
+            "Total boot: {}  —  {}".format(info["total"], phases or "phase breakdown unavailable"))
+        for child in list(self.boot_blame.get_children()):
+            self.boot_blame.remove(child)
+        for unit, seconds in info.get("blame", []):
+            line = Gtk.Box(spacing=8)
+            name = Gtk.Label(label=unit.replace(".service", ""))
+            name.set_xalign(0)
+            name.set_hexpand(True)
+            name.set_ellipsize(Pango.EllipsizeMode.END)
+            time_chip = Gtk.Label(label=seconds)
+            time_chip.get_style_context().add_class("chip")
+            line.pack_start(name, True, True, 0)
+            line.pack_start(time_chip, False, False, 0)
+            self.boot_blame.pack_start(line, False, False, 0)
+        self.boot_blame.show_all()
+
+    def on_refresh_services(self, _btn=None):
+        self.submit(services_backend.list_services, done=self._apply_services)
+        self.submit(services_backend.boot_info, done=self._apply_boot)
+
+    def on_service_action(self, action):
+        row = getattr(self, "selected_service_row", None)
+        if row is None:
+            self._notify("Select a service first.", "warning")
+            return
+        unit = row.unit
+        if action in ("stop", "disable"):
+            if not self._confirm("{} {}?".format(action.capitalize(), unit),
+                                 "Stopped or disabled services may disable features "
+                                 "you rely on (sound, network, desktop)."):
+                return
+        self.submit(services_backend.set_service_state, unit, action,
+                    done=lambda _r: self.on_refresh_services())
 
     # ------------------------------------------------------------------
     # Backup page

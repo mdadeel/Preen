@@ -289,7 +289,7 @@ class GuiRuntimeTest(unittest.TestCase):
 
     def test_window_builds_and_all_pages_exist(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
-        self.assertEqual(len(window.stack.get_children()), 7)
+        self.assertEqual(len(window.stack.get_children()), 9)
         self.assertIn("code", window.app_rows)
         self.assertTrue(window.log_buf.lines)
 
