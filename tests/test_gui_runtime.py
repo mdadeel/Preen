@@ -167,6 +167,14 @@ class Widget:
         return None
 
 
+class FakeImage(Widget):
+    """Gtk.Image needs a class-level constructor the plain Widget lacks."""
+
+    @classmethod
+    def new_from_icon_name(cls, *_args):
+        return cls()
+
+
 class FakeGtk:
     ApplicationWindow = Widget
     Application = Widget
@@ -178,10 +186,12 @@ class FakeGtk:
     FileChooserDialog = Widget
     Grid = Widget
     HeaderBar = Widget
+    Image = FakeImage
     Label = Widget
     ListBox = Widget
     ListBoxRow = Widget
     MessageDialog = Widget
+    ProgressBar = Widget
     ScrolledWindow = Widget
     SearchEntry = Widget
     Separator = Widget
@@ -202,7 +212,8 @@ class FakeGtk:
             return None
 
     Orientation = SimpleNamespace(HORIZONTAL=0, VERTICAL=1)
-    SelectionMode = SimpleNamespace(NONE=0)
+    SelectionMode = SimpleNamespace(NONE=0, SINGLE=1)
+    Align = SimpleNamespace(CENTER=3, START=0)
     StackTransitionType = SimpleNamespace(CROSSFADE=0)
     MessageType = SimpleNamespace(INFO=0, WARNING=1, ERROR=2)
     ButtonsType = SimpleNamespace(CLOSE=1, OK_CANCEL=2)
