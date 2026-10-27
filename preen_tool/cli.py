@@ -1,6 +1,6 @@
 """Headless command line interface.
 
-``zorin-optimizer --doctor`` checks the installation without starting GTK, so
+``preen --doctor`` checks the installation without starting GTK, so
 it works over SSH and in CI. ``--check-catalog`` validates every app ID and
 preset before shipping a release.
 """
@@ -33,7 +33,7 @@ def _capability_rows() -> List[Dict[str, str]]:
             "required": bool(item["required"]),
         })
     try:
-        importlib.import_module("zorin_optim_tool.backend.apps")
+        importlib.import_module("preen_tool.backend.apps")
         backend_status, backend_detail = "ok", "backend package importable"
     except Exception as exc:  # pragma: no cover - broken installation
         backend_status, backend_detail = "missing", str(exc)
@@ -79,7 +79,7 @@ def collect_report() -> Dict:
 
 
 def print_report(report: Dict) -> None:
-    print("Zorin Optimizer {} - doctor".format(report["version"]))
+    print("Preen {} - doctor".format(report["version"]))
     print("Catalogue: {} ({} apps, {} presets)".format(
         report["catalog"], report["catalog_entries"], report["presets"]))
     print("-" * 64)
@@ -104,7 +104,7 @@ def print_report(report: Dict) -> None:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="zorin-optimizer", add_help=True)
+    parser = argparse.ArgumentParser(prog="preen", add_help=True)
     parser.add_argument("--doctor", action="store_true", help="check installation without starting the GUI")
     parser.add_argument("--check-catalog", action="store_true", help="validate apps.json / presets.json")
     parser.add_argument("--json", action="store_true", help="machine-readable doctor output")

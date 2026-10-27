@@ -17,8 +17,8 @@ from unittest import mock
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from zorin_optim_tool import app, cli  # noqa: E402
-from zorin_optim_tool.backend import (  # noqa: E402
+from preen_tool import app, cli  # noqa: E402
+from preen_tool.backend import (  # noqa: E402
     apps,
     backup,
     dashboard,
@@ -111,17 +111,17 @@ class BackendTestCase(unittest.TestCase):
         with zipfile.ZipFile(Path(out) / wheel_name) as archive:
             names = set(archive.namelist())
         for required in (
-            "zorin_optim_tool/app.py",
-            "zorin_optim_tool/gui.py",
-            "zorin_optim_tool/cli.py",
-            "zorin_optim_tool/backend/apps.py",
-            "zorin_optim_tool/backend/utils.py",
-            "zorin_optim_tool/backend/settings.py",
-            "zorin_optim_tool/backend/performance.py",
-            "zorin_optim_tool/backend/backup.py",
-            "zorin_optim_tool/backend/ui_customization.py",
-            "zorin_optim_tool/config/apps.json",
-            "zorin_optim_tool/config/presets.json",
+            "preen_tool/app.py",
+            "preen_tool/gui.py",
+            "preen_tool/cli.py",
+            "preen_tool/backend/apps.py",
+            "preen_tool/backend/utils.py",
+            "preen_tool/backend/settings.py",
+            "preen_tool/backend/performance.py",
+            "preen_tool/backend/backup.py",
+            "preen_tool/backend/ui_customization.py",
+            "preen_tool/config/apps.json",
+            "preen_tool/config/presets.json",
         ):
             self.assertIn(required, names, "wheel is missing " + required)
 
@@ -150,7 +150,7 @@ class BackendTestCase(unittest.TestCase):
         utils.run_cmd(["bash", "-c", "echo hi"], use_pkexec=True, mutate=True)
         self.assertEqual(self.fake.commands()[-1]["cmd"], "pkexec")
         self.fake.clear_log()
-        with mock.patch("zorin_optim_tool.backend.utils.os.geteuid", return_value=0):
+        with mock.patch("preen_tool.backend.utils.os.geteuid", return_value=0):
             utils.run_cmd(["bash", "-c", "echo hi"], use_pkexec=True, mutate=True)
         self.assertEqual(self.fake.commands()[-1]["cmd"], "bash")
 

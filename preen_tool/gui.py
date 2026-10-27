@@ -32,8 +32,8 @@ from .backend import (  # noqa: E402
     utils,
 )
 
-APP_NAME = "Zorin Optimizer"
-APP_ID = "io.github.mdadeel.ZorinOptimizer"
+APP_NAME = "Preen"
+APP_ID = "io.github.mdadeel.Preen"
 MAX_LOG_LINES = 4000
 
 # Small, purely cosmetic stylesheet. Wrapped in try/except at load time:
@@ -308,7 +308,7 @@ class MainWindow(Gtk.ApplicationWindow):
         app_title.set_markup("<b>{}</b>".format(APP_NAME))
         app_title.set_xalign(0)
         title_box.pack_start(app_title, False, False, 0)
-        title_box.set_tooltip_text("Safe system setup for Zorin OS")
+        title_box.set_tooltip_text("System setup for Linux")
         header.set_custom_title(title_box)
 
         # Spinner and status label are created here but live in the bottom
@@ -774,7 +774,7 @@ class MainWindow(Gtk.ApplicationWindow):
     # ------------------------------------------------------------------
     def _build_dashboard_page(self):
         page = self._page(
-            "dashboard", "Dashboard", "Welcome to Zorin Optimizer",
+            "dashboard", "Dashboard", "Welcome to Preen",
             "Install apps, clean up packages and tune your system — with a dry-run switch "
             "so you can see exactly what will happen first.", icon="computer-symbolic")
 
@@ -1564,7 +1564,7 @@ class MainWindow(Gtk.ApplicationWindow):
         return path if response == Gtk.ResponseType.OK else None
 
     def on_export_config(self, _btn):
-        path = self._save_dialog("Save settings archive", "zorin-config-backup.tar.xz")
+        path = self._save_dialog("Save settings archive", "preen-config-backup.tar.xz")
         if path:
             self.submit(backup_backend.export_configs, path)
 
@@ -1625,7 +1625,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self._notice("Log cleared.")
 
     def on_save_log(self, _btn):
-        path = self._save_dialog("Save log", "zorin-optimizer.log")
+        path = self._save_dialog("Save log", "preen.log")
         if not path:
             return
         if self.log_buf.save(path):
@@ -1736,17 +1736,17 @@ class MainWindow(Gtk.ApplicationWindow):
         dialog = Gtk.AboutDialog(transient_for=self)
         dialog.set_program_name(APP_NAME)
         dialog.set_version("v" + __version__)
-        dialog.set_comments("Safe app installs, cleanup and system tuning for Zorin OS.")
+        dialog.set_comments("System setup, deep cleaning and tuning for Linux.")
         dialog.set_website("https://github.com/mdadeel/ZorinOS-Optimizer")
         dialog.set_website_label("Project on GitHub")
         dialog.set_license("MIT")
-        dialog.set_authors(["Zorin Optimizer contributors"])
+        dialog.set_authors(["Preen contributors"])
         dialog.set_logo_icon_name("utilities-system-monitor")
         dialog.run()
         dialog.destroy()
 
 
-class ZorinOptimizerApp(Gtk.Application):
+class PreenApp(Gtk.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID)
         self.window = None

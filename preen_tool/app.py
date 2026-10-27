@@ -2,7 +2,7 @@
 
 Kept deliberately GTK-free so ``--doctor``, ``--version`` and
 ``--check-catalog`` work on headless machines and during package builds. The
-GUI lives in :mod:`zorin_optim_tool.gui` and is imported only when needed.
+GUI lives in :mod:`preen_tool.gui` and is imported only when needed.
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def main(argv=None) -> int:
     unknown = [a for a in argv if a.startswith("-")]
     if unknown:
         print("Unknown option(s): {}".format(", ".join(unknown)), file=sys.stderr)
-        print("Try: zorin-optimizer --doctor", file=sys.stderr)
+        print("Try: preen --doctor", file=sys.stderr)
         return 2
 
     try:
@@ -39,14 +39,14 @@ def main(argv=None) -> int:
         print(
             "Install the GTK bindings first:\n"
             "  sudo apt install python3-gi gir1.2-gtk-3.0\n"
-            "Then check your installation with: zorin-optimizer --doctor",
+            "Then check your installation with: preen --doctor",
             file=sys.stderr,
         )
         return 1
 
-    from .gui import ZorinOptimizerApp
+    from .gui import PreenApp
 
-    app = ZorinOptimizerApp()
+    app = PreenApp()
     return app.run([sys.argv[0]] + argv)
 
 

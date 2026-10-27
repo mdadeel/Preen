@@ -60,20 +60,20 @@ class GuiImportTest(unittest.TestCase):
         repo_stub = _Repository("gi.repository")
         gi_stub.repository = repo_stub
         with mock.patch.dict(sys.modules, {"gi": gi_stub, "gi.repository": repo_stub}):
-            sys.modules.pop("zorin_optim_tool.gui", None)
+            sys.modules.pop("preen_tool.gui", None)
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                gui = importlib.import_module("zorin_optim_tool.gui")
+                gui = importlib.import_module("preen_tool.gui")
             self.assertTrue(hasattr(gui, "MainWindow"))
-            self.assertTrue(hasattr(gui, "ZorinOptimizerApp"))
+            self.assertTrue(hasattr(gui, "PreenApp"))
             self.assertTrue(hasattr(gui, "LogBuffer"))
             for name in ("submit", "_finish", "on_install_selected", "on_run_optimize",
                          "on_snapshot", "on_open_timeshift", "on_import_config",
                          "on_toggle_simulate", "_build_dashboard_page"):
                 self.assertTrue(hasattr(gui.MainWindow, name), "missing " + name)
-        sys.modules.pop("zorin_optim_tool.gui", None)
+        sys.modules.pop("preen_tool.gui", None)
 
     def test_launcher_fails_gracefully_without_gtk(self):
-        from zorin_optim_tool import app
+        from preen_tool import app
 
         stderr = io.StringIO()
         with mock.patch.dict(sys.modules, {"gi": None}):

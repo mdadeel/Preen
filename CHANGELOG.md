@@ -11,7 +11,7 @@ the previous release is in [`docs/ROAST.md`](docs/ROAST.md).
 
 ### Fixed
 
-- The wheel/`.deb` now ships `zorin_optim_tool/backend/`; the installed app
+- The wheel/`.deb` now ships `preen_tool/backend/`; the installed app
   previously crashed with `ModuleNotFoundError` on startup.
 - Simulate mode now gates **all** mutating actions (themes, gsettings, icon
   packs, CSS, config export/import, Timeshift, power profiles, startup apps),

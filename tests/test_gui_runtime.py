@@ -18,8 +18,8 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from zorin_optim_tool.backend import settings as settings_backend  # noqa: E402
-from zorin_optim_tool.backend import utils  # noqa: E402
+from preen_tool.backend import settings as settings_backend  # noqa: E402
+from preen_tool.backend import utils  # noqa: E402
 
 
 class FakeTextBuffer:
@@ -268,9 +268,9 @@ class GuiRuntimeTest(unittest.TestCase):
         self.patch = mock.patch.dict(sys.modules, {"gi": gi, "gi.repository": repo})
         self.patch.start()
         self.addCleanup(self.patch.stop)
-        sys.modules.pop("zorin_optim_tool.gui", None)
-        self.gui = importlib.import_module("zorin_optim_tool.gui")
-        self.addCleanup(lambda: sys.modules.pop("zorin_optim_tool.gui", None))
+        sys.modules.pop("preen_tool.gui", None)
+        self.gui = importlib.import_module("preen_tool.gui")
+        self.addCleanup(lambda: sys.modules.pop("preen_tool.gui", None))
         self.simulate_patch = mock.patch.object(utils, "_simulate", True)
         self.simulate_patch.start()
         self.addCleanup(self.simulate_patch.stop)
@@ -288,13 +288,13 @@ class GuiRuntimeTest(unittest.TestCase):
             self.addCleanup(patch.stop)
 
     def test_window_builds_and_all_pages_exist(self):
-        window = self.gui.MainWindow(self.gui.ZorinOptimizerApp())
+        window = self.gui.MainWindow(self.gui.PreenApp())
         self.assertEqual(len(window.stack.get_children()), 7)
         self.assertIn("code", window.app_rows)
         self.assertTrue(window.log_buf.lines)
 
     def test_handlers_run_without_exceptions(self):
-        window = self.gui.MainWindow(self.gui.ZorinOptimizerApp())
+        window = self.gui.MainWindow(self.gui.PreenApp())
         # Select two apps, apply a preset, then exercise every page's handlers.
         window.app_rows["vlc"].chk.set_active(True)
         window.app_rows["git"].chk.set_active(True)

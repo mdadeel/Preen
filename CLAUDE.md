@@ -6,12 +6,12 @@ The `Makefile` is the single source of truth — run `make help`. Most used:
 
 ```bash
 make setup       # system deps + editable install (needs sudo)
-make run         # python3 -m zorin_optim_tool.app
+make run         # python3 -m preen_tool.app
 make simulate    # same, in dry-run mode
 make doctor      # headless installation/dependency report
 make check       # validate apps.json / presets.json
 make test        # python3 -m unittest discover -s tests -v
-make lint        # python3 -m compileall -q zorin_optim_tool tests
+make lint        # python3 -m compileall -q preen_tool tests
 make wheel       # check + test + build wheel
 make deb         # check + test + dpkg-buildpackage
 make clean       # remove generated artefacts
@@ -20,10 +20,10 @@ make clean       # remove generated artefacts
 All CLI flags work without GTK/display:
 
 ```bash
-python3 -m zorin_optim_tool.app --doctor [--json]
-python3 -m zorin_optim_tool.app --check-catalog
-python3 -m zorin_optim_tool.app --version
-python3 -m zorin_optim_tool.app --simulate
+python3 -m preen_tool.app --doctor [--json]
+python3 -m preen_tool.app --check-catalog
+python3 -m preen_tool.app --version
+python3 -m preen_tool.app --simulate
 ```
 
 ## 📐 Style

@@ -18,7 +18,7 @@ Planned next steps:
 
 ### Testing (2025-10-26)
 - Installed system deps via apt: `python3-psutil`, `python3-gi`, `gir1.2-gtk-3.0` (already present).
-- Fixed a syntax error in `zorin_optim_tool/app.py` (removed stray `}` at EOF).
+- Fixed a syntax error in `preen_tool/app.py` (removed stray `}` at EOF).
 - App launches successfully; only a benign SyntaxWarning in `performance.py` (escape sequence in sed). UI pages load.
 - Basic buttons trigger threaded backend calls; further runtime testing of package actions requires user authorization for pkexec.
 

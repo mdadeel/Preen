@@ -1,4 +1,4 @@
 include README.md LICENSE CHANGELOG.md CONTRIBUTING.md requirements.txt Makefile .editorconfig
-recursive-include zorin_optim_tool/config *.json
+recursive-include preen_tool/config *.json
 recursive-include docs *.md *.example
 recursive-include tests *.py
