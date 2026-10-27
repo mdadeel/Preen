@@ -44,6 +44,15 @@ MAX_LOG_LINES = 4000
 # @accent_color is not defined in GTK 3 themes; @theme_selected_bg_color
 # plays that role.
 _CSS = b"""
+/* ----- Frosted glass: soft gradient behind translucent surfaces ----- */
+window {
+    background-color: @theme_bg_color;
+    background-image: linear-gradient(180deg,
+        alpha(@theme_selected_bg_color, 0.06),
+        alpha(@theme_fg_color, 0.02) 45%,
+        alpha(@theme_selected_bg_color, 0.03));
+}
+
 /* ----- Flat, minimal header bar ----- */
 headerbar {
     background-image: none;
@@ -73,14 +82,16 @@ headerbar button:not(:hover):not(:active):not(:checked) {
 /* ----- Bottom status bar ----- */
 actionbar {
     background-image: none;
-    background-color: alpha(@theme_fg_color, 0.035);
+    background-color: alpha(@theme_base_color, 0.6);
     border-top: 1px solid alpha(@theme_fg_color, 0.08);
     padding: 4px 10px;
 }
 
 /* ----- Sidebar: macOS System Settings tiles ----- */
 .sidebar {
-    background-color: alpha(@theme_fg_color, 0.045);
+    background-color: alpha(@theme_base_color, 0.55);
+    background-image: linear-gradient(to right,
+        alpha(@theme_selected_bg_color, 0.04), transparent 120px);
     border-right: 1px solid alpha(@theme_fg_color, 0.08);
     padding: 10px 8px;
     min-width: 208px;
@@ -122,9 +133,11 @@ actionbar {
 .hint-label, .dim-label { color: alpha(@theme_fg_color, 0.55); }
 .counter-label { color: alpha(@theme_fg_color, 0.55); font-size: 0.92em; }
 
-/* ----- Cards ----- */
+/* ----- Cards (translucent for the frosted look) ----- */
 .card {
-    background-color: @theme_base_color;
+    background-color: alpha(@theme_base_color, 0.82);
+    background-image: linear-gradient(to bottom,
+        alpha(@theme_fg_color, 0.02), transparent 40px);
     border: 1px solid alpha(@theme_fg_color, 0.09);
     border-radius: 14px;
     padding: 18px;
@@ -142,7 +155,9 @@ actionbar {
 .hero-os { font-size: 1.3em; font-weight: 700; }
 .hero-meta { color: alpha(@theme_fg_color, 0.6); }
 .stat-card {
-    background-color: @theme_base_color;
+    background-color: alpha(@theme_base_color, 0.82);
+    background-image: linear-gradient(to bottom,
+        alpha(@theme_fg_color, 0.02), transparent 40px);
     border: 1px solid alpha(@theme_fg_color, 0.09);
     border-radius: 14px;
     padding: 16px;
