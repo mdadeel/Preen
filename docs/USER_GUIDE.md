@@ -3,54 +3,65 @@
 Preen helps you set up, clean and tune a Linux desktop from one window. This
 guide assumes no Linux experience and walks through every page.
 
-> The single most important control is the **Simulate** switch in the
-> top-right corner. Turn it on before trying maintenance actions: they do not
-> change the system, and Logs shows what would have run. When the environment
-> variable `ZOPTIM_SIMULATE=1` forces simulation, the switch stays locked on.
+> Turn on **Simulate** in the top-right corner before trying maintenance
+> actions. Supported changes are previewed in Logs instead of applied. This is
+> not a no-write sandbox: read-only checks still run, preferences and logs can
+> be saved, and loading old settings may migrate a legacy configuration folder.
+> If `ZOPTIM_SIMULATE=1` forces simulation, the switch stays locked on.
 
 ---
 
 ## 1. Install
 
-### Option A: Debian package (recommended)
+### Option A: Run from source
 
-Download `preen_0.4.0_all.deb` from the
-[releases page](https://github.com/mdadeel/Preen/releases/latest), then:
-
-```bash
-sudo apt install ./preen_0.4.0_all.deb
-preen
-```
-
-### Option B: AppImage (no installation)
+On a Debian/Ubuntu-family system:
 
 ```bash
-chmod +x Preen-0.4.0-x86_64.AppImage
-./Preen-0.4.0-x86_64.AppImage
+sudo apt install -y git python3 python3-gi gir1.2-gtk-3.0 python3-psutil
+git clone https://github.com/mdadeel/Preen.git
+cd Preen
+python3 -m preen_tool.app --doctor
+python3 -m preen_tool.app --simulate
 ```
 
-### Option C: Run from a source checkout
+If your default Python cannot import the system PyGObject package, use the
+system Python, such as `/usr/bin/python3`, for the last two commands.
+
+### Option B: Build a Debian package
+
+Check the [releases page](https://github.com/mdadeel/Preen/releases) for
+available assets. When last checked on 2026-10-28, `v0.4.0` had no attached
+Debian or AppImage binaries. With `dpkg-deb` installed, build from a checkout:
 
 ```bash
-sudo apt install -y python3-gi gir1.2-gtk-3.0 python3-psutil \
-  flatpak gsettings-desktop-schemas polkitd tar xz-utils
-python3 -m pip install -e .
-python3 -m preen_tool.app
+./packaging/build_deb.sh
+sudo apt install ./dist/preen_0.4.0_all.deb  # use the file the builder reports
+preen --simulate
 ```
+
+### Option C: Build an AppImage
+
+On x86-64 Linux, `./packaging/build_appimage.sh` builds an AppImage from a
+checkout. It needs the host's Python, GTK and PyGObject, and may download
+`appimagetool` without verifying its checksum. Prefer a trusted pre-verified
+tool supplied through `APPIMAGETOOL`. The resulting file is in `dist/`.
 
 ### Optional tools
 
 Install these only if you want the matching features:
 
 ```bash
+sudo apt install flatpak gsettings-desktop-schemas polkitd
 sudo apt install power-profiles-daemon systemd-zram-generator timeshift
+# Optional: add Flathub if you choose to use that Flatpak repository.
 flatpak remote-add --if-not-exists flathub \
   https://flathub.org/repo/flathub.flatpakrepo
 ```
 
-Preen can start without these optional tools, but the corresponding features
-will not work until they are installed. The Dashboard also identifies missing
-required tools, and `preen --doctor` prints a capability report in a terminal.
+Some older distributions use `policykit-1` rather than `polkitd`. Preen can
+start without these tools, but the corresponding features will not work until
+they are installed. The Dashboard and `--doctor` report available capabilities.
 
 ---
 
@@ -88,9 +99,10 @@ scroll the sidebar and page content to reach additional controls.
 
 ### Install Apps
 
-- Pick a preferred source with the segmented **Flatpak / APT** switch. It is
-  a preference, not a restriction: when an app is missing from one source,
-  the other is used automatically and the fallback is logged.
+- Pick a preferred source with the segmented **Flatpak / APT** switch. If the
+  catalogue has no entry for that source but has one for the other, Preen uses
+  the other source and logs the fallback. This does not promise a retry after a
+  repository or installation error.
 - The badge shows catalogue sources; the status shows installed, not installed,
   unavailable or error. Preen does not claim that an update is available without
   a real update check. Failed package scans are not treated as proof that a
@@ -181,8 +193,9 @@ permanent; thumbnails are regenerated automatically.
   administrator authorization to show saved snapshots. The startup check
   never prompts; it may show unavailable until you refresh. A refresh is not
   run in Simulate mode.
-- **Export Settings** saves `~/.config` to a `.tar.xz` archive, skipping
-  caches and links.
+- **Export Settings** saves regular files under `~/.config` to a `.tar.xz`
+  archive, skipping named caches and links. The archive can include credentials
+  and private settings; Preen does not encrypt it. Store and share it carefully.
 - **Import Settings** inspects the archive in the background and asks before
   overwriting matching files. Unsafe entries or existing destination symlinks
   are refused; export first if you are unsure. A disk or permission error
@@ -209,7 +222,7 @@ Preferences are saved to `~/.config/preen/settings.json`.
 | Preferred package source | Flatpak | Pre-selected source on the Install page |
 | Dashboard auto-refresh | 15 s | `Off` stops the periodic refresh |
 | Page shown on startup | Dashboard | Any sidebar page can open first |
-| Start in Simulate mode | Off | Safe default for shared machines |
+| Start in Simulate mode | Off | Turn on to start future sessions in Simulate mode |
 | Confirm full package updates | On | Ask before Update All; cleanup, uninstall and restore always require confirmation |
 | Show dependency warnings | On | Startup banner when a tool is missing |
 
@@ -220,6 +233,9 @@ instead of crashing the app.
 ---
 
 ## 5. Command line reference
+
+These examples assume Preen is installed. From a source checkout, replace
+`preen` with `python3 -m preen_tool.app`.
 
 ```bash
 preen                         # start the GUI
@@ -257,14 +273,18 @@ reported as warnings.
 ## 7. FAQ
 
 **Is Simulate mode really safe?**
-Maintenance operations, including cleanup, gsettings, icon packs, archives
-and service changes, are gated by it. Tests exercise command and file changes
-with Simulate on. Saving Preen preferences or a log is still allowed.
+Supported maintenance operations, including cleanup, desktop settings, icon
+packs, archives and service changes, are previewed instead of applied. Tests
+exercise selected command and file changes with Simulate on. Read-only checks
+still run, preferences or logs can be saved, and legacy settings can migrate;
+it is not a no-write sandbox or a substitute for a backup.
 
 **Will it remove important system packages?**
-No. Core packages such as `gnome-shell`, `apt` and `python3` are protected,
-their checkboxes are disabled, and scanner rows pass strict validation
-before becoming command arguments.
+Preen's direct app-uninstall paths block a defined set of core APT package
+names such as `gnome-shell`, `apt` and `python3`, disable their selection and
+validate scanned names. APT autoremove and dependency changes can affect other
+packages, and Simulate does not run the package solver to predict every effect.
+Review removal requests and keep a backup.
 
 **Why does it ask for my password?**
 APT, `/etc/fstab` and systemd changes need root. Related package commands
@@ -275,5 +295,7 @@ In `~/.config/preen/settings.json`. Exported config archives go wherever you
 choose in the file chooser.
 
 **Does it phone home?**
-No. The only network activity is what `apt-get` or `flatpak` performs when
-you ask them to install or update something.
+The current app has no built-in telemetry or log upload. APT, Flatpak,
+Flathub setup and other external tools can contact repositories or services
+under their own policies. Logs and config archives can contain sensitive data;
+see the [privacy policy](../PRIVACY.md).

@@ -5,13 +5,33 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "preen"
 version = "0.4.0"
-description = "Preen — system setup, deep cleaning and tuning for Linux"
+description = "Linux system utility for apps, disk cleanup, services and configuration backups"
 authors = [{ name = "Preen contributors" }]
 readme = "README.md"
+license = { file = "LICENSE" }
+keywords = ["linux", "gtk", "apt", "flatpak", "system utility", "disk cleanup", "systemd", "backup"]
+classifiers = [
+  "Environment :: Console",
+  "Environment :: X11 Applications :: GTK",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: System :: Systems Administration",
+  "Topic :: Utilities",
+]
 requires-python = ">=3.8"
 dependencies = [
   "psutil>=5.9; platform_system == 'Linux'",
 ]
+
+[project.urls]
+Homepage = "https://github.com/mdadeel/Preen"
+Documentation = "https://github.com/mdadeel/Preen/blob/main/docs/README.md"
+Source = "https://github.com/mdadeel/Preen"
+Issues = "https://github.com/mdadeel/Preen/issues"
+Changelog = "https://github.com/mdadeel/Preen/blob/main/CHANGELOG.md"
+Privacy = "https://github.com/mdadeel/Preen/blob/main/PRIVACY.md"
+Security = "https://github.com/mdadeel/Preen/blob/main/SECURITY.md"
 
 [project.scripts]
 preen = "preen_tool.app:main"
