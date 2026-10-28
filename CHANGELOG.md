@@ -4,6 +4,35 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+A macOS System Settings (Sequoia) redesign of the GTK interface, built from
+flat fills and grouped inset controls.
+
+### Added
+
+- Sidebar search field that filters the nine settings pages in place and
+  hides the section headers while a query is active.
+- Reusable grouped setting rows: a title plus optional sub-caption with a
+  trailing switch or value control, separated by hairlines like the System
+  Settings inset lists.
+- The swapfile size dropdown is now only enabled while the swapfile switch
+  is on, and refreshes its sensitivity when settings reload.
+
+### Changed
+
+- The stylesheet is now fully flat with no gradients. The window is a
+  neutral canvas, cards are solid grouped surfaces with 12 px corners and
+  hairline borders, and the selected sidebar row is a solid system-blue
+  pill with white text.
+- Optimize System and Customize Look use capsule switches and labelled
+  value rows instead of check buttons. The same widget attributes and
+  get/set behavior are preserved, so handlers and tests are unchanged.
+- Switches, sliders, checkboxes and the segmented control now follow the
+  macOS capsule and squircle treatment with the shared `#0a84ff` accent.
+- Buttons, entries, dropdowns, popovers, dialogs and scrollbars were
+  restyled to match the same flat, rounded system.
+
 ## [0.4.0] - 2026-10-27
 
 A macOS-inspired design pass, a queue-based task runner that no longer drops

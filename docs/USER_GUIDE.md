@@ -69,6 +69,13 @@ terminal.
 
 ## 3. The pages
 
+The sidebar groups the nine pages under Overview, Software, System and
+Personal, each with a coloured symbol tile. Use the **Search** field at the
+top of the sidebar to jump straight to a page: type part of its name, such
+as `clean` or `backup`, and the list filters to the matches. The section
+headers hide while a search is active and return when you clear the field.
+The currently selected page is shown as a solid blue row.
+
 ### Dashboard
 
 - A hero card with your operating system, kernel, uptime, power profile and

@@ -47,29 +47,41 @@ MAX_LOG_LINES = 4000
 # @accent_color is not defined in GTK 3 themes; @theme_selected_bg_color
 # plays that role.
 _CSS = b"""
-/* SF-like system font stack; every theme colour is named so light/dark works
-   automatically, matching the macOS System Settings feel. */
+/* ============================================================
+   Preen GTK theme, macOS System Settings (Sequoia) inspired.
+   Flat fills only, no gradients. Light and dark both work by
+   riding the Adwaita @theme_* tokens; the accent is the macOS
+   system blue, which reads correctly in both schemes.
+   ============================================================ */
+@define-color mac_blue #0a84ff;
+@define-color mac_blue_press #0066d6;
+@define-color mac_green #30d158;
+@define-color mac_purple #bf5af2;
+@define-color mac_orange #ff9f0a;
+@define-color mac_pink #ff375f;
+@define-color mac_teal #64d2ff;
+@define-color mac_slate #8e939c;
+@define-color hairline alpha(@theme_fg_color, 0.09);
+@define-color soft_fill alpha(@theme_fg_color, 0.06);
+
 * {
     font-family: -apple-system, "SF Pro Text", "Inter", "Segoe UI",
                  "Cantarell", "Ubuntu", sans-serif;
 }
 
-/* ----- Frosted glass: soft gradient behind translucent surfaces ----- */
+/* ----- Window: flat neutral canvas, white grouped cards sit on it ----- */
 window {
     background-color: @theme_bg_color;
-    background-image: linear-gradient(180deg,
-        alpha(@theme_selected_bg_color, 0.07),
-        alpha(@theme_fg_color, 0.02) 45%,
-        alpha(@theme_selected_bg_color, 0.04));
 }
 
-/* ----- Flat, minimal header bar ----- */
+/* ----- Flat header bar ----- */
 headerbar {
     background-image: none;
-    background-color: alpha(@theme_bg_color, 0.85);
-    border-bottom: 1px solid alpha(@theme_fg_color, 0.07);
+    background-color: @theme_bg_color;
+    border-bottom: 1px solid @hairline;
     box-shadow: none;
-    min-height: 42px;
+    min-height: 44px;
+    padding: 4px 8px;
 }
 headerbar button:not(:hover):not(:active):not(:checked) {
     background-image: none;
@@ -77,8 +89,9 @@ headerbar button:not(:hover):not(:active):not(:checked) {
     border-color: transparent;
     box-shadow: none;
 }
+headerbar entry, headerbar > box entry { border-radius: 999px; }
 
-/* ----- Simulate mode ----- */
+/* ----- Simulate mode pill ----- */
 .simulate-banner {
     background-color: alpha(@warning_color, 0.22);
     color: @theme_fg_color;
@@ -92,42 +105,48 @@ headerbar button:not(:hover):not(:active):not(:checked) {
 /* ----- Bottom status bar ----- */
 actionbar {
     background-image: none;
-    background-color: alpha(@theme_base_color, 0.65);
-    border-top: 1px solid alpha(@theme_fg_color, 0.07);
+    background-color: @theme_bg_color;
+    border-top: 1px solid @hairline;
     padding: 4px 12px;
 }
 
 /* ----- Sidebar: macOS System Settings ----- */
 .sidebar {
-    background-color: alpha(@theme_base_color, 0.55);
-    background-image: linear-gradient(to right,
-        alpha(@theme_selected_bg_color, 0.05), transparent 130px);
-    border-right: 1px solid alpha(@theme_fg_color, 0.07);
-    padding: 12px 10px;
-    min-width: 224px;
+    background-color: alpha(@theme_base_color, 0.5);
+    border-right: 1px solid @hairline;
+    padding: 10px 10px 12px 10px;
+    min-width: 232px;
+}
+.sidebar .sidebar-search {
+    margin: 4px 6px 10px 6px;
+    border-radius: 999px;
+    min-height: 30px;
 }
 .sidebar-section {
     color: alpha(@theme_fg_color, 0.48);
-    font-size: 0.78em;
+    font-size: 0.76em;
     font-weight: 700;
-    letter-spacing: 0.06em;
-    padding: 12px 12px 4px 12px;
+    letter-spacing: 0.07em;
+    padding: 14px 12px 5px 12px;
 }
 .page-row {
-    border-radius: 10px;
-    padding: 7px 10px;
+    border-radius: 8px;
+    padding: 5px 10px;
     margin: 1px 2px;
+    min-height: 34px;
 }
 .page-row:hover:not(:selected) {
-    background-color: alpha(@theme_fg_color, 0.06);
+    background-color: @soft_fill;
 }
 .page-row:selected {
-    background-color: alpha(@theme_selected_bg_color, 0.16);
-    color: @theme_fg_color;
+    background-color: @mac_blue;
+    color: #ffffff;
 }
-.page-row:selected label { font-weight: 700; }
+.page-row:selected label { color: #ffffff; font-weight: 700; }
+
+/* Coloured symbol tiles, the macOS sidebar icon set */
 .tile {
-    border-radius: 8px;
+    border-radius: 7px;
     min-width: 28px;
     min-height: 28px;
 }
@@ -135,98 +154,104 @@ actionbar {
     color: #ffffff;
     -gtk-icon-shadow: none;
 }
-.tile-blue    { background-image: none; background-color: #0a84ff; }
-.tile-green   { background-image: none; background-color: #30b750; }
-.tile-purple  { background-image: none; background-color: #bf5af2; }
-.tile-orange  { background-image: none; background-color: #ff9f0a; }
-.tile-pink    { background-image: none; background-color: #ff375f; }
-.tile-teal    { background-image: none; background-color: #64d2ff; }
-.tile-slate   { background-image: none; background-color: #8e939c; }
+.tile-blue   { background-image: none; background-color: @mac_blue; }
+.tile-green  { background-image: none; background-color: @mac_green; }
+.tile-purple { background-image: none; background-color: @mac_purple; }
+.tile-orange { background-image: none; background-color: @mac_orange; }
+.tile-pink   { background-image: none; background-color: @mac_pink; }
+.tile-teal   { background-image: none; background-color: @mac_teal; }
+.tile-slate  { background-image: none; background-color: @mac_slate; }
 
 /* ----- Typography ----- */
-.page-title { font-size: 1.55em; font-weight: 700; letter-spacing: -0.02em; }
-.page-subtitle { color: alpha(@theme_fg_color, 0.6); font-size: 0.96em; }
-.card-title { font-size: 1.04em; font-weight: 700; letter-spacing: -0.01em; }
-.hint-label, .dim-label { color: alpha(@theme_fg_color, 0.55); font-size: 0.92em; }
-.counter-label { color: alpha(@theme_fg_color, 0.55); font-size: 0.92em; }
+.page-title { font-size: 1.5em; font-weight: 700; letter-spacing: -0.02em; }
+.page-subtitle { color: alpha(@theme_fg_color, 0.6); font-size: 0.95em; }
+.card-title { font-size: 1.02em; font-weight: 700; letter-spacing: -0.01em; }
+.hint-label, .dim-label { color: alpha(@theme_fg_color, 0.55); font-size: 0.9em; }
+.counter-label { color: alpha(@theme_fg_color, 0.55); font-size: 0.9em; }
+.settings-title { font-weight: 600; }
+.settings-sub { color: alpha(@theme_fg_color, 0.55); font-size: 0.88em; }
 
-/* ----- Cards (translucent for the frosted look) ----- */
+/* ----- Grouped inset cards ----- */
 .card {
-    background-color: alpha(@theme_base_color, 0.84);
-    background-image: linear-gradient(to bottom,
-        alpha(@theme_fg_color, 0.025), transparent 46px);
-    border: 1px solid alpha(@theme_fg_color, 0.08);
-    border-radius: 16px;
+    background-color: @theme_base_color;
+    border: 1px solid @hairline;
+    border-radius: 12px;
+    padding: 18px 20px;
+}
+
+/* Inset setting rows: hairline separators like System Settings */
+.settings-row {
+    min-height: 40px;
+    padding: 7px 2px;
+    border-bottom: 1px solid @hairline;
+}
+.settings-row:last-child { border-bottom: none; }
+.settings-row + .dim-label { margin-top: 10px; }
+.settings-row button.flat { padding-left: 0; }
+
+/* ----- Dashboard hero + stat cards ----- */
+.hero-card {
+    background-color: alpha(@mac_blue, 0.09);
+    border: 1px solid alpha(@mac_blue, 0.25);
+    border-radius: 14px;
     padding: 20px;
 }
-
-/* ----- Dashboard: hero + stat cards ----- */
-.hero-card {
-    background-image: linear-gradient(120deg,
-        alpha(@theme_selected_bg_color, 0.18),
-        alpha(@theme_selected_bg_color, 0.03));
-    border: 1px solid alpha(@theme_selected_bg_color, 0.26);
-    border-radius: 18px;
-    padding: 22px;
-}
-.hero-os { font-size: 1.35em; font-weight: 700; letter-spacing: -0.01em; }
+.hero-os { font-size: 1.3em; font-weight: 700; letter-spacing: -0.01em; }
 .hero-meta { color: alpha(@theme_fg_color, 0.6); }
 .stat-card {
-    background-color: alpha(@theme_base_color, 0.84);
-    background-image: linear-gradient(to bottom,
-        alpha(@theme_fg_color, 0.025), transparent 46px);
-    border: 1px solid alpha(@theme_fg_color, 0.08);
-    border-radius: 16px;
-    padding: 16px;
+    background-color: @theme_base_color;
+    border: 1px solid @hairline;
+    border-radius: 12px;
+    padding: 14px 16px;
 }
-.stat-value { font-size: 1.4em; font-weight: 700; letter-spacing: -0.01em; }
+.stat-value { font-size: 1.35em; font-weight: 700; letter-spacing: -0.01em; }
 .stat-name { color: alpha(@theme_fg_color, 0.55); font-weight: 600; }
 .stat-card progressbar trough {
     background-color: alpha(@theme_fg_color, 0.12);
     border: none;
     border-radius: 999px;
-    min-height: 8px;
+    min-height: 6px;
 }
 .stat-card progressbar progress {
     border-radius: 999px;
-    min-height: 8px;
+    min-height: 6px;
+    border: none;
 }
-/* One accent colour per metric, macOS system palette */
-.stat-cpu progressbar progress  { background-color: #0a84ff; }
-.stat-mem progressbar progress  { background-color: #bf5af2; }
-.stat-disk progressbar progress { background-color: #30b750; }
-.stat-swap progressbar progress { background-color: #64d2ff; }
+.stat-cpu progressbar progress  { background-color: @mac_blue; }
+.stat-mem progressbar progress  { background-color: @mac_purple; }
+.stat-disk progressbar progress { background-color: @mac_green; }
+.stat-swap progressbar progress { background-color: @mac_teal; }
 
 /* ----- Badges & chips ----- */
 .chip {
-    background-color: alpha(@theme_fg_color, 0.08);
+    background-color: @soft_fill;
     border-radius: 999px;
     padding: 3px 11px;
     font-size: 0.9em;
 }
-.chip-ok { background-color: alpha(@success_color, 0.28); }
-.chip-bad { background-color: alpha(@error_color, 0.22); }
-.chip-muted { background-color: alpha(@theme_fg_color, 0.1); color: alpha(@theme_fg_color, 0.7); }
+.chip-ok { background-color: alpha(@success_color, 0.25); }
+.chip-bad { background-color: alpha(@error_color, 0.2); }
+.chip-muted { background-color: @soft_fill; color: alpha(@theme_fg_color, 0.7); }
 .badge {
-    background-color: alpha(@theme_selected_bg_color, 0.14);
+    background-color: alpha(@mac_blue, 0.15);
     border-radius: 999px;
     padding: 2px 9px;
     font-size: 0.85em;
 }
-.badge-ok { background-color: alpha(@success_color, 0.28); }
-.badge-bad { background-color: alpha(@error_color, 0.22); }
+.badge-ok { background-color: alpha(@success_color, 0.25); }
+.badge-bad { background-color: alpha(@error_color, 0.2); }
 
-/* ----- macOS-style segmented control ----- */
+/* ----- macOS capsule segmented control ----- */
 .segmented {
-    background-color: alpha(@theme_fg_color, 0.08);
-    border-radius: 9px;
+    background-color: alpha(@theme_fg_color, 0.09);
+    border-radius: 999px;
     padding: 2px;
 }
 .segmented button {
     border: none;
-    border-radius: 7px;
+    border-radius: 999px;
     background: transparent;
-    padding: 4px 14px;
+    padding: 5px 16px;
     font-weight: 600;
     box-shadow: none;
 }
@@ -237,59 +262,163 @@ actionbar {
     box-shadow: 0 1px 3px alpha(rgb(0, 0, 0), 0.18);
 }
 
-/* ----- Vibrant filled pill buttons ----- */
+/* ----- Buttons ----- */
+button {
+    border-radius: 8px;
+    padding: 6px 14px;
+}
 button.suggested-action {
     background-image: none;
-    background-color: @theme_selected_bg_color;
-    color: @theme_selected_fg_color;
+    background-color: @mac_blue;
+    color: #ffffff;
     border: none;
     border-radius: 999px;
-    padding: 6px 18px;
+    padding: 7px 20px;
     font-weight: 600;
 }
-button.suggested-action:hover {
-    background-color: shade(@theme_selected_bg_color, 1.08);
-}
-button.suggested-action:active {
-    background-color: shade(@theme_selected_bg_color, 0.92);
-}
+button.suggested-action:hover { background-color: shade(@mac_blue, 1.12); }
+button.suggested-action:active { background-color: @mac_blue_press; }
 button.destructive-action {
     background-image: none;
     background-color: @error_color;
     color: #ffffff;
     border: none;
     border-radius: 999px;
-    padding: 6px 18px;
+    padding: 7px 20px;
     font-weight: 600;
 }
-button.destructive-action:hover {
-    background-color: shade(@error_color, 1.08);
-}
-button.flat { border-radius: 9px; }
+button.destructive-action:hover { background-color: shade(@error_color, 1.1); }
+button.flat { border-radius: 8px; }
+button.flat:hover { background-color: @soft_fill; }
+
+/* ----- Entries and search fields ----- */
 entry, searchbar entry {
     border-radius: 9px;
-    padding: 5px 8px;
+    padding: 6px 10px;
+    border: 1px solid @hairline;
+    background-color: @theme_base_color;
+}
+entry:focus { border-color: @mac_blue; }
+
+/* ----- Dropdowns ----- */
+combobox box, combobox > box > button.combo { border-radius: 9px; }
+button.combo {
+    border-radius: 9px;
+    padding: 6px 12px;
+    min-height: 32px;
 }
 
-/* ----- Getting-started step numbers ----- */
+/* ----- macOS capsule switches ----- */
+switch {
+    border: none;
+    border-radius: 999px;
+    background-color: alpha(@theme_fg_color, 0.2);
+    min-width: 46px;
+    min-height: 27px;
+    padding: 0;
+    background-image: none;
+}
+switch slider {
+    border-radius: 50%;
+    background-color: #ffffff;
+    min-width: 23px;
+    min-height: 23px;
+    margin: 2px;
+    border: none;
+    box-shadow: 0 1px 3px alpha(rgb(0, 0, 0), 0.3);
+}
+switch:checked { background-color: @mac_blue; }
+switch:checked slider { background-color: #ffffff; }
+
+/* ----- Sliders: thin rounded track, round knob ----- */
+scale { padding: 6px 0; }
+scale trough {
+    min-height: 4px;
+    border-radius: 999px;
+    background-color: alpha(@theme_fg_color, 0.18);
+}
+scale highlight {
+    border-radius: 999px;
+    background-color: @mac_blue;
+}
+scale slider {
+    min-width: 18px;
+    min-height: 18px;
+    border-radius: 50%;
+    background-color: #ffffff;
+    border: 1px solid alpha(rgb(0, 0, 0), 0.12);
+    box-shadow: 0 1px 3px alpha(rgb(0, 0, 0), 0.25);
+}
+
+/* ----- Checkboxes and radios: rounded squircle, blue when on ----- */
+check, check row check, radio {
+    border-radius: 5px;
+    border: 1.5px solid alpha(@theme_fg_color, 0.35);
+    background-color: @theme_base_color;
+    min-width: 18px;
+    min-height: 18px;
+}
+check:checked, radio:checked {
+    background-color: @mac_blue;
+    border-color: @mac_blue;
+}
+radio { border-radius: 50%; }
+
+/* ----- Separators and scrollbars ----- */
+separator { background-color: @hairline; }
+scrollbar { background: transparent; border: none; }
+scrollbar slider {
+    border-radius: 999px;
+    min-width: 8px;
+    min-height: 8px;
+    background-color: alpha(@theme_fg_color, 0.25);
+    border: none;
+}
+scrollbar trough { background: transparent; border: none; }
+
+/* ----- Log viewer ----- */
+textview {
+    border-radius: 10px;
+    padding: 4px;
+}
+textview text {
+    background-color: @theme_base_color;
+}
+
+/* ----- Banners ----- */
+infobar { border-radius: 12px; }
+.info-banner { background-color: alpha(@mac_blue, 0.12); }
+.warning-banner { background-color: alpha(@warning_color, 0.18); }
+.error-banner { background-color: alpha(@error_color, 0.16); }
+
+/* ----- Menus and dialogs ----- */
+popover { border-radius: 12px; }
+popover modelbutton {
+    border-radius: 8px;
+    padding: 8px 14px;
+    margin: 2px 4px;
+}
+dialog { border-radius: 16px; }
+dialog > box { padding: 10px; }
+dialog button { border-radius: 999px; padding: 7px 18px; }
+
+/* ----- Step numbers and list rows ----- */
 .step-number {
-    background-color: @theme_selected_bg_color;
-    color: @theme_selected_fg_color;
+    background-color: @mac_blue;
+    color: #ffffff;
     border-radius: 999px;
     min-width: 24px;
     min-height: 24px;
     padding: 2px 4px;
     font-weight: 700;
 }
-
-/* ----- App list rows ----- */
-.app-row { padding: 9px 10px; }
-.app-row:hover {
-    background-color: alpha(@theme_fg_color, 0.045);
-}
+.app-row { padding: 9px 10px; border-bottom: 1px solid @hairline; }
+.app-row:last-child { border-bottom: none; }
+.app-row:hover { background-color: @soft_fill; }
 .list-header { padding-top: 14px; padding-bottom: 4px; }
-.snapshot-row { padding: 7px 10px; }
-.snapshot-row:hover { background-color: alpha(@theme_fg_color, 0.04); }
+.snapshot-row { padding: 7px 10px; border-bottom: 1px solid @hairline; }
+.snapshot-row:last-child { border-bottom: none; }
+.snapshot-row:hover { background-color: @soft_fill; }
 """
 
 
@@ -455,10 +584,25 @@ class MainWindow(Gtk.ApplicationWindow):
         self.sidebar_list = Gtk.ListBox()
         self.sidebar_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.sidebar_list.connect("row_selected", self._on_sidebar_row_selected)
+        self.sidebar_list.set_filter_func(self._sidebar_filter)
+        self._sidebar_query = ""
         self.stack.connect("notify::visible-child-name", self._on_stack_page_changed)
         sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         sidebar.get_style_context().add_class("sidebar")
-        sidebar.pack_start(self.sidebar_list, False, False, 0)
+
+        # macOS-style search pinned above the sidebar sections. It lives
+        # outside the ListBox, so row/header counts never change while
+        # filtering toggles row visibility instead.
+        self.sidebar_search = Gtk.SearchEntry()
+        self.sidebar_search.set_placeholder_text("Search")
+        self.sidebar_search.get_style_context().add_class("sidebar-search")
+        self.sidebar_search.set_tooltip_text("Find a settings page")
+        self.sidebar_search.connect("search-changed", self._on_sidebar_search_changed)
+        sidebar.pack_start(self.sidebar_search, False, False, 0)
+        sidebar_scroll = Gtk.ScrolledWindow()
+        sidebar_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        sidebar_scroll.add(self.sidebar_list)
+        sidebar.pack_start(sidebar_scroll, True, True, 0)
 
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         panes = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
@@ -622,7 +766,7 @@ class MainWindow(Gtk.ApplicationWindow):
         return chip
 
     def _button(self, label, callback, tooltip=None, primary=False, destructive=False,
-                icon=None):
+                icon=None, flat=False):
         if icon:
             button = Gtk.Button()
             inner = Gtk.Box(spacing=7)
@@ -639,6 +783,8 @@ class MainWindow(Gtk.ApplicationWindow):
             context.add_class("suggested-action")
         if destructive:
             context.add_class("destructive-action")
+        if flat:
+            context.add_class("flat")
         self.action_widgets.append(button)
         return button
 
@@ -679,8 +825,12 @@ class MainWindow(Gtk.ApplicationWindow):
         self.stack.add_titled(box, name, sidebar_title)
         return box
 
-    def _frame(self, label, icon=None):
-        """A rounded card with a small title row; returns (card, inner_box)."""
+    def _frame(self, label, icon=None, tight=False):
+        """A rounded card with a small title row; returns (card, inner_box).
+
+        Tight frames hold connected inset setting rows, so their inner box
+        uses no spacing and lets the row hairlines form one grouped list.
+        """
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         card.get_style_context().add_class("card")
         head = Gtk.Box(spacing=8)
@@ -691,9 +841,60 @@ class MainWindow(Gtk.ApplicationWindow):
         heading.get_style_context().add_class("card-title")
         head.pack_start(heading, False, False, 0)
         card.pack_start(head, False, False, 0)
-        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                        spacing=0 if tight else 10)
         card.pack_start(inner, False, False, 0)
         return card, inner
+
+    def _toggle_row(self, title, subtitle=None, tooltip=None):
+        """A macOS-style grouped row: title (and sub-caption) left, switch right.
+
+        Returns (row_box, switch); callers keep the switch under the same
+        attribute name the old check buttons used, so get_active/set_active
+        contracts are unchanged.
+        """
+        row = Gtk.Box(spacing=12)
+        row.get_style_context().add_class("settings-row")
+        if tooltip:
+            row.set_tooltip_text(tooltip)
+        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        title_label = Gtk.Label(label=title)
+        title_label.set_xalign(0)
+        title_label.set_line_wrap(True)
+        title_label.get_style_context().add_class("settings-title")
+        text_box.pack_start(title_label, False, False, 0)
+        if subtitle:
+            sub_label = Gtk.Label(label=subtitle)
+            sub_label.set_xalign(0)
+            sub_label.set_line_wrap(True)
+            sub_label.get_style_context().add_class("settings-sub")
+            text_box.pack_start(sub_label, False, False, 0)
+        row.pack_start(text_box, True, True, 0)
+        switch = Gtk.Switch()
+        switch.set_valign(Gtk.Align.CENTER)
+        if tooltip:
+            switch.set_tooltip_text(tooltip)
+        row.pack_end(switch, False, False, 0)
+        return row, switch
+
+    def _value_row(self, title, control, subtitle=None):
+        """A grouped row with a label left and any control (combo, button) right."""
+        row = Gtk.Box(spacing=12)
+        row.get_style_context().add_class("settings-row")
+        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        title_label = Gtk.Label(label=title)
+        title_label.set_xalign(0)
+        title_label.get_style_context().add_class("settings-title")
+        text_box.pack_start(title_label, False, False, 0)
+        if subtitle:
+            sub_label = Gtk.Label(label=subtitle)
+            sub_label.set_xalign(0)
+            sub_label.set_line_wrap(True)
+            sub_label.get_style_context().add_class("settings-sub")
+            text_box.pack_start(sub_label, False, False, 0)
+        row.pack_start(text_box, True, True, 0)
+        row.pack_end(control, False, False, 0)
+        return row
 
     @staticmethod
     def _hint(text):
@@ -757,6 +958,7 @@ class MainWindow(Gtk.ApplicationWindow):
             for name, label, icon, tile_class in pages:
                 row = Gtk.ListBoxRow()
                 row.page_name = name
+                row.search_text = label.lower()
                 row.get_style_context().add_class("page-row")
                 line = Gtk.Box(spacing=10)
                 tile = Gtk.Box()
@@ -780,6 +982,21 @@ class MainWindow(Gtk.ApplicationWindow):
         name = getattr(row, "page_name", None)
         if name and name != self.stack.get_visible_child_name():
             self.stack.set_visible_child_name(name)
+
+    def _on_sidebar_search_changed(self, entry):
+        self._sidebar_query = entry.get_text().strip().lower()
+        # Present on the real GTK ListBox; the test double is a no-op here.
+        invalidate = getattr(self.sidebar_list, "invalidate_filter", None)
+        if callable(invalidate):
+            invalidate()
+
+    def _sidebar_filter(self, row):
+        if not self._sidebar_query:
+            return True
+        # Section headers disappear while searching, macOS Settings style.
+        if getattr(row, "page_name", None) is None:
+            return False
+        return self._sidebar_query in getattr(row, "search_text", "")
 
     def _on_stack_page_changed(self, _stack, _param):
         name = self.stack.get_visible_child_name()
@@ -1472,42 +1689,57 @@ class MainWindow(Gtk.ApplicationWindow):
             "Only the settings you change are applied. Cleaning up and changing swap or ZRAM "
             "needs your password via polkit.", icon="speedometer-symbolic")
 
-        cleanup_frame, cleanup = self._frame("Cleanup & desktop behaviour")
-        self.chk_cleanup = Gtk.CheckButton.new_with_label(
-            "Remove unused packages (APT autoremove/autoclean + Flatpak unused)")
-        self.chk_animations = Gtk.CheckButton.new_with_label("Disable GNOME animations")
-        cleanup.pack_start(self.chk_cleanup, False, False, 0)
-        cleanup.pack_start(self.chk_animations, False, False, 0)
-        cleanup.pack_start(self._row(self._button("Manage Startup Apps…", self.on_manage_startup,
-                                                  "Enable or disable apps that launch at login")),
-                           False, False, 0)
+        cleanup_frame, cleanup = self._frame("Cleanup & desktop behaviour", tight=True)
+        cleanup_row, self.chk_cleanup = self._toggle_row(
+            "Remove unused packages",
+            "APT autoremove and autoclean, plus unused Flatpak runtimes")
+        animations_row, self.chk_animations = self._toggle_row(
+            "Disable GNOME animations",
+            "Fewer transitions and window effects on supported desktops")
+        cleanup.pack_start(cleanup_row, False, False, 0)
+        cleanup.pack_start(animations_row, False, False, 0)
+        startup_row = Gtk.Box()
+        startup_row.get_style_context().add_class("settings-row")
+        startup_row.pack_start(
+            self._button("Manage Startup Apps…", self.on_manage_startup,
+                         "Enable or disable apps that launch at login", icon="list-add-symbolic",
+                         flat=True),
+            False, False, 0)
+        cleanup.pack_start(startup_row, False, False, 0)
         page.pack_start(cleanup_frame, False, False, 0)
 
-        power_frame, power = self._frame("Memory & power")
-        swap_row = Gtk.Box(spacing=8)
-        self.chk_swap = Gtk.CheckButton.new_with_label("Use a swapfile")
-        self.chk_swap.set_tooltip_text("Creates /swapfile and adds it to /etc/fstab")
-        swap_row.pack_start(self.chk_swap, False, False, 0)
-        swap_row.pack_start(Gtk.Label(label="Size:"), False, False, 0)
+        power_frame, power = self._frame("Memory & power", tight=True)
+        swap_row, self.chk_swap = self._toggle_row(
+            "Use a swapfile",
+            "Creates /swapfile and adds it to /etc/fstab",
+            tooltip="Creates /swapfile and adds it to /etc/fstab")
+        self.chk_swap.connect("notify::active", self._on_swap_toggle)
+        power.pack_start(swap_row, False, False, 0)
+
         self.cmb_swap_size = Gtk.ComboBoxText()
         for size_gb in (1, 2, 4, 8):
             self.cmb_swap_size.append_text("{} GB".format(size_gb))
         self.cmb_swap_size.set_active(1)
         self.cmb_swap_size.set_tooltip_text("Swapfile size in gigabytes (only used when enabling it)")
-        swap_row.pack_start(self.cmb_swap_size, False, False, 0)
-        self.chk_zram = Gtk.CheckButton.new_with_label("Enable ZRAM (needs systemd-zram-generator)")
-        power_row = Gtk.Box(spacing=8)
-        power_row.pack_start(Gtk.Label(label="Power profile:"), False, False, 0)
+        power.pack_start(self._value_row("Swapfile size", self.cmb_swap_size,
+                                         "Only used when a swapfile is being enabled"),
+                         False, False, 0)
+
+        zram_row, self.chk_zram = self._toggle_row(
+            "Enable ZRAM",
+            "Needs systemd-zram-generator")
+        power.pack_start(zram_row, False, False, 0)
+
         self.cmb_power = Gtk.ComboBoxText()
         for profile in perf_backend.POWER_PROFILES:
             self.cmb_power.append_text(profile)
         self.cmb_power.set_active(0)
         self.cmb_power.set_tooltip_text("Requires power-profiles-daemon")
-        power_row.pack_start(self.cmb_power, False, False, 0)
-        power.pack_start(swap_row, False, False, 0)
-        power.pack_start(self.chk_zram, False, False, 0)
-        power.pack_start(power_row, False, False, 0)
+        power.pack_start(self._value_row("Power profile", self.cmb_power,
+                                         "Requires power-profiles-daemon"),
+                         False, False, 0)
         page.pack_start(power_frame, False, False, 0)
+        self._on_swap_toggle(None)
 
         page.pack_start(self._row(
             self._button("Apply Changes", self.on_run_optimize,
@@ -1519,6 +1751,10 @@ class MainWindow(Gtk.ApplicationWindow):
         page.pack_start(self._hint(
             "Current settings are detected automatically. If nothing changed, nothing runs."),
             False, False, 0)
+
+    def _on_swap_toggle(self, _switch, _param=None):
+        # The size combo only matters while a swapfile is being enabled.
+        self.cmb_swap_size.set_sensitive(self.chk_swap.get_active())
 
     def _read_settings(self):
         return {
@@ -1551,6 +1787,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 scaling_index = index
                 break
         self.cmb_scaling.set_active(scaling_index)
+        self._on_swap_toggle(None)
 
         warnings = info.get("warnings") or []
         for child in list(self.health_chips.get_children()):
@@ -1649,40 +1886,51 @@ class MainWindow(Gtk.ApplicationWindow):
             "Only GTK themes already installed on your system are applied.",
             icon="preferences-desktop-appearance")
 
-        theme_frame, theme = self._frame("Theme")
-        row = Gtk.Box(spacing=8)
-        row.pack_start(Gtk.Label(label="Appearance:"), False, False, 0)
+        theme_frame, theme = self._frame("Theme", tight=True)
         self.cmb_theme = Gtk.ComboBoxText()
         self.cmb_theme.append_text("Light")
         self.cmb_theme.append_text("Dark")
         self.cmb_theme.set_active(0)
-        row.pack_start(self.cmb_theme, False, False, 0)
-        row.pack_start(self._button("Apply Theme Now", self.on_apply_theme,
-                                    "Switch the GNOME colour scheme immediately"), False, False, 0)
-        theme.pack_start(row, False, False, 0)
+        theme.pack_start(self._value_row("Appearance", self.cmb_theme,
+                                         "Switch the GNOME colour scheme"),
+                         False, False, 0)
 
-        scaling_row = Gtk.Box(spacing=8)
-        scaling_row.pack_start(Gtk.Label(label="Text size:"), False, False, 0)
-        self.cmb_scaling = Gtk.ComboBoxText()
         self.SCALING_OPTIONS = (
             ("Default (100%)", 1.0),
             ("Large (115%)", 1.15),
             ("Larger (125%)", 1.25),
             ("Small (85%)", 0.85),
         )
+        self.cmb_scaling = Gtk.ComboBoxText()
         for label, _factor in self.SCALING_OPTIONS:
             self.cmb_scaling.append_text(label)
         self.cmb_scaling.set_active(0)
         self.cmb_scaling.set_tooltip_text("GNOME text scaling factor, applied desktop-wide")
-        scaling_row.pack_start(self.cmb_scaling, False, False, 0)
-        theme.pack_start(scaling_row, False, False, 0)
+        theme.pack_start(self._value_row("Text size", self.cmb_scaling,
+                                         "GNOME scaling factor, applied desktop-wide"),
+                         False, False, 0)
+        apply_theme_row = Gtk.Box()
+        apply_theme_row.get_style_context().add_class("settings-row")
+        apply_theme_row.pack_start(
+            self._button("Apply Theme Now", self.on_apply_theme,
+                         "Switch the GNOME colour scheme immediately", icon="object-select-symbolic",
+                         flat=True),
+            False, False, 0)
+        theme.pack_start(apply_theme_row, False, False, 0)
         page.pack_start(theme_frame, False, False, 0)
 
-        extras_frame, extras = self._frame("Extras")
-        self.chk_round = Gtk.CheckButton.new_with_label("Rounded corners (adds a rule to ~/.config/gtk-3.0/gtk.css)")
-        extras.pack_start(self.chk_round, False, False, 0)
-        extras.pack_start(self._button("Install Icon Pack…", self.on_install_icon,
-                                       "Choose a .tar.xz or .tar.gz icon theme"), False, False, 0)
+        extras_frame, extras = self._frame("Extras", tight=True)
+        round_row, self.chk_round = self._toggle_row(
+            "Rounded corners",
+            "Adds a reversible rule to ~/.config/gtk-3.0/gtk.css")
+        extras.pack_start(round_row, False, False, 0)
+        icon_row = Gtk.Box()
+        icon_row.get_style_context().add_class("settings-row")
+        icon_row.pack_start(self._button("Install Icon Pack…", self.on_install_icon,
+                                         "Choose a .tar.xz or .tar.gz icon theme",
+                                         icon="folder-download-symbolic", flat=True),
+                            False, False, 0)
+        extras.pack_start(icon_row, False, False, 0)
         extras.pack_start(self._hint("Rounded-corner CSS is reversible and may need an app restart to show."),
                           False, False, 0)
         page.pack_start(extras_frame, False, False, 0)
