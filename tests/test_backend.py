@@ -154,6 +154,35 @@ class BackendTestCase(unittest.TestCase):
             utils.run_cmd(["bash", "-c", "echo hi"], use_pkexec=True, mutate=True)
         self.assertEqual(self.fake.commands()[-1]["cmd"], "bash")
 
+    def test_simulated_privileged_commands_need_no_polkit_and_report_preview(self):
+        utils.set_simulate(True)
+        with mock.patch.object(utils.os, "geteuid", return_value=1000), \
+                mock.patch.object(utils, "has_command", return_value=False), \
+                mock.patch.object(utils.subprocess, "Popen") as popen:
+            report = utils.Report(self.log)
+            result = report.run(["journalctl", "--vacuum-size=100M"],
+                                use_pkexec=True, mutate=True)
+            self.assertTrue(result.simulated)
+            self.assertIn("pkexec journalctl", result.out)
+            self.assertIn("Simulation complete", report.finish("Done").message)
+            outcome = utils.run_actions([("dry step", lambda: utils.ok("Done"), ())])
+            self.assertIn("No changes were made", outcome.message)
+            popen.assert_not_called()
+        self.assertIn("[simulate] would run", self.log.text())
+
+    def test_command_log_preserves_complete_stdout_stderr_and_exit_code(self):
+        stdout = "out-start-" + "o" * 1600 + "-out-end"
+        stderr = "err-start-" + "e" * 1600 + "-err-end"
+        result = utils.run_cmd([sys.executable, "-c",
+                                "import sys; sys.stdout.write({!r}); "
+                                "sys.stderr.write({!r}); sys.exit(9)".format(stdout, stderr)],
+                               log=self.log)
+        self.assertEqual(result.code, 9)
+        text = self.log.text()
+        self.assertIn("[failed] exit 9", text)
+        self.assertIn(stdout, text)
+        self.assertIn(stderr, text)
+
     def test_run_actions_never_reexecutes_on_internal_typeerror(self):
         counter = []
 
@@ -188,6 +217,47 @@ class BackendTestCase(unittest.TestCase):
         self.assertEqual(sum(1 for c in commands if c["cmd"] == "flatpak"), 1)
         self.assertEqual(sum(1 for c in commands if c["cmd"] == "dpkg-query"), 1)
         self.assertLessEqual(len(commands), 2)
+
+    def test_failed_package_scan_is_unknown_and_blocks_relevant_actions(self):
+        warning = "flatpak list failed: database unavailable"
+        with mock.patch.object(apps, "get_installed_state", return_value=(set(), set(), [warning])), \
+                mock.patch.object(apps, "_run_batches") as run_batches:
+            status = apps.get_status_label_map()
+            self.assertEqual(status["vlc"], "Error")
+            self.assertEqual(status["git"], "Not installed")
+            for operation in (apps.install_apps, apps.update_apps, apps.uninstall_apps):
+                result = operation(["vlc"], "flatpak", log=self.log)
+                self.assertFalse(result.ok)
+                self.assertIn("Cannot determine installed state", result.message)
+                self.assertIn(warning, result.details)
+            run_batches.assert_not_called()
+
+    def test_dashboard_failed_measurements_are_unavailable_not_zero(self):
+        with mock.patch.object(dashboard, "psutil", None), \
+                mock.patch.object(dashboard, "_fallback_cpu", return_value=None), \
+                mock.patch.object(dashboard, "_fallback_memory", return_value=(None, None, None)), \
+                mock.patch.object(dashboard, "_fallback_swap", return_value=(None, None, None)), \
+                mock.patch.object(dashboard.os, "statvfs", side_effect=OSError("unavailable")):
+            info = dashboard.get_system_info()
+        for key in ("cpu_percent", "mem_percent", "disk_percent", "swap_percent"):
+            self.assertEqual(info[key], "Unavailable")
+        self.assertEqual(info["disk_used"], "Unavailable")
+
+    def test_missing_flatpak_does_not_block_known_apt_operations(self):
+        with mock.patch.object(apps, "get_installed_state",
+                               return_value=(set(), {"vlc"}, ["flatpak is not installed"])), \
+                mock.patch.object(apps, "_run_batches"):
+            outcome = apps.uninstall_apps(["vlc"], "apt", log=self.log)
+            self.assertTrue(outcome.ok)
+
+    def test_manage_scan_reports_failed_flatpak_with_exit_detail(self):
+        warnings = []
+        with mock.patch.object(apps, "has_command", return_value=True), \
+                mock.patch.object(apps, "run_cmd",
+                                  return_value=utils.CommandResult(23, "", "flatpak database error")):
+            self.assertEqual(apps.list_installed_flatpak(warnings, self.log), [])
+        self.assertIn("exit 23", warnings[0])
+        self.assertIn("flatpak database error", self.log.text())
 
     # ------------------------------------------------------------------
     # Install / update / uninstall

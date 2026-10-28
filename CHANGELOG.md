@@ -6,32 +6,37 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
-A macOS System Settings (Sequoia) redesign of the GTK interface, built from
-flat fills and grouped inset controls.
+A GNOME-native dark GTK 3 refresh of all nine pages, retaining the existing
+backend, package catalogue and serial task queue.
 
 ### Added
 
-- Sidebar search field that filters the nine settings pages in place and
-  hides the section headers while a query is active.
-- Reusable grouped setting rows: a title plus optional sub-caption with a
-  trailing switch or value control, separated by hairlines like the System
-  Settings inset lists.
-- The swapfile size dropdown is now only enabled while the swapfile switch
-  is on, and refreshes its sensitivity when settings reload.
+- Shared dark design tokens, grouped searchable sidebar, responsive cards and
+  button rows, compact simulation control and contextual notices.
+- Honest package and cleanup states, partial-scan warnings, protected rows,
+  severity-coloured selectable logs, and explicit unavailable metrics.
+- Regression coverage for snapshot refresh, simulation, queue callbacks,
+  diagnostics, cleanup measurements and package/service scan failures.
 
 ### Changed
 
-- The stylesheet is now fully flat with no gradients. The window is a
-  neutral canvas, cards are solid grouped surfaces with 12 px corners and
-  hairline borders, and the selected sidebar row is a solid system-blue
-  pill with white text.
-- Optimize System and Customize Look use capsule switches and labelled
-  value rows instead of check buttons. The same widget attributes and
-  get/set behavior are preserved, so handlers and tests are unchanged.
-- Switches, sliders, checkboxes and the segmented control now follow the
-  macOS capsule and squircle treatment with the shared `#0a84ff` accent.
-- Buttons, entries, dropdowns, popovers, dialogs and scrollbars were
-  restyled to match the same flat, rounded system.
+- Dashboard summaries and cleanup totals describe measured data and estimates;
+  journal usage above its 100 MiB target is only an upper bound.
+- Command logs retain stdout, stderr and exit codes. Simulated privileged
+  commands can be previewed without polkit and report that no changes occurred.
+- Cleanup, uninstall and restore always require confirmation; the preference
+  controls the additional confirmation for Update All.
+
+### Fixed
+
+- Backup snapshot refresh no longer references an out-of-scope `page`; export
+  and import controls are constructed with the Backup page.
+- Journal vacuum failures now reach the GUI and log instead of reporting success.
+- Failed package and service scans no longer masquerade as empty results;
+  unavailable power profiles no longer appear as a balanced setting.
+- Callback errors retain tracebacks and their banner is not replaced by a
+  later success notice. Busy/health and notice widgets are actually revealed.
+- A symlink used as a cleanup root is refused instead of traversed.
 
 ## [0.4.0] - 2026-10-27
 

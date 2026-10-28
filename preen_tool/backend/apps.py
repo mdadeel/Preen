@@ -216,16 +216,24 @@ def installed_formats(item: Dict) -> List[Tuple[str, str]]:
 
 
 def get_status_label_map() -> Dict[str, str]:
-    catalogue = load_apps()
     status: Dict[str, str] = {}
-    flatpaks, apt_packages, _ = get_installed_state()
+    flatpaks, apt_packages, warnings = get_installed_state()
+    flat_problem = next((w for w in warnings if w.startswith("flatpak ")), "")
+    apt_problem = next((w for w in warnings if w.startswith("dpkg-query ")), "")
     for item in all_apps().values():
         formats = []
         if any(ref in flatpaks for ref in as_list(item.get("flatpak"))):
             formats.append("Flatpak")
         if any(pkg in apt_packages for pkg in as_list(item.get("apt"))):
             formats.append("APT")
-        status[item["id"]] = "Installed ({})".format(", ".join(formats)) if formats else "Not installed"
+        if formats:
+            label = "Installed ({})".format(", ".join(formats))
+        else:
+            problems = ([flat_problem] if item.get("flatpak") and flat_problem else [])
+            problems += ([apt_problem] if item.get("apt") and apt_problem else [])
+            # A missing/failed scanner cannot prove that a package is absent.
+            label = ("Error" if any("failed" in p for p in problems) else "Unavailable") if problems else "Not installed"
+        status[item["id"]] = label
     return status
 
 
@@ -243,10 +251,21 @@ def get_status_map(source: str) -> Dict[str, bool]:
 # ---------------------------------------------------------------------------
 # Scanners for "Manage Apps"
 # ---------------------------------------------------------------------------
-def list_installed_flatpak() -> List[Dict]:
+def list_installed_flatpak(warnings=None, log=None) -> List[Dict]:
     if not has_command("flatpak"):
+        if warnings is not None:
+            warnings.append("Flatpak is not installed")
+        if log:
+            log.append("[warning] Flatpak is not installed; its applications cannot be scanned.\n")
         return []
-    result = run_cmd(["flatpak", "list", "--app", "--columns=application,name"])
+    result = run_cmd(["flatpak", "list", "--app", "--columns=application,name"], quiet=True)
+    if not result.ok:
+        message = "Flatpak scan failed (exit {}): {}".format(
+            result.code, result.err or result.out or "no output")
+        if warnings is not None:
+            warnings.append(message)
+        if log:
+            log.append("[warning] " + message.rstrip() + "\n")
     items: List[Dict] = []
     if result.ok:
         for line in result.out.splitlines():
@@ -262,7 +281,7 @@ def list_installed_flatpak() -> List[Dict]:
     return items
 
 
-def list_installed_apt() -> List[Dict]:
+def list_installed_apt(warnings=None, log=None) -> List[Dict]:
     """List graphical APT applications via their .desktop launchers.
 
     One ``dpkg -S`` call resolves every launcher to its owning package. The
@@ -270,11 +289,24 @@ def list_installed_apt() -> List[Dict]:
     thousands of library rows.
     """
     desktop_files = sorted(glob.glob("/usr/share/applications/*.desktop"))
-    if not desktop_files or not has_command("dpkg"):
+    if not has_command("dpkg"):
+        if warnings is not None:
+            warnings.append("dpkg is not installed")
+        if log:
+            log.append("[warning] dpkg is not installed; graphical APT applications cannot be scanned.\n")
+        return []
+    if not desktop_files:
         return []
 
     owners: Dict[str, str] = {}
-    result = run_cmd(["dpkg", "-S"] + desktop_files)
+    result = run_cmd(["dpkg", "-S"] + desktop_files, quiet=True)
+    if result.code not in (0, 1):
+        message = "APT application scan failed (exit {}): {}".format(
+            result.code, result.err or result.out or "no output")
+        if warnings is not None:
+            warnings.append(message)
+        if log:
+            log.append("[warning] " + message.rstrip() + "\n")
     if result.code in (0, 1):  # 1 = at least one path is not owned by a package
         for line in result.out.splitlines():
             if ": " not in line:
@@ -421,9 +453,40 @@ def _run_batches(report: Report, flatpaks: Sequence[str], apts: Sequence[str],
 # ---------------------------------------------------------------------------
 # Public operations
 # ---------------------------------------------------------------------------
+def _selection_scan_failures(app_ids: List[str], source: str, mode: str) -> List[str]:
+    """Do not mistake a failed relevant package query for an absent package."""
+    source = _check_source(source)
+    _flatpaks, _apts, warnings = get_installed_state()
+    problems = {
+        "flatpak": [w for w in warnings if w.startswith("flatpak list failed")],
+        "apt": [w for w in warnings if w.startswith("dpkg-query failed") or
+                (w.startswith("dpkg-query is not installed") and has_command("apt-get"))],
+    }
+    relevant = set()
+    catalogue = all_apps()
+    for app_id in app_ids:
+        item = catalogue.get(app_id)
+        if not item:
+            continue
+        if mode == "install":
+            other = "apt" if source == "flatpak" else "flatpak"
+            chosen = source if item.get(source) else other if item.get(other) else None
+            if chosen:
+                relevant.add(chosen)
+        else:
+            relevant.update(kind for kind in ("flatpak", "apt") if item.get(kind))
+    return [warning for kind in ("flatpak", "apt") if kind in relevant
+            for warning in problems[kind]]
+
+
 def install_apps(app_ids: List[str], source: str, log=None) -> Outcome:
     if not app_ids:
         return fail("No apps selected.")
+    if not any(app_id in all_apps() for app_id in app_ids):
+        return fail("No recognised apps selected.")
+    problems = _selection_scan_failures(app_ids, source, "install")
+    if problems:
+        return fail("Cannot determine installed state; refresh package status and try again.", *problems)
     report = Report(log)
     flatpaks, apts, notes = _resolve_selection(app_ids, source, "install")
     for note in notes:
@@ -443,6 +506,11 @@ def update_apps(app_ids: List[str], source: str, log=None) -> Outcome:
     _check_source(source)
     if not app_ids:
         return fail("No apps selected.")
+    if not any(app_id in all_apps() for app_id in app_ids):
+        return fail("No recognised apps selected.")
+    problems = _selection_scan_failures(app_ids, source, "update")
+    if problems:
+        return fail("Cannot determine installed state; refresh package status and try again.", *problems)
     report = Report(log)
     flatpaks, apts, notes = _resolve_selection(app_ids, source, "update")
     for note in notes:
@@ -461,6 +529,11 @@ def uninstall_apps(app_ids: List[str], source: str, log=None) -> Outcome:
     _check_source(source)
     if not app_ids:
         return fail("No apps selected.")
+    if not any(app_id in all_apps() for app_id in app_ids):
+        return fail("No recognised apps selected.")
+    problems = _selection_scan_failures(app_ids, source, "uninstall")
+    if problems:
+        return fail("Cannot determine installed state; refresh package status and try again.", *problems)
     report = Report(log)
     flatpaks, apts, notes = _resolve_selection(app_ids, source, "uninstall")
     for note in notes:

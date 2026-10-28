@@ -4,8 +4,9 @@ Preen helps you set up, clean and tune a Linux desktop from one window. This
 guide assumes no Linux experience and walks through every page.
 
 > The single most important control is the **Simulate** switch in the
-> top-right corner. Turn it on before trying anything: nothing changes, and
-> the Logs page shows exactly what would have run.
+> top-right corner. Turn it on before trying maintenance actions: they do not
+> change the system, and Logs shows what would have run. When the environment
+> variable `ZOPTIM_SIMULATE=1` forces simulation, the switch stays locked on.
 
 ---
 
@@ -47,9 +48,9 @@ flatpak remote-add --if-not-exists flathub \
   https://flathub.org/repo/flathub.flatpakrepo
 ```
 
-Missing tools are never fatal. The Dashboard tool panel explains which
-features are unavailable, and `preen --doctor` prints the same report in a
-terminal.
+Preen can start without these optional tools, but the corresponding features
+will not work until they are installed. The Dashboard also identifies missing
+required tools, and `preen --doctor` prints a capability report in a terminal.
 
 ---
 
@@ -63,37 +64,37 @@ terminal.
 5. Open **Logs**. You will see the exact command prefixed with
    `[simulate] would run:`, proof that nothing was installed.
 6. When you are happy, switch Simulate off and repeat the action for real.
-   You enter your password once per batch through polkit.
+   Privileged commands use polkit and may prompt for authentication.
 
 ---
 
 ## 3. The pages
 
 The sidebar groups the nine pages under Overview, Software, System and
-Personal, each with a coloured symbol tile. Use the **Search** field at the
-top of the sidebar to jump straight to a page: type part of its name, such
-as `clean` or `backup`, and the list filters to the matches. The section
-headers hide while a search is active and return when you clear the field.
-The currently selected page is shown as a solid blue row.
+Personal, with symbolic icons and a highlighted selected row. Use **Find a
+page** at the top of the sidebar to filter by name. Section headers hide
+while a search is active and return when you clear it. On smaller windows,
+scroll the sidebar and page content to reach additional controls.
 
 ### Dashboard
 
 - A hero card with your operating system, kernel, uptime, power profile and
   load average.
-- Four live metric cards: CPU, memory, disk and swap, each with a progress
-  bar in its own accent colour. They refresh automatically, and the interval
+- Four live metric cards for CPU, memory, disk and swap. Readings that cannot
+  be measured are shown as unavailable, not as zero. The refresh interval
   is configurable in Preferences.
-- A three-step getting-started checklist.
-- A **Tool availability** panel with plain-language warnings.
-- Shortcuts: **Refresh Status**, **Run Cleanup Now** and **Open Logs**.
+- Suggested next steps and a **Tool availability** panel when tools are missing.
+- Shortcuts: **Refresh Status**, **Run Cleanup** and **Open Logs**.
 
 ### Install Apps
 
 - Pick a preferred source with the segmented **Flatpak / APT** switch. It is
   a preference, not a restriction: when an app is missing from one source,
   the other is used automatically and the fallback is logged.
-- The badge next to each app shows the available source or sources. Hover
-  for notes.
+- The badge shows catalogue sources; the status shows installed, not installed,
+  unavailable or error. Preen does not claim that an update is available without
+  a real update check. Failed package scans are not treated as proof that a
+  package is absent.
 - Search, **Select all**, **Clear** and **Quick picks** presets make large
   selections fast. The counter shows what is ticked.
 - **Install Selected** is the primary action. **Update Selected**,
@@ -104,21 +105,24 @@ The currently selected page is shown as a solid blue row.
 
 - Lists Flatpak apps and graphical APT applications (packages that own a
   `.desktop` launcher), never thousands of libraries.
-- Search, then **Update Selected** or **Uninstall Selected**.
+- Search, then **Update Selected** or **Uninstall Selected**. A scan warning
+  means the list may be incomplete; see Logs for the cause.
 - Rows marked **protected** are core desktop packages. Their checkboxes are
-  disabled so a cleanup cannot break your session.
+  disabled and the backend also blocks their removal.
 
 ### Deep Clean
 
-1. Press **Scan Now**. Every item shows the space it reclaims before
-   anything is deleted.
-2. Tick what you want, or use **Select all** and **Clear**. The counter
-   shows the selected total.
-3. Press **Clean Selected**. Root items share one polkit prompt.
+1. Press **Scan Now**. Sizes are estimates, not guarantees of reclaimed disk
+   space. An unreadable item is marked **Unavailable** instead of zero.
+2. Tick what you want, or use **Select all** for measurable nonempty items.
+   An unavailable-size item can be selected individually, with care.
+3. Press **Clean Selected** and confirm. APT and journal actions are separate
+   privileged steps and may each request polkit authentication.
 
-Items include the APT package cache, the systemd journal (vacuumed to keep
-the newest 100 MB), thumbnails, the pip cache and the trash. Thumbnails are
-regenerated automatically.
+Items include the APT cache, journal, thumbnails, pip cache and trash. Journal
+usage includes active files that cannot be vacuumed, so the amount above the
+100 MiB retention target is only an upper-bound estimate. Trash deletion is
+permanent; thumbnails are regenerated automatically.
 
 ### Optimize System
 
@@ -126,7 +130,8 @@ regenerated automatically.
   remove unused Flatpak runtimes, disable GNOME animations, and manage
   startup applications through a dedicated dialog.
 - **Memory and power:** create or remove a swapfile with a selectable size
-  (1, 2, 4 or 8 GB), enable ZRAM, and choose a power profile.
+  (1, 2, 4 or 8 GB), enable ZRAM, and choose a power profile. The profile
+  selector is disabled if its current state cannot be read.
 - Only settings that differ from the detected baseline are applied, so
   pressing apply with no changes does nothing.
 
@@ -162,11 +167,12 @@ regenerated automatically.
 
 ### Logs
 
-- Every command, exit code, stdout fragment and error is recorded here.
-- Use **Filter log** to find a line, and the **Auto-scroll** switch to hold
-  a position while new lines arrive.
-- **Save Log** writes the full history to a text file you can attach to a
-  support request.
+- Command output, errors, exit codes and callback tracebacks appear here with
+  severity colours. Text can be selected and copied.
+- Use **Filter log** to find lines, **Auto-scroll** to hold a position, and
+  **Clear Log** to discard the retained history.
+- **Save Log** writes the retained history, regardless of the active filter.
+  The most recent 4,000 lines are kept in memory; older lines are discarded.
 
 ---
 
@@ -181,7 +187,7 @@ Preferences are saved to `~/.config/preen/settings.json`.
 | Dashboard auto-refresh | 15 s | `Off` stops the periodic refresh |
 | Page shown on startup | Dashboard | Any sidebar page can open first |
 | Start in Simulate mode | Off | Safe default for shared machines |
-| Confirm destructive actions | On | Ask before uninstall or restore |
+| Confirm full package updates | On | Ask before Update All; cleanup, uninstall and restore always require confirmation |
 | Show dependency warnings | On | Startup banner when a tool is missing |
 
 Source and safety options apply immediately. Startup and refresh options
@@ -226,9 +232,9 @@ reported as warnings.
 ## 7. FAQ
 
 **Is Simulate mode really safe?**
-Yes. Every mutating operation, including file writes, gsettings, icon packs,
-archives and service changes, is gated by it. A test calls each one with
-Simulate on and asserts that no command is spawned and no file is written.
+Maintenance operations, including cleanup, gsettings, icon packs, archives
+and service changes, are gated by it. Tests exercise command and file changes
+with Simulate on. Saving Preen preferences or a log is still allowed.
 
 **Will it remove important system packages?**
 No. Core packages such as `gnome-shell`, `apt` and `python3` are protected,
@@ -236,8 +242,8 @@ their checkboxes are disabled, and scanner rows pass strict validation
 before becoming command arguments.
 
 **Why does it ask for my password?**
-APT, `/etc/fstab` and systemd changes need root. Commands are batched so you
-see one polkit prompt per operation, not one per package.
+APT, `/etc/fstab` and systemd changes need root. Related package commands
+are batched where possible; separate privileged steps can prompt separately.
 
 **Where are my settings stored?**
 In `~/.config/preen/settings.json`. Exported config archives go wherever you

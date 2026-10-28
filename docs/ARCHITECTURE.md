@@ -26,7 +26,7 @@ preen --doctor ──► cli.py ──► backend/ (headless)
 |---|---|
 | `app.py` | GTK-free launcher. Handles `--doctor`, `--check-catalog`, `--version`, `--simulate` and prints a friendly error when PyGObject is missing. |
 | `cli.py` | Headless diagnostics, catalogue validation and the JSON report. |
-| `gui.py` | All GTK screens, the macOS-inspired stylesheet, dialogs, preferences and the serial task queue. |
+| `gui.py` | Nine GTK 3 screens, shared dark design tokens, dialogs, preferences, diagnostic log and the serial task queue. |
 | `backend/utils.py` | `run_cmd`, `CommandResult`, `Report`, `Outcome`, `run_actions`, desktop-file parsing, `safe_tar_members`, `ensure_flathub`. |
 | `backend/apps.py` | Catalogue loading and validation, two-query installed-state detection, batched install/update/uninstall. |
 | `backend/deepclean.py` | Reclaimable-space scans, size formatting and simulate-gated cleaning. |
@@ -48,9 +48,11 @@ spawned.
   before `Popen` and logs `[simulate] would run: ...`.
 - `env=` is merged into `os.environ`, never replaced.
 - `use_pkexec=True` adds exactly one `pkexec` (none when already root) and
-  returns a clear error when polkit is unavailable.
+  returns a clear error when polkit is unavailable. Simulated commands are
+  previewed before checking for polkit and do not launch a process.
 - `Report.run()` collects failures into an `Outcome`; the GUI shows a banner
-  and the log carries the details.
+  and the log retains command stdout, stderr and exit codes (up to the
+  4,000-line in-memory retention limit).
 - Shell scripts only exist to batch privileged steps into one polkit
   prompt, and every interpolated value passes through `shlex.quote`.
 
@@ -71,7 +73,8 @@ UI thread ◄──────── GLib.idle_add(_finish) ─────┘
 - Worker threads may only call `LogBuffer.append()`, which itself uses
   `GLib.idle_add`.
 - All widget updates happen in `_finish` on the main thread or inside a
-  `done=` callback.
+  `done=` callback. Busy state remains active through callbacks and queued
+  refreshes; the Simulate switch and action buttons cannot change mid-batch.
 - `utils.accepts_log()` inspects signatures instead of catching
   `TypeError`, so a function is never executed twice.
 
@@ -101,6 +104,9 @@ file is written in Simulate mode.
   known-safe values.
 - **Diff-based optimisation.** Only settings that changed from the detected
   baseline are applied.
+- **Cleanable paths.** Only allowlisted directories are emptied; a symlink
+  used as a cleanable root is refused. Unknown scan sizes stay unknown.
+  Journal size above its retention target is an upper bound, not a promise.
 - **Atomic writes.** Preferences, desktop entries and CSS go through a temp
   file and `os.replace`.
 
@@ -117,8 +123,11 @@ exercises every handler without a display server.
   matching modules.
 - `test_gui_smoke.py` checks the import surface and the GTK-missing error
   path.
-- `test_gui_runtime.py` builds all nine pages, fires every handler and
-  verifies the newer widgets (segmented control, filters, counters).
+- `test_gui_runtime.py` builds all nine pages and exercises handlers, the
+  snapshot callback, queued work, simulation, notices, filters and counters.
+
+The fake GTK tests do not establish visual correctness or replace tests on a
+real GNOME desktop with polkit and package managers.
 
 Run them with `make test` or
 `python3 -m unittest discover -s tests -v`. No root, display server or

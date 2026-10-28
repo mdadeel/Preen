@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from . import utils
 
@@ -43,8 +43,10 @@ _JOURNAL_RE = re.compile(
 _UNITS = {"B": 1, "K": 1024, "M": 1024 ** 2, "G": 1024 ** 3, "T": 1024 ** 4}
 
 
-def format_size(num_bytes: float) -> str:
-    """Human-readable size, e.g. ``1.2 GB`` or ``0 B``."""
+def format_size(num_bytes: Optional[float]) -> str:
+    """Human-readable size, or ``Unavailable`` for a failed measurement."""
+    if num_bytes is None:
+        return "Unavailable"
     size = float(max(0, num_bytes))
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if size < 1024 or unit == "TB":
@@ -55,19 +57,34 @@ def format_size(num_bytes: float) -> str:
     return "{:.1f} TB".format(size)
 
 
-def du_size(path: str) -> int:
-    """Total size of *path* in bytes; missing or unreadable paths are 0."""
-    total = 0
+def du_size(path: str) -> Optional[int]:
+    """Measure a directory; missing paths are empty, unreadable ones unknown.
+
+    A symlink used as the cleanable root is not followed, matching the
+    deletion safety check in :func:`clean_user_paths`.
+    """
     try:
-        for dirpath, _dirnames, filenames in os.walk(path):
+        os.lstat(path)
+    except FileNotFoundError:
+        return 0
+    except OSError:
+        return None
+    if os.path.islink(path):
+        return None
+    if not os.path.isdir(path):
+        return 0
+    total = 0
+    errors: List[OSError] = []
+    try:
+        for dirpath, _dirnames, filenames in os.walk(path, onerror=errors.append):
             for name in filenames:
                 try:
                     total += os.lstat(os.path.join(dirpath, name)).st_size
-                except OSError:
-                    continue
+                except OSError as exc:
+                    errors.append(exc)
     except OSError:
-        return 0
-    return total
+        return None
+    return None if errors else total
 
 
 def parse_journal_usage(text: str) -> int:
@@ -78,19 +95,22 @@ def parse_journal_usage(text: str) -> int:
     return int(float(match.group(1)) * _UNITS[match.group(2).upper()])
 
 
-def _apt_cache_size() -> int:
+def _apt_cache_size() -> Optional[int]:
     return du_size("/var/cache/apt/archives")
 
 
-def _journal_size() -> int:
+def _journal_size() -> Optional[int]:
     if not utils.has_command("journalctl"):
-        return 0
+        return None
     result = utils.run_cmd(["journalctl", "--disk-usage"], quiet=True)
-    return parse_journal_usage(result.out) if result.ok else 0
+    if not result.ok or not _JOURNAL_RE.search(result.out or ""):
+        return None
+    return parse_journal_usage(result.out)
 
 
 def scan_cleanable() -> List[dict]:
-    """Return every cleanable item with its current size, largest first."""
+    """Return cleanables, with ``None`` for sizes that could not be measured."""
+    journal_size = _journal_size()
     items = [
         {"key": "apt_cache",
          "label": "APT package cache",
@@ -98,8 +118,12 @@ def scan_cleanable() -> List[dict]:
          "size": _apt_cache_size(), "root": True},
         {"key": "journal",
          "label": "System journal logs",
-         "detail": "systemd logs; cleaning keeps the most recent 100 MB",
-         "size": _journal_size(), "root": True},
+         "detail": "Archived logs only; vacuuming keeps at least 100 MB. Estimate may be lower.",
+         # journalctl --disk-usage includes active files which cannot be
+         # vacuumed. The amount above the retention limit is an upper bound,
+         # not a promise that this much space will actually be recovered.
+         "size": max(0, journal_size - 100 * 1024 ** 2) if journal_size is not None else None,
+         "root": True},
     ]
     items.extend(
         {
@@ -111,7 +135,7 @@ def scan_cleanable() -> List[dict]:
         }
         for key, info in USER_CLEAN_INFO.items()
     )
-    items.sort(key=lambda item: item["size"], reverse=True)
+    items.sort(key=lambda item: item["size"] if item["size"] is not None else -1, reverse=True)
     return items
 
 
@@ -136,6 +160,9 @@ def clean_user_paths(keys: List[str], log=None) -> utils.Outcome:
     errors: List[str] = []
     for key, path in paths:
         try:
+            if os.path.islink(path):
+                errors.append("{}: cleanable directory is a symbolic link".format(path))
+                continue
             if not os.path.isdir(path):
                 continue
             for name in os.listdir(path):
@@ -162,8 +189,7 @@ def clean_apt_cache(log=None) -> utils.Outcome:
 
 def vacuum_journal(log=None) -> utils.Outcome:
     report = utils.Report(log)
-    report.run(["journalctl", "--vacuum-size=100M"], use_pkexec=True, mutate=True,
-               allow_failure=True)
+    report.run(["journalctl", "--vacuum-size=100M"], use_pkexec=True, mutate=True)
     return report.finish("System journal vacuumed to 100 MB.",
                          "Could not vacuum the system journal")
 
@@ -195,4 +221,5 @@ def build_clean_actions(selected: List[dict]) -> List[tuple]:
 
 
 def total_size(items: List[dict]) -> int:
-    return sum(int(item.get("size", 0)) for item in items)
+    """Sum known sizes; callers must separately disclose unknown entries."""
+    return sum(int(item.get("size") or 0) for item in items)

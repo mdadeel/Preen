@@ -47,85 +47,143 @@ def _load_average_text() -> str:
     return "{:.2f}, {:.2f}, {:.2f}".format(load[0], load[1], load[2])
 
 
-def _fallback_swap():
+def _proc_memory_values():
+    """Read Linux memory counters; absent/unreadable counters stay unknown."""
+    values = {}
     try:
-        values = {}
         with open("/proc/meminfo", "r", encoding="utf-8") as handle:
             for line in handle:
                 key, value = line.split(":", 1)
                 values[key] = int(value.strip().split()[0]) * 1024
-        total = values.get("SwapTotal", 0)
-        free = values.get("SwapFree", 0)
-        used = max(0, total - free)
-        percent = round(100.0 * used / total, 1) if total else 0.0
-        return percent, used, total
     except (OSError, ValueError, IndexError):
-        return 0.0, 0, 0
+        return {}
+    return values
+
+
+def _fallback_swap():
+    values = _proc_memory_values()
+    if "SwapTotal" not in values or "SwapFree" not in values:
+        return None, None, None
+    total = values["SwapTotal"]
+    used = max(0, total - values["SwapFree"])
+    return (round(100.0 * used / total, 1) if total else 0.0, used, total)
 
 
 def _fallback_memory():
+    values = _proc_memory_values()
+    total = values.get("MemTotal")
+    available = values.get("MemAvailable")
+    if not total or available is None:
+        return None, None, None
+    used = max(0, total - available)
+    return round(100.0 * used / total, 1), used, total
+
+
+def _fallback_cpu():
+    """Sample /proc/stat rather than presenting a fabricated zero percent."""
+    def sample():
+        with open("/proc/stat", "r", encoding="utf-8") as handle:
+            fields = handle.readline().split()
+        if not fields or fields[0] != "cpu" or len(fields) < 5:
+            raise ValueError("CPU counters unavailable")
+        # The first eight fields are non-overlapping (guest is already
+        # included in user/nice). iowait counts as idle.
+        numbers = [int(value) for value in fields[1:9]]
+        idle = numbers[3] + (numbers[4] if len(numbers) > 4 else 0)
+        return sum(numbers), idle
+
     try:
-        values = {}
-        with open("/proc/meminfo", "r", encoding="utf-8") as handle:
-            for line in handle:
-                key, value = line.split(":", 1)
-                values[key] = int(value.strip().split()[0]) * 1024
-        total = values.get("MemTotal", 0)
-        available = values.get("MemAvailable", total)
-        used = total - available
-        return round(100.0 * used / total, 1) if total else 0.0, used, total
+        first_total, first_idle = sample()
+        time.sleep(0.12)
+        total, idle = sample()
+        delta = total - first_total
+        if delta <= 0:
+            return None
+        return round(max(0.0, min(100.0, 100.0 * (1 - (idle - first_idle) / delta))), 1)
     except (OSError, ValueError, IndexError):
-        return 0.0, 0, 0
+        return None
 
 
 def get_system_info() -> Dict[str, str]:
+    # Each counter is independent: a failure in one must not hide the rest or
+    # turn a missing reading into a plausible-looking zero.
+    cpu = None
+    cores = os.cpu_count()
     if psutil is not None:
-        cpu = psutil.cpu_percent(interval=0.2)
-        mem = psutil.virtual_memory()
-        mem_percent, mem_used, mem_total = mem.percent, mem.used, mem.total
-        disk = psutil.disk_usage("/")
-        disk_percent, disk_used, disk_total = disk.percent, disk.used, disk.total
-        swap = psutil.swap_memory()
-        swap_percent, swap_used, swap_total = swap.percent, swap.used, swap.total
-        uptime = time.time() - psutil.boot_time()
-        cores = psutil.cpu_count(logical=True) or 1
-    else:
-        cpu, cores = 0.0, 1
-        mem_percent, mem_used, mem_total = _fallback_memory()
-        swap_percent, swap_used, swap_total = _fallback_swap()
-        disk_percent, disk_used, disk_total = 0.0, 0, 0
+        try:
+            cpu = psutil.cpu_percent(interval=0.2)
+            cores = psutil.cpu_count(logical=True) or cores
+        except Exception:
+            pass
+    if cpu is None:
+        cpu = _fallback_cpu()
+
+    mem_percent, mem_used, mem_total = _fallback_memory()
+    swap_percent, swap_used, swap_total = _fallback_swap()
+    disk_percent, disk_used, disk_total = None, None, None
+    uptime = None
+    if psutil is not None:
+        try:
+            mem = psutil.virtual_memory()
+            mem_percent, mem_used, mem_total = mem.percent, mem.used, mem.total
+        except Exception:
+            pass
+        try:
+            swap = psutil.swap_memory()
+            swap_percent, swap_used, swap_total = swap.percent, swap.used, swap.total
+        except Exception:
+            pass
+        try:
+            disk = psutil.disk_usage("/")
+            disk_percent, disk_used, disk_total = disk.percent, disk.used, disk.total
+        except Exception:
+            pass
+        try:
+            uptime = time.time() - psutil.boot_time()
+        except Exception:
+            pass
+    if disk_total is None:
         try:
             stat = os.statvfs("/")
             disk_total = stat.f_blocks * stat.f_frsize
             disk_used = (stat.f_blocks - stat.f_bfree) * stat.f_frsize
-            disk_percent = round(100.0 * disk_used / disk_total, 1) if disk_total else 0.0
+            disk_percent = round(100.0 * disk_used / disk_total, 1) if disk_total else None
         except OSError:
             pass
+    if uptime is None:
         try:
             with open("/proc/uptime", "r", encoding="utf-8") as handle:
                 uptime = float(handle.read().split()[0])
-        except (OSError, ValueError):
-            uptime = 0.0
+        except (OSError, ValueError, IndexError):
+            pass
 
     power = ""
     if has_command("powerprofilesctl"):
         result = run_cmd(["powerprofilesctl", "get"], quiet=True)
         power = result.out.strip() if result.ok else ""
 
-    gib = 1024.0 ** 3
+    def percent(value):
+        return str(round(value, 1)) if value is not None else "Unavailable"
+
+    def capacity(used, total):
+        if used is None or total is None:
+            return "Unavailable"
+        gib = 1024.0 ** 3
+        return "{:.1f} / {:.1f} GiB".format(used / gib, total / gib)
+
     return {
-        "cpu_percent": str(round(cpu, 1)),
-        "cpu_cores": str(cores),
-        "mem_percent": str(round(mem_percent, 1)),
-        "mem_used": "{:.1f} / {:.1f} GiB".format(mem_used / gib, mem_total / gib),
-        "disk_percent": str(round(disk_percent, 1)),
-        "disk_used": "{:.1f} / {:.1f} GiB".format(disk_used / gib, disk_total / gib),
-        "swap_percent": str(round(swap_percent, 1)),
-        "swap_used": "{:.1f} / {:.1f} GiB".format(swap_used / gib, swap_total / gib),
+        "cpu_percent": percent(cpu),
+        "cpu_cores": str(cores) if cores else "Unavailable",
+        "mem_percent": percent(mem_percent),
+        "mem_used": capacity(mem_used, mem_total),
+        "disk_percent": percent(disk_percent),
+        "disk_used": capacity(disk_used, disk_total),
+        "swap_percent": percent(swap_percent),
+        "swap_used": capacity(swap_used, swap_total),
         "load_average": _load_average_text(),
         "os": _os_pretty_name(),
         "kernel": platform.uname().release,
-        "uptime": _uptime_text(uptime),
+        "uptime": _uptime_text(uptime) if uptime is not None else "Unavailable",
         "power_profile": power,
     }
 

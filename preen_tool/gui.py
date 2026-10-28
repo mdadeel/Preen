@@ -11,9 +11,11 @@ Design rules:
 """
 from __future__ import annotations
 
+import os
 import threading
 import traceback
 from collections import deque
+from datetime import datetime
 
 import gi
 
@@ -39,386 +41,219 @@ APP_NAME = "Preen"
 APP_ID = "io.github.mdadeel.Preen"
 MAX_LOG_LINES = 4000
 
-# Small, purely cosmetic stylesheet. Wrapped in try/except at load time:
-# a missing theme feature must never prevent the app from starting.
-# Every colour is a named theme colour (or an alpha of one), so the whole UI
-# follows the system light/dark theme, except the sidebar tiles, which use
-# fixed macOS-system-palette accents that stay vibrant in both modes.
-# @accent_color is not defined in GTK 3 themes; @theme_selected_bg_color
-# plays that role.
+# GTK 3 design tokens. Keeping the palette and control states together makes
+# all pages (and native GTK dialogs) read as one application. No system theme
+# files are changed.
 _CSS = b"""
-/* ============================================================
-   Preen GTK theme, macOS System Settings (Sequoia) inspired.
-   Flat fills only, no gradients. Light and dark both work by
-   riding the Adwaita @theme_* tokens; the accent is the macOS
-   system blue, which reads correctly in both schemes.
-   ============================================================ */
-@define-color mac_blue #0a84ff;
-@define-color mac_blue_press #0066d6;
-@define-color mac_green #30d158;
-@define-color mac_purple #bf5af2;
-@define-color mac_orange #ff9f0a;
-@define-color mac_pink #ff375f;
-@define-color mac_teal #64d2ff;
-@define-color mac_slate #8e939c;
-@define-color hairline alpha(@theme_fg_color, 0.09);
-@define-color soft_fill alpha(@theme_fg_color, 0.06);
+@define-color preen_bg #202124;
+@define-color preen_sidebar #1b1c1e;
+@define-color preen_surface #282a2d;
+@define-color preen_elevated #303236;
+@define-color preen_text #f1f3f4;
+@define-color preen_muted #a5a9b0;
+@define-color preen_border #3b3e42;
+@define-color preen_accent #3584e4;
+@define-color preen_success #57a773;
+@define-color preen_warning #e5a84b;
+@define-color preen_error #e45b5b;
 
-* {
-    font-family: -apple-system, "SF Pro Text", "Inter", "Segoe UI",
-                 "Cantarell", "Ubuntu", sans-serif;
-}
-
-/* ----- Window: flat neutral canvas, white grouped cards sit on it ----- */
-window {
-    background-color: @theme_bg_color;
-}
-
-/* ----- Flat header bar ----- */
+* { font-family: Cantarell, Inter, Ubuntu, sans-serif; }
+window, dialog { background-color: @preen_bg; color: @preen_text; }
+label { color: @preen_text; }
 headerbar {
     background-image: none;
-    background-color: @theme_bg_color;
-    border-bottom: 1px solid @hairline;
+    background-color: @preen_bg;
+    border-bottom: 1px solid @preen_border;
     box-shadow: none;
     min-height: 44px;
-    padding: 4px 8px;
+    padding: 3px 12px;
 }
-headerbar button:not(:hover):not(:active):not(:checked) {
-    background-image: none;
-    background-color: transparent;
+headerbar .header-title { font-size: 0.95em; font-weight: 600; }
+headerbar button.titlebutton {
+    background: transparent;
     border-color: transparent;
     box-shadow: none;
-}
-headerbar entry, headerbar > box entry { border-radius: 999px; }
-
-/* ----- Simulate mode pill ----- */
-.simulate-banner {
-    background-color: alpha(@warning_color, 0.22);
-    color: @theme_fg_color;
-    border-radius: 999px;
-    padding: 3px 12px;
-    font-weight: 600;
-    font-size: 0.9em;
-    letter-spacing: 0.03em;
-}
-
-/* ----- Bottom status bar ----- */
-actionbar {
-    background-image: none;
-    background-color: @theme_bg_color;
-    border-top: 1px solid @hairline;
-    padding: 4px 12px;
-}
-
-/* ----- Sidebar: macOS System Settings ----- */
-.sidebar {
-    background-color: alpha(@theme_base_color, 0.5);
-    border-right: 1px solid @hairline;
-    padding: 10px 10px 12px 10px;
-    min-width: 232px;
-}
-.sidebar .sidebar-search {
-    margin: 4px 6px 10px 6px;
-    border-radius: 999px;
-    min-height: 30px;
-}
-.sidebar-section {
-    color: alpha(@theme_fg_color, 0.48);
-    font-size: 0.76em;
-    font-weight: 700;
-    letter-spacing: 0.07em;
-    padding: 14px 12px 5px 12px;
-}
-.page-row {
-    border-radius: 8px;
-    padding: 5px 10px;
-    margin: 1px 2px;
-    min-height: 34px;
-}
-.page-row:hover:not(:selected) {
-    background-color: @soft_fill;
-}
-.page-row:selected {
-    background-color: @mac_blue;
-    color: #ffffff;
-}
-.page-row:selected label { color: #ffffff; font-weight: 700; }
-
-/* Coloured symbol tiles, the macOS sidebar icon set */
-.tile {
-    border-radius: 7px;
-    min-width: 28px;
-    min-height: 28px;
-}
-.tile image {
-    color: #ffffff;
-    -gtk-icon-shadow: none;
-}
-.tile-blue   { background-image: none; background-color: @mac_blue; }
-.tile-green  { background-image: none; background-color: @mac_green; }
-.tile-purple { background-image: none; background-color: @mac_purple; }
-.tile-orange { background-image: none; background-color: @mac_orange; }
-.tile-pink   { background-image: none; background-color: @mac_pink; }
-.tile-teal   { background-image: none; background-color: @mac_teal; }
-.tile-slate  { background-image: none; background-color: @mac_slate; }
-
-/* ----- Typography ----- */
-.page-title { font-size: 1.5em; font-weight: 700; letter-spacing: -0.02em; }
-.page-subtitle { color: alpha(@theme_fg_color, 0.6); font-size: 0.95em; }
-.card-title { font-size: 1.02em; font-weight: 700; letter-spacing: -0.01em; }
-.hint-label, .dim-label { color: alpha(@theme_fg_color, 0.55); font-size: 0.9em; }
-.counter-label { color: alpha(@theme_fg_color, 0.55); font-size: 0.9em; }
-.settings-title { font-weight: 600; }
-.settings-sub { color: alpha(@theme_fg_color, 0.55); font-size: 0.88em; }
-
-/* ----- Grouped inset cards ----- */
-.card {
-    background-color: @theme_base_color;
-    border: 1px solid @hairline;
-    border-radius: 12px;
-    padding: 18px 20px;
-}
-
-/* Inset setting rows: hairline separators like System Settings */
-.settings-row {
-    min-height: 40px;
-    padding: 7px 2px;
-    border-bottom: 1px solid @hairline;
-}
-.settings-row:last-child { border-bottom: none; }
-.settings-row + .dim-label { margin-top: 10px; }
-.settings-row button.flat { padding-left: 0; }
-
-/* ----- Dashboard hero + stat cards ----- */
-.hero-card {
-    background-color: alpha(@mac_blue, 0.09);
-    border: 1px solid alpha(@mac_blue, 0.25);
-    border-radius: 14px;
-    padding: 20px;
-}
-.hero-os { font-size: 1.3em; font-weight: 700; letter-spacing: -0.01em; }
-.hero-meta { color: alpha(@theme_fg_color, 0.6); }
-.stat-card {
-    background-color: @theme_base_color;
-    border: 1px solid @hairline;
-    border-radius: 12px;
-    padding: 14px 16px;
-}
-.stat-value { font-size: 1.35em; font-weight: 700; letter-spacing: -0.01em; }
-.stat-name { color: alpha(@theme_fg_color, 0.55); font-weight: 600; }
-.stat-card progressbar trough {
-    background-color: alpha(@theme_fg_color, 0.12);
-    border: none;
-    border-radius: 999px;
-    min-height: 6px;
-}
-.stat-card progressbar progress {
-    border-radius: 999px;
-    min-height: 6px;
-    border: none;
-}
-.stat-cpu progressbar progress  { background-color: @mac_blue; }
-.stat-mem progressbar progress  { background-color: @mac_purple; }
-.stat-disk progressbar progress { background-color: @mac_green; }
-.stat-swap progressbar progress { background-color: @mac_teal; }
-
-/* ----- Badges & chips ----- */
-.chip {
-    background-color: @soft_fill;
-    border-radius: 999px;
-    padding: 3px 11px;
-    font-size: 0.9em;
-}
-.chip-ok { background-color: alpha(@success_color, 0.25); }
-.chip-bad { background-color: alpha(@error_color, 0.2); }
-.chip-muted { background-color: @soft_fill; color: alpha(@theme_fg_color, 0.7); }
-.badge {
-    background-color: alpha(@mac_blue, 0.15);
-    border-radius: 999px;
-    padding: 2px 9px;
-    font-size: 0.85em;
-}
-.badge-ok { background-color: alpha(@success_color, 0.25); }
-.badge-bad { background-color: alpha(@error_color, 0.2); }
-
-/* ----- macOS capsule segmented control ----- */
-.segmented {
-    background-color: alpha(@theme_fg_color, 0.09);
-    border-radius: 999px;
-    padding: 2px;
-}
-.segmented button {
-    border: none;
-    border-radius: 999px;
-    background: transparent;
-    padding: 5px 16px;
-    font-weight: 600;
-    box-shadow: none;
-}
-.segmented button:checked,
-.segmented button:active {
-    background-color: @theme_base_color;
-    color: @theme_fg_color;
-    box-shadow: 0 1px 3px alpha(rgb(0, 0, 0), 0.18);
-}
-
-/* ----- Buttons ----- */
-button {
-    border-radius: 8px;
-    padding: 6px 14px;
-}
-button.suggested-action {
-    background-image: none;
-    background-color: @mac_blue;
-    color: #ffffff;
-    border: none;
-    border-radius: 999px;
-    padding: 7px 20px;
-    font-weight: 600;
-}
-button.suggested-action:hover { background-color: shade(@mac_blue, 1.12); }
-button.suggested-action:active { background-color: @mac_blue_press; }
-button.destructive-action {
-    background-image: none;
-    background-color: @error_color;
-    color: #ffffff;
-    border: none;
-    border-radius: 999px;
-    padding: 7px 20px;
-    font-weight: 600;
-}
-button.destructive-action:hover { background-color: shade(@error_color, 1.1); }
-button.flat { border-radius: 8px; }
-button.flat:hover { background-color: @soft_fill; }
-
-/* ----- Entries and search fields ----- */
-entry, searchbar entry {
-    border-radius: 9px;
-    padding: 6px 10px;
-    border: 1px solid @hairline;
-    background-color: @theme_base_color;
-}
-entry:focus { border-color: @mac_blue; }
-
-/* ----- Dropdowns ----- */
-combobox box, combobox > box > button.combo { border-radius: 9px; }
-button.combo {
-    border-radius: 9px;
-    padding: 6px 12px;
-    min-height: 32px;
-}
-
-/* ----- macOS capsule switches ----- */
-switch {
-    border: none;
-    border-radius: 999px;
-    background-color: alpha(@theme_fg_color, 0.2);
-    min-width: 46px;
-    min-height: 27px;
-    padding: 0;
-    background-image: none;
-}
-switch slider {
-    border-radius: 50%;
-    background-color: #ffffff;
-    min-width: 23px;
-    min-height: 23px;
-    margin: 2px;
-    border: none;
-    box-shadow: 0 1px 3px alpha(rgb(0, 0, 0), 0.3);
-}
-switch:checked { background-color: @mac_blue; }
-switch:checked slider { background-color: #ffffff; }
-
-/* ----- Sliders: thin rounded track, round knob ----- */
-scale { padding: 6px 0; }
-scale trough {
-    min-height: 4px;
-    border-radius: 999px;
-    background-color: alpha(@theme_fg_color, 0.18);
-}
-scale highlight {
-    border-radius: 999px;
-    background-color: @mac_blue;
-}
-scale slider {
-    min-width: 18px;
-    min-height: 18px;
-    border-radius: 50%;
-    background-color: #ffffff;
-    border: 1px solid alpha(rgb(0, 0, 0), 0.12);
-    box-shadow: 0 1px 3px alpha(rgb(0, 0, 0), 0.25);
-}
-
-/* ----- Checkboxes and radios: rounded squircle, blue when on ----- */
-check, check row check, radio {
-    border-radius: 5px;
-    border: 1.5px solid alpha(@theme_fg_color, 0.35);
-    background-color: @theme_base_color;
-    min-width: 18px;
-    min-height: 18px;
-}
-check:checked, radio:checked {
-    background-color: @mac_blue;
-    border-color: @mac_blue;
-}
-radio { border-radius: 50%; }
-
-/* ----- Separators and scrollbars ----- */
-separator { background-color: @hairline; }
-scrollbar { background: transparent; border: none; }
-scrollbar slider {
-    border-radius: 999px;
-    min-width: 8px;
-    min-height: 8px;
-    background-color: alpha(@theme_fg_color, 0.25);
-    border: none;
-}
-scrollbar trough { background: transparent; border: none; }
-
-/* ----- Log viewer ----- */
-textview {
-    border-radius: 10px;
     padding: 4px;
 }
-textview text {
-    background-color: @theme_base_color;
-}
-
-/* ----- Banners ----- */
-infobar { border-radius: 12px; }
-.info-banner { background-color: alpha(@mac_blue, 0.12); }
-.warning-banner { background-color: alpha(@warning_color, 0.18); }
-.error-banner { background-color: alpha(@error_color, 0.16); }
-
-/* ----- Menus and dialogs ----- */
-popover { border-radius: 12px; }
-popover modelbutton {
-    border-radius: 8px;
-    padding: 8px 14px;
-    margin: 2px 4px;
-}
-dialog { border-radius: 16px; }
-dialog > box { padding: 10px; }
-dialog button { border-radius: 999px; padding: 7px 18px; }
-
-/* ----- Step numbers and list rows ----- */
-.step-number {
-    background-color: @mac_blue;
-    color: #ffffff;
-    border-radius: 999px;
-    min-width: 24px;
-    min-height: 24px;
-    padding: 2px 4px;
+.header-status { color: @preen_muted; font-size: 0.9em; }
+.simulate-banner {
+    color: @preen_warning;
+    background-color: alpha(@preen_warning, 0.12);
+    border: 1px solid alpha(@preen_warning, 0.35);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 0.78em;
     font-weight: 700;
 }
-.app-row { padding: 9px 10px; border-bottom: 1px solid @hairline; }
+
+.sidebar {
+    background-color: @preen_sidebar;
+    border-right: 1px solid @preen_border;
+    padding: 20px 12px 12px;
+}
+.sidebar-brand { padding: 0 8px 18px; }
+.brand-icon {
+    background-color: alpha(@preen_accent, 0.16);
+    color: @preen_accent;
+    border-radius: 8px;
+    min-width: 36px;
+    min-height: 36px;
+}
+.brand-icon image { color: @preen_accent; }
+.brand-name { font-size: 1.22em; font-weight: 700; }
+.brand-caption { color: @preen_muted; font-size: 0.73em; }
+.sidebar .sidebar-search { margin: 0 2px 8px; }
+.sidebar list, list { background-color: transparent; }
+.sidebar-section {
+    color: @preen_muted;
+    font-size: 0.72em;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 13px 10px 5px;
+}
+.page-row {
+    border-left: 3px solid transparent;
+    border-radius: 6px;
+    padding: 7px 10px;
+    margin: 1px 0;
+    min-height: 22px;
+}
+.page-row image { color: @preen_muted; }
+.page-row:hover:not(:selected) { background-color: @preen_surface; }
+.page-row:selected {
+    background-color: #293747;
+    border-left-color: @preen_accent;
+}
+.page-row:selected label { color: @preen_text; font-weight: 600; }
+.page-row:selected image { color: @preen_accent; }
+.sidebar-footer { border-top: 1px solid @preen_border; padding: 12px 4px 0; }
+.sidebar-version { color: @preen_muted; font-size: 0.8em; }
+
+.page-title { font-size: 1.65em; font-weight: 700; }
+.page-subtitle { color: @preen_muted; font-size: 0.96em; }
+.card-title { font-size: 1.06em; font-weight: 700; }
+.eyebrow { color: @preen_muted; font-size: 0.75em; font-weight: 700; letter-spacing: 0.05em; }
+.hint-label, .dim-label, .counter-label, .settings-sub { color: @preen_muted; font-size: 0.9em; opacity: 1; }
+.settings-title { font-weight: 600; }
+.card {
+    background-color: @preen_surface;
+    border: 1px solid @preen_border;
+    border-radius: 9px;
+    padding: 16px;
+}
+.settings-row { min-height: 40px; padding: 8px 0; border-bottom: 1px solid @preen_border; }
+.settings-row:last-child { border-bottom: none; }
+
+.hero-card {
+    background-color: @preen_surface;
+    border: 1px solid @preen_border;
+    border-radius: 9px;
+    padding: 18px 20px;
+}
+.hero-os { font-size: 1.25em; font-weight: 700; }
+.hero-meta { color: @preen_muted; font-size: 0.92em; }
+.stat-card {
+    background-color: @preen_surface;
+    border: 1px solid @preen_border;
+    border-radius: 9px;
+    padding: 15px;
+    min-width: 145px;
+}
+.stat-card image { color: @preen_muted; }
+.stat-name { color: @preen_muted; font-weight: 600; }
+.stat-value { font-size: 1.65em; font-weight: 700; }
+.stat-detail { color: @preen_muted; font-size: 0.86em; }
+progressbar trough {
+    background-color: @preen_border;
+    border: none;
+    border-radius: 4px;
+    min-height: 4px;
+}
+progressbar progress {
+    background-color: @preen_accent;
+    border: none;
+    border-radius: 4px;
+    min-height: 4px;
+}
+.summary-value { font-size: 1.8em; font-weight: 700; }
+.summary-caption { color: @preen_muted; font-size: 0.9em; }
+.action-list { background-color: @preen_surface; border: 1px solid @preen_border; border-radius: 9px; }
+.action-list button { border: none; border-radius: 0; background: transparent; box-shadow: none; padding: 10px 14px; }
+.action-list button:hover { background-color: @preen_elevated; }
+.action-icon { color: @preen_accent; }
+.warning-line { color: @preen_warning; }
+
+.badge, .chip, .chip-muted { color: @preen_muted; font-size: 0.86em; }
+.badge-ok, .chip-ok, .status-installed { color: @preen_success; }
+.badge-bad, .chip-bad, .status-error { color: @preen_error; }
+.status-warning { color: @preen_warning; }
+.segmented { background-color: @preen_sidebar; border: 1px solid @preen_border; border-radius: 7px; padding: 2px; }
+.segmented button { background: transparent; border: none; border-radius: 5px; box-shadow: none; padding: 5px 12px; }
+.segmented button:checked { background-color: @preen_elevated; color: @preen_text; }
+
+button {
+    background-image: none;
+    background-color: @preen_elevated;
+    color: @preen_text;
+    border: 1px solid @preen_border;
+    border-radius: 7px;
+    box-shadow: none;
+    padding: 7px 12px;
+}
+button:hover { background-color: #3a3d42; }
+button:active { background-color: #43464b; }
+button:disabled { color: alpha(@preen_muted, 0.55); background-color: @preen_surface; border-color: @preen_border; }
+button.suggested-action { background-color: @preen_accent; color: #ffffff; border-color: @preen_accent; font-weight: 600; }
+button.suggested-action:hover { background-color: #4a94ee; }
+button.suggested-action:disabled { background-color: #34475c; color: #8d9bab; border-color: #34475c; }
+button.destructive-action { color: #f08080; background-color: @preen_surface; border-color: alpha(@preen_error, 0.55); }
+button.destructive-action:hover { background-color: alpha(@preen_error, 0.17); }
+button.destructive-action:disabled { color: alpha(@preen_muted, 0.55); border-color: @preen_border; }
+button.flat { background: transparent; border-color: transparent; box-shadow: none; }
+button.flat:hover { background-color: @preen_elevated; }
+button:focus, entry:focus, check:focus, switch:focus, row:focus {
+    outline-color: @preen_accent;
+    outline-style: solid;
+    outline-width: 2px;
+}
+entry {
+    background-image: none;
+    background-color: @preen_surface;
+    color: @preen_text;
+    border: 1px solid @preen_border;
+    border-radius: 7px;
+    padding: 7px 10px;
+    box-shadow: none;
+}
+entry:focus { border-color: @preen_accent; }
+entry image { color: @preen_muted; }
+check, radio { background-color: @preen_surface; border: 1px solid @preen_muted; border-radius: 4px; min-width: 16px; min-height: 16px; }
+check:checked, radio:checked { background-color: @preen_accent; border-color: @preen_accent; color: #ffffff; }
+radio { border-radius: 50%; }
+switch { background-image: none; background-color: @preen_border; border: none; border-radius: 999px; }
+switch:checked { background-color: @preen_accent; }
+switch slider { background-color: #ffffff; border-radius: 999px; }
+separator { background-color: @preen_border; }
+scrollbar { background: transparent; border: none; }
+scrollbar slider { background-color: #62666c; border-radius: 8px; min-width: 6px; min-height: 6px; border: none; }
+scrollbar trough { background: transparent; border: none; }
+
+.app-row { padding: 9px 12px; border-bottom: 1px solid @preen_border; }
 .app-row:last-child { border-bottom: none; }
-.app-row:hover { background-color: @soft_fill; }
-.list-header { padding-top: 14px; padding-bottom: 4px; }
-.snapshot-row { padding: 7px 10px; border-bottom: 1px solid @hairline; }
-.snapshot-row:last-child { border-bottom: none; }
-.snapshot-row:hover { background-color: @soft_fill; }
+.app-row:hover { background-color: alpha(@preen_text, 0.035); }
+.list-header { padding: 12px 12px 6px; }
+.list-surface { background-color: @preen_surface; border: 1px solid @preen_border; border-radius: 9px; }
+.clean-row { padding: 10px 12px; border-bottom: 1px solid @preen_border; }
+.action-bar { padding-top: 8px; border-top: 1px solid @preen_border; }
+.snapshot-row { padding: 8px 10px; border-bottom: 1px solid @preen_border; }
+textview, textview text { background-color: @preen_sidebar; color: @preen_text; }
+.log-surface { background-color: @preen_sidebar; border: 1px solid @preen_border; border-radius: 9px; padding: 8px; }
+infobar { border-radius: 7px; margin: 8px 24px 0; padding: 3px 8px; }
+.info-banner { background-color: #263a50; }
+.warning-banner { background-color: #473a26; }
+.error-banner { background-color: #4b2e30; }
+popover, menu { background-color: @preen_elevated; border: 1px solid @preen_border; border-radius: 8px; }
+dialog > box { padding: 8px; }
 """
 
 
@@ -427,7 +262,12 @@ def _escape_markup(text: str) -> str:
 
 
 class LogBuffer:
-    """Thread-safe append-only log with an in-memory copy for saving."""
+    """Thread-safe diagnostic log, with a filtered, severity-coloured view."""
+
+    _COLORS = {
+        "info": "#b8c5d4", "notice": "#a5a9b0", "warning": "#e5a84b",
+        "error": "#e45b5b", "success": "#70c28a", "simulate": "#7db5f5",
+    }
 
     def __init__(self, textbuffer: Gtk.TextBuffer, textview: Gtk.TextView):
         self.buf = textbuffer
@@ -436,25 +276,55 @@ class LogBuffer:
         self.auto_scroll = True
         self.filter_text = ""
         self._lock = threading.Lock()
+        create_tag = getattr(self.buf, "create_tag", None)
+        self._tags_available = callable(create_tag)
+        if self._tags_available:
+            for name, color in self._COLORS.items():
+                create_tag("log-" + name, foreground=color)
+
+    @staticmethod
+    def _severity(line):
+        lower = line.lower()
+        if any(marker in lower for marker in ("[error]", "[failed]", "[timeout]")):
+            return "error"
+        if "[warning]" in lower or "[warn]" in lower:
+            return "warning"
+        if "[ok]" in lower or "[success]" in lower:
+            return "success"
+        if "[simulate]" in lower:
+            return "simulate"
+        return "notice" if "[notice]" in lower else "info"
 
     def append(self, text: str):
-        text = str(text)
+        stamp = datetime.now().strftime("%H:%M:%S")
+        parts = str(text).splitlines(keepends=True)
+        lines = ["[{}] {}".format(stamp, part) for part in parts]
+        if not lines:
+            return
         with self._lock:
-            self.lines.append(text)
+            self.lines.extend(lines)
             if len(self.lines) > MAX_LOG_LINES:
                 self.lines = self.lines[-MAX_LOG_LINES:]
-        GLib.idle_add(self._append, text)
+        GLib.idle_add(self._append, lines)
 
-    def _append(self, text: str):
-        # While a filter is active the view is rebuilt on demand, so only
-        # insert lines that match the current filter.
-        if not self.filter_text or self.filter_text in text.lower():
-            end = self.buf.get_end_iter()
-            self.buf.insert(end, text)
-            if self.auto_scroll:
-                mark = self.buf.create_mark(None, self.buf.get_end_iter(), True)
-                self.view.scroll_to_mark(mark, 0.0, True, 0.0, 1.0)
-                self.buf.delete_mark(mark)
+    def _insert(self, line):
+        end = self.buf.get_end_iter()
+        if self._tags_available:
+            self.buf.insert_with_tags_by_name(end, line, "log-" + self._severity(line))
+        else:  # also keeps the headless GTK test double useful
+            self.buf.insert(end, line)
+
+    def _scroll_to_end(self):
+        if self.auto_scroll:
+            mark = self.buf.create_mark(None, self.buf.get_end_iter(), True)
+            self.view.scroll_to_mark(mark, 0.0, True, 0.0, 1.0)
+            self.buf.delete_mark(mark)
+
+    def _append(self, lines):
+        for line in lines:
+            if not self.filter_text or self.filter_text in line.lower():
+                self._insert(line)
+        self._scroll_to_end()
         if self.buf.get_line_count() > MAX_LOG_LINES:
             start = self.buf.get_start_iter()
             cutoff = self.buf.get_iter_at_line(self.buf.get_line_count() - MAX_LOG_LINES)
@@ -462,25 +332,18 @@ class LogBuffer:
         return False
 
     def set_filter(self, text: str):
-        """Keep every line in memory but show only those containing *text*."""
+        """Filter individual lines in the view, not the saved diagnostic log."""
         self.filter_text = (text or "").strip().lower()
         GLib.idle_add(self._rebuild)
 
     def _rebuild(self):
+        with self._lock:
+            lines = list(self.lines)
         self.buf.set_text("")
-        if not self.filter_text:
-            end = self.buf.get_end_iter()
-            for line in self.lines:
-                self.buf.insert(end, line)
-        else:
-            end = self.buf.get_end_iter()
-            for line in self.lines:
-                if self.filter_text in line.lower():
-                    self.buf.insert(end, line)
-        if self.auto_scroll:
-            mark = self.buf.create_mark(None, self.buf.get_end_iter(), True)
-            self.view.scroll_to_mark(mark, 0.0, True, 0.0, 1.0)
-            self.buf.delete_mark(mark)
+        for line in lines:
+            if not self.filter_text or self.filter_text in line.lower():
+                self._insert(line)
+        self._scroll_to_end()
         return False
 
     def clear(self):
@@ -501,7 +364,8 @@ class LogBuffer:
 class MainWindow(Gtk.ApplicationWindow):
     def __init__(self, app: Gtk.Application):
         super().__init__(application=app, title=APP_NAME)
-        self.set_default_size(1140, 780)
+        self.set_default_size(1180, 780)
+        self.set_size_request(720, 480)
         window_position = getattr(getattr(Gtk, "WindowPosition", None), "CENTER", None)
         if window_position is not None:
             self.set_position(window_position)
@@ -517,7 +381,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.selected_service_row = None
         self.baseline = {
             "animations_off": False, "swap": False, "zram": False,
-            "power": "balanced", "theme": "light", "round": False,
+            "power": None, "theme": "light", "round": False,
         }
         self.settings = settings_backend.load()
         if self.settings.get("simulate_on_startup"):
@@ -525,42 +389,48 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self._install_css()
 
-        # ----- Header bar (compact: icon + name, actions tucked into a menu) -----
+        # Keep the native titlebar and window controls. Page headings live in
+        # the content; the small title here provides context while scrolling.
         header = Gtk.HeaderBar()
         header.set_show_close_button(True)
+        self.header_title = Gtk.Label(label="Dashboard")
+        self.header_title.get_style_context().add_class("header-title")
+        header.set_custom_title(self.header_title)
 
-        title_box = Gtk.Box(spacing=8)
-        title_box.pack_start(self._icon("utilities-system-monitor", 18), False, False, 0)
-        app_title = Gtk.Label()
-        app_title.set_markup("<b>{}</b>".format(APP_NAME))
-        app_title.set_xalign(0)
-        title_box.pack_start(app_title, False, False, 0)
-        title_box.set_tooltip_text("System setup for Linux")
-        header.set_custom_title(title_box)
-
-        # Spinner and status label are created here but live in the bottom
-        # status bar, the header stays clean.
         self.spinner = Gtk.Spinner()
-        self.status_label = Gtk.Label(label="Ready")
+        self.status_label = Gtk.Label(label="Working…")
         self.status_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self.status_label.set_xalign(0)
-
+        self.status_label.get_style_context().add_class("header-status")
+        self.busy_box = Gtk.Box(spacing=6)
+        self.busy_box.pack_start(self.spinner, False, False, 0)
+        self.busy_box.pack_start(self.status_label, False, False, 0)
+        self.busy_box.set_no_show_all(True)
+        self.busy_box.hide()
+        header.pack_start(self.busy_box)
         header.pack_end(self._build_menu_button())
 
-        sim_box = Gtk.Box(spacing=6)
-        sim_box.set_tooltip_text("Dry-run: preview every action without changing the system")
+        sim_box = Gtk.Box(spacing=7)
+        sim_box.set_valign(Gtk.Align.CENTER)
+        sim_box.set_tooltip_text("Preview commands and file changes in Logs without changing the system")
         self.sim_switch = Gtk.Switch()
-        self.sim_switch.set_tooltip_text("Dry-run: preview every action without changing the system")
-        # Set the saved state *before* connecting, so startup does not emit a
-        # spurious signal and print a duplicate "Simulate is ON" notice.
+        self._simulation_forced = os.environ.get(utils.SIMULATE_ENV) == "1"
+        self.sim_switch.set_tooltip_text(
+            "Simulation is forced by {}".format(utils.SIMULATE_ENV) if self._simulation_forced
+            else "Preview actions without making changes. See Logs for details.")
         self.sim_switch.set_active(utils.is_simulate())
+        self.sim_switch.set_sensitive(not self._simulation_forced)
         self.sim_switch.connect("notify::active", self.on_toggle_simulate)
         sim_box.pack_start(Gtk.Label(label="Simulate"), False, False, 0)
         sim_box.pack_start(self.sim_switch, False, False, 0)
         header.pack_end(sim_box)
+        self.sim_banner = Gtk.Label(label="SIMULATION")
+        self.sim_banner.set_tooltip_text("No changes will be made while simulation is enabled")
+        self.sim_banner.get_style_context().add_class("simulate-banner")
+        self.sim_banner.set_valign(Gtk.Align.CENTER)
+        self.sim_banner.set_no_show_all(True)
+        header.pack_end(self.sim_banner)
         self.set_titlebar(header)
 
-        # ----- Global banners -----
         self.banner = Gtk.InfoBar()
         self.banner_label = Gtk.Label(label="")
         self.banner_label.set_line_wrap(True)
@@ -570,17 +440,13 @@ class MainWindow(Gtk.ApplicationWindow):
         self.banner.connect("response", self._dismiss_banner)
         self.banner.set_no_show_all(True)
         self.banner.hide()
+        self._notification_generation = 0
+        self._banner_level = None
 
-        self.sim_banner = Gtk.Label(
-            label="SIMULATE MODE: commands are previewed in Logs; nothing will be changed.")
-        self.sim_banner.set_name("simulate-banner")
-        self.sim_banner.get_style_context().add_class("simulate-banner")
-        self.sim_banner.set_no_show_all(True)
-
-        # ----- Main layout -----
         self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE,
-                               transition_duration=180)
-        self.stack.set_transition_duration(180)
+                               transition_duration=120)
+        self.stack.set_hhomogeneous(False)
+        self.stack.set_vhomogeneous(False)
         self.sidebar_list = Gtk.ListBox()
         self.sidebar_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.sidebar_list.connect("row_selected", self._on_sidebar_row_selected)
@@ -588,15 +454,34 @@ class MainWindow(Gtk.ApplicationWindow):
         self._sidebar_query = ""
         self.stack.connect("notify::visible-child-name", self._on_stack_page_changed)
         sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        sidebar.set_size_request(232, -1)
         sidebar.get_style_context().add_class("sidebar")
 
-        # macOS-style search pinned above the sidebar sections. It lives
-        # outside the ListBox, so row/header counts never change while
-        # filtering toggles row visibility instead.
+        brand = Gtk.Box(spacing=10)
+        brand.get_style_context().add_class("sidebar-brand")
+        brand_icon = Gtk.Box()
+        brand_icon.get_style_context().add_class("brand-icon")
+        glyph = self._icon("utilities-system-monitor-symbolic", 20)
+        glyph.set_halign(Gtk.Align.CENTER)
+        glyph.set_valign(Gtk.Align.CENTER)
+        brand_icon.pack_start(glyph, True, True, 0)
+        brand.pack_start(brand_icon, False, False, 0)
+        brand_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        brand_name = Gtk.Label(label=APP_NAME)
+        brand_name.set_xalign(0)
+        brand_name.get_style_context().add_class("brand-name")
+        brand_caption = Gtk.Label(label="SYSTEM UTILITY")
+        brand_caption.set_xalign(0)
+        brand_caption.get_style_context().add_class("brand-caption")
+        brand_text.pack_start(brand_name, False, False, 0)
+        brand_text.pack_start(brand_caption, False, False, 0)
+        brand.pack_start(brand_text, True, True, 0)
+        sidebar.pack_start(brand, False, False, 0)
+
         self.sidebar_search = Gtk.SearchEntry()
-        self.sidebar_search.set_placeholder_text("Search")
+        self.sidebar_search.set_placeholder_text("Find a page")
         self.sidebar_search.get_style_context().add_class("sidebar-search")
-        self.sidebar_search.set_tooltip_text("Find a settings page")
+        self.sidebar_search.set_tooltip_text("Search navigation pages")
         self.sidebar_search.connect("search-changed", self._on_sidebar_search_changed)
         sidebar.pack_start(self.sidebar_search, False, False, 0)
         sidebar_scroll = Gtk.ScrolledWindow()
@@ -604,31 +489,39 @@ class MainWindow(Gtk.ApplicationWindow):
         sidebar_scroll.add(self.sidebar_list)
         sidebar.pack_start(sidebar_scroll, True, True, 0)
 
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        sidebar_footer = Gtk.Box(spacing=8)
+        sidebar_footer.get_style_context().add_class("sidebar-footer")
+        version = Gtk.Label(label="v" + __version__)
+        version.get_style_context().add_class("sidebar-version")
+        version.set_xalign(0)
+        sidebar_footer.pack_start(version, True, True, 0)
+        preferences = Gtk.Button()
+        preferences.get_style_context().add_class("flat")
+        preferences.set_image(self._icon("preferences-system-symbolic", 16))
+        preferences.set_tooltip_text("Preferences")
+        preferences.connect("clicked", self.on_preferences)
+        sidebar_footer.pack_end(preferences, False, False, 0)
+        sidebar.pack_start(sidebar_footer, False, False, 0)
+
+        main = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        main.pack_start(self.banner, False, False, 0)
+        main.pack_start(self.stack, True, True, 0)
         panes = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         panes.pack_start(sidebar, False, False, 0)
-        panes.pack_start(self.stack, True, True, 0)
-        body.pack_start(panes, True, True, 0)
+        panes.pack_start(main, True, True, 0)
+        self.add(panes)
 
-        # ----- Bottom dock: alerts slide up above a slim status bar -----
-        footer = Gtk.ActionBar()
-        status_box = Gtk.Box(spacing=8)
-        status_box.pack_start(self.spinner, False, False, 0)
-        status_box.pack_start(self.status_label, False, False, 0)
-        footer.pack_start(status_box)
-        footer.pack_end(self.sim_banner)
-        bottom = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        bottom.pack_start(self.banner, False, False, 0)
-        bottom.pack_start(footer, False, False, 0)
-        body.pack_start(bottom, False, False, 0)
-        self.add(body)
-
-        # ----- Shared log view -----
         self.log_view = Gtk.TextView()
         self.log_view.set_editable(False)
+        self.log_view.set_cursor_visible(False)
         self.log_view.set_monospace(True)
-        self.log_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.log_view.set_wrap_mode(Gtk.WrapMode.NONE)
+        self.log_view.set_pixels_above_lines(2)
+        self.log_view.set_left_margin(8)
+        self.log_view.set_right_margin(8)
         self.log_buf = LogBuffer(self.log_view.get_buffer(), self.log_view)
+        if self._style_error:
+            self.log_buf.append("[error] Could not load the Preen stylesheet: {}\n".format(self._style_error))
 
         # ----- Pages (Dashboard first: it is the landing page) -----
         self._build_dashboard_page()
@@ -656,6 +549,13 @@ class MainWindow(Gtk.ApplicationWindow):
     # Small UI factories
     # ------------------------------------------------------------------
     def _install_css(self):
+        self._style_error = None
+        try:
+            gtk_settings = Gtk.Settings.get_default()
+            if gtk_settings is not None:
+                gtk_settings.set_property("gtk-application-prefer-dark-theme", True)
+        except (AttributeError, TypeError):
+            pass  # The application stylesheet still supplies its own palette.
         try:
             provider = Gtk.CssProvider()
             provider.load_from_data(_CSS)
@@ -663,8 +563,10 @@ class MainWindow(Gtk.ApplicationWindow):
             if screen is not None:
                 Gtk.StyleContext.add_provider_for_screen(
                     screen, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        except Exception:  # cosmetics only
-            pass
+        except Exception as exc:
+            # A theme problem should not prevent startup, but it must remain
+            # visible to someone diagnosing an unexpectedly unstyled window.
+            self._style_error = str(exc)
 
     def _header_button(self, label, callback, tooltip):
         button = Gtk.Button(label=label)
@@ -717,7 +619,7 @@ class MainWindow(Gtk.ApplicationWindow):
             return Gtk.Label(label="•")
 
     def _segmented(self, options, active_index=0, tooltip=None):
-        """A macOS-style segmented control.
+        """A compact GTK linked-button source selector.
 
         Returned box behaves like a ComboBoxText for callers: it exposes
         ``get_active_text()`` and ``set_active(index)``.
@@ -805,24 +707,27 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _page(self, name, sidebar_title, title, subtitle, icon=None):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        box.set_border_width(22)
-        header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
-        title_row = Gtk.Box(spacing=10)
-        if icon:
-            title_row.pack_start(self._icon(icon, 20), False, False, 0)
-        heading = Gtk.Label()
-        heading.set_markup("<b>{}</b>".format(_escape_markup(title)))
+        box.set_border_width(24)
+        header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        heading = Gtk.Label(label=title)
         heading.set_xalign(0)
         heading.get_style_context().add_class("page-title")
-        title_row.pack_start(heading, False, False, 0)
-        header.pack_start(title_row, False, False, 0)
+        header.pack_start(heading, False, False, 0)
         sub = Gtk.Label(label=subtitle)
         sub.set_xalign(0)
         sub.set_line_wrap(True)
         sub.get_style_context().add_class("page-subtitle")
         header.pack_start(sub, False, False, 0)
         box.pack_start(header, False, False, 0)
-        self.stack.add_titled(box, name, sidebar_title)
+        # Settings/overview pages can grow vertically; list-based pages keep
+        # their own expanding scroller and persistent bottom actions.
+        if name in ("dashboard", "optimize", "customize", "services", "backup"):
+            scroll = Gtk.ScrolledWindow()
+            scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+            scroll.add(box)
+            self.stack.add_titled(scroll, name, sidebar_title)
+        else:
+            self.stack.add_titled(box, name, sidebar_title)
         return box
 
     def _frame(self, label, icon=None, tight=False):
@@ -843,11 +748,11 @@ class MainWindow(Gtk.ApplicationWindow):
         card.pack_start(head, False, False, 0)
         inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                         spacing=0 if tight else 10)
-        card.pack_start(inner, False, False, 0)
+        card.pack_start(inner, True, True, 0)
         return card, inner
 
     def _toggle_row(self, title, subtitle=None, tooltip=None):
-        """A macOS-style grouped row: title (and sub-caption) left, switch right.
+        """A grouped settings row: title (and sub-caption) left, switch right.
 
         Returns (row_box, switch); callers keep the switch under the same
         attribute name the old check buttons used, so get_active/set_active
@@ -919,27 +824,41 @@ class MainWindow(Gtk.ApplicationWindow):
             box.pack_start(widget, False, False, 0)
         return box
 
+    @staticmethod
+    def _flow(*widgets):
+        """A compact button row that wraps instead of clipping when resized."""
+        flow = Gtk.FlowBox()
+        flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        flow.set_min_children_per_line(1)
+        flow.set_max_children_per_line(10)
+        flow.set_row_spacing(8)
+        flow.set_column_spacing(8)
+        flow.set_homogeneous(False)
+        for widget in widgets:
+            flow.add(widget)
+        return flow
+
     # ------------------------------------------------------------------
     # Sidebar navigation
     # ------------------------------------------------------------------
-    # Grouped the way macOS System Settings groups its sidebar.
+    # Stable page IDs are shared with preferences and the stack.
     SIDEBAR_SECTIONS = [
         ("Overview", [
-            ("dashboard", "Dashboard", "computer-symbolic", "tile-blue"),
+            ("dashboard", "Dashboard", "view-grid-symbolic", ""),
         ]),
         ("Software", [
-            ("install", "Install Apps", "system-software-install-symbolic", "tile-green"),
-            ("manage", "Manage Apps", "application-x-executable-symbolic", "tile-purple"),
+            ("install", "Install Apps", "system-software-install-symbolic", ""),
+            ("manage", "Manage Apps", "application-x-executable-symbolic", ""),
         ]),
         ("System", [
-            ("deepclean", "Deep Clean", "user-trash-symbolic", "tile-orange"),
-            ("optimize", "Optimize System", "speedometer-symbolic", "tile-pink"),
-            ("services", "Services", "system-run-symbolic", "tile-teal"),
-            ("backup", "Backup & Restore", "drive-multidisk-symbolic", "tile-purple"),
+            ("deepclean", "Deep Clean", "user-trash-symbolic", ""),
+            ("optimize", "Optimize System", "preferences-system-symbolic", ""),
+            ("services", "Services", "system-run-symbolic", ""),
+            ("backup", "Backup & Restore", "document-save-symbolic", ""),
         ]),
         ("Personal", [
-            ("customize", "Customize Look", "preferences-desktop-appearance", "tile-blue"),
-            ("logs", "Logs", "document-open-recent-symbolic", "tile-slate"),
+            ("customize", "Customize Look", "preferences-desktop-theme-symbolic", ""),
+            ("logs", "Logs", "text-x-generic-symbolic", ""),
         ]),
     ]
 
@@ -955,20 +874,15 @@ class MainWindow(Gtk.ApplicationWindow):
             header_row.add(header)
             self.sidebar_list.add(header_row)
 
-            for name, label, icon, tile_class in pages:
+            for name, label, icon, _unused in pages:
                 row = Gtk.ListBoxRow()
                 row.page_name = name
                 row.search_text = label.lower()
                 row.get_style_context().add_class("page-row")
-                line = Gtk.Box(spacing=10)
-                tile = Gtk.Box()
-                tile.get_style_context().add_class("tile")
-                tile.get_style_context().add_class(tile_class)
-                glyph = self._icon(icon, 15)
-                glyph.set_halign(Gtk.Align.CENTER)
+                line = Gtk.Box(spacing=12)
+                glyph = self._icon(icon, 16)
                 glyph.set_valign(Gtk.Align.CENTER)
-                tile.pack_start(glyph, True, True, 0)
-                line.pack_start(tile, False, False, 0)
+                line.pack_start(glyph, False, False, 0)
                 text = Gtk.Label(label=label)
                 text.set_xalign(0)
                 line.pack_start(text, True, True, 0)
@@ -993,7 +907,7 @@ class MainWindow(Gtk.ApplicationWindow):
     def _sidebar_filter(self, row):
         if not self._sidebar_query:
             return True
-        # Section headers disappear while searching, macOS Settings style.
+        # Section headers disappear while searching.
         if getattr(row, "page_name", None) is None:
             return False
         return self._sidebar_query in getattr(row, "search_text", "")
@@ -1002,6 +916,11 @@ class MainWindow(Gtk.ApplicationWindow):
         name = self.stack.get_visible_child_name()
         if not name:
             return
+        for _section, pages in self.SIDEBAR_SECTIONS:
+            for page_name, title, _icon, _unused in pages:
+                if page_name == name:
+                    self.header_title.set_text(title)
+                    break
         for row in self.sidebar_list.get_children():
             if getattr(row, "page_name", None) == name:
                 self.sidebar_list.select_row(row)
@@ -1026,7 +945,9 @@ class MainWindow(Gtk.ApplicationWindow):
                 return
             func, args, done = self._queue.popleft()
             self._busy = True
-        GLib.idle_add(self._set_busy_ui, True)
+        # submit() is called on the GTK thread; disable immediately so a
+        # double click cannot enqueue a second command before an idle event.
+        self._set_busy_ui(True)
 
         def target():
             try:
@@ -1036,7 +957,7 @@ class MainWindow(Gtk.ApplicationWindow):
                     result = func(*args)
             except Exception as exc:  # never let a worker die silently
                 self.log_buf.append("[error] {}: {}\n{}\n".format(
-                    type(exc).__name__, exc, traceback.format_exc(limit=6)))
+                    type(exc).__name__, exc, traceback.format_exc()))
                 result = utils.fail("{}: {}".format(type(exc).__name__, exc))
             GLib.idle_add(self._finish, result, done)
 
@@ -1045,32 +966,59 @@ class MainWindow(Gtk.ApplicationWindow):
     def _set_busy_ui(self, busy):
         self.spinner.start() if busy else self.spinner.stop()
         self.status_label.set_text("Working…" if busy else "Ready")
+        if busy:
+            self.busy_box.set_no_show_all(False)
+            self.busy_box.show_all()
+        else:
+            self.busy_box.hide()
+            self.busy_box.set_no_show_all(True)
+        # Simulation cannot be switched off halfway through a queued batch.
+        self.sim_switch.set_sensitive(not busy and not self._simulation_forced)
         for widget in self.action_widgets:
             widget.set_sensitive(not busy)
+        for button in self._segmented_buttons(self.install_source):
+            button.set_sensitive(not busy)
+        self._sync_power_control()
+        if not busy:
+            self._update_install_counter()
+            self._update_manage_counter()
+            self._update_clean_counter()
+            self._update_service_actions()
+            self._on_swap_toggle(None)
         return False
 
     def _finish(self, result, done):
-        with self._busy_lock:
-            self._busy = False
-        self._set_busy_ui(False)
-        self._pump_queue()
+        # Remain busy while a completion callback runs: callbacks may enqueue
+        # refreshes, and no other worker should race their widget updates.
         if isinstance(result, utils.Outcome):
+            message = result.message
+            if result.ok and utils.is_simulate() and "simulat" not in message.lower():
+                message = "Simulation complete. No changes were made."
             prefix = "[ok] " if result.ok else "[failed] "
-            self.log_buf.append(prefix + result.message + "\n")
+            self.log_buf.append(prefix + message + "\n")
             for detail in result.details:
                 self.log_buf.append("    - " + detail + "\n")
             if result.ok:
-                self.status_label.set_text(result.message)
+                self._notify(message, "info", log=False)
             else:
-                summary = result.message
+                summary = message
                 if result.details:
                     summary += ": " + result.details[0][:180]
-                self._notify("Action failed: " + summary, "error")
+                self._notify("Action failed: " + summary, "error", log=False)
         if done is not None:
             try:
                 done(result)
             except Exception as exc:
-                self.log_buf.append("[error] UI update failed: {}\n".format(exc))
+                detail = traceback.format_exc()
+                self.log_buf.append("[error] UI update failed: {}\n{}\n".format(exc, detail))
+                self._notify("The interface could not refresh. See Logs for details.",
+                             "error", log=False)
+        with self._busy_lock:
+            self._busy = False
+        if self._queue:
+            self._pump_queue()
+        else:
+            self._set_busy_ui(False)
         return False
 
     def _start_initial_tasks(self):
@@ -1097,9 +1045,16 @@ class MainWindow(Gtk.ApplicationWindow):
     # ------------------------------------------------------------------
     # Feedback (non-modal) and dialogs
     # ------------------------------------------------------------------
-    def _notify(self, message, level="info"):
-        """Show a dismissible banner instead of blocking the user with a modal."""
+    def _notify(self, message, level="info", log=True):
+        """Show transient notices and dismissible, persistent errors."""
         message = str(message).strip()
+        if self._banner_level == "error" and level != "error":
+            if log:
+                self.log_buf.append("[{}] {}\n".format(level, message))
+            return
+        self._notification_generation += 1
+        self._banner_level = level
+        generation = self._notification_generation
         self.banner_label.set_text(message[:600])
         context = self.banner.get_style_context()
         for css_class in ("info-banner", "warning-banner", "error-banner"):
@@ -1110,12 +1065,24 @@ class MainWindow(Gtk.ApplicationWindow):
             "warning": Gtk.MessageType.WARNING,
             "error": Gtk.MessageType.ERROR,
         }.get(level, Gtk.MessageType.INFO))
+        # The InfoBar starts with no-show-all, so reveal its children too.
+        self.banner.get_content_area().show_all()
+        self.banner.show_all()
+        self.banner_label.show()
         self.banner.show()
         self.banner.set_revealed(True)
-        self.status_label.set_text(message[:100])
-        self.log_buf.append("[{}] {}\n".format(level, message))
+        if log:
+            self.log_buf.append("[{}] {}\n".format(level, message))
+        if level != "error":
+            def expire():
+                if generation == self._notification_generation:
+                    self._dismiss_banner()
+                return False
+            GLib.timeout_add_seconds(7, expire)
 
     def _dismiss_banner(self, *_args):
+        self._notification_generation += 1
+        self._banner_level = None
         self.banner.set_revealed(False)
         self.banner.hide()
 
@@ -1131,8 +1098,8 @@ class MainWindow(Gtk.ApplicationWindow):
         dialog.run()
         dialog.destroy()
 
-    def _confirm(self, title, message):
-        if not self.settings.get("confirm_destructive", True):
+    def _confirm(self, title, message, required=True):
+        if not required and not self.settings.get("confirm_destructive", True):
             self.log_buf.append("[confirm] skipped (disabled in Preferences)\n")
             return True
         dialog = Gtk.MessageDialog(transient_for=self, flags=0,
@@ -1157,93 +1124,129 @@ class MainWindow(Gtk.ApplicationWindow):
     # ------------------------------------------------------------------
     def _build_dashboard_page(self):
         page = self._page(
-            "dashboard", "Dashboard", "Welcome to Preen",
-            "Install apps, clean up packages and tune your system, with a dry-run switch "
-            "so you can see exactly what will happen first.", icon="computer-symbolic")
+            "dashboard", "Dashboard", "Dashboard",
+            "A clear view of your system and the tools available to maintain it.")
 
-        hero = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        hero = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
         hero.get_style_context().add_class("hero-card")
+        eyebrow = Gtk.Label(label="THIS SYSTEM")
+        eyebrow.set_xalign(0)
+        eyebrow.get_style_context().add_class("eyebrow")
         self.hero_os = Gtk.Label(label="Reading system information…")
         self.hero_os.set_xalign(0)
         self.hero_os.get_style_context().add_class("hero-os")
-        self.lbl_stats = Gtk.Label(label="One moment, collecting CPU, memory and disk data.")
+        self.lbl_stats = Gtk.Label(label="Collecting system details…")
         self.lbl_stats.set_xalign(0)
         self.lbl_stats.set_line_wrap(True)
         self.lbl_stats.get_style_context().add_class("hero-meta")
+        hero.pack_start(eyebrow, False, False, 0)
         hero.pack_start(self.hero_os, False, False, 0)
         hero.pack_start(self.lbl_stats, False, False, 0)
         page.pack_start(hero, False, False, 0)
 
-        stat_row = Gtk.Box(spacing=12, homogeneous=True)
+        resources = Gtk.Box(spacing=8)
+        title = Gtk.Label(label="Resource overview")
+        title.set_xalign(0)
+        title.get_style_context().add_class("card-title")
+        resources.pack_start(title, True, True, 0)
+        resources.pack_end(self._hint("Live system usage"), False, False, 0)
+        page.pack_start(resources, False, False, 0)
+
+        stat_row = Gtk.FlowBox()
+        stat_row.set_selection_mode(Gtk.SelectionMode.NONE)
+        stat_row.set_min_children_per_line(1)
+        stat_row.set_max_children_per_line(4)
+        stat_row.set_homogeneous(True)
+        stat_row.set_row_spacing(10)
+        stat_row.set_column_spacing(10)
         self.stat_bars = {}
-        for key, name, icon in (("cpu", "CPU", "speedometer-symbolic"),
-                                ("mem", "Memory", "drive-multidisk-symbolic"),
+        self.stat_details = {}
+        for key, name, icon in (("cpu", "CPU", "utilities-system-monitor-symbolic"),
+                                ("mem", "Memory", "media-memory-symbolic"),
                                 ("disk", "Disk", "drive-harddisk-symbolic"),
-                                ("swap", "Swap", "media-memory-symbolic")):
+                                ("swap", "Swap", "drive-multidisk-symbolic")):
             card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
             card.get_style_context().add_class("stat-card")
-            card.get_style_context().add_class("stat-{}".format(key))
-            head = Gtk.Box(spacing=7)
+            head = Gtk.Box(spacing=8)
             head.pack_start(self._icon(icon), False, False, 0)
             name_label = Gtk.Label(label=name)
             name_label.set_xalign(0)
             name_label.get_style_context().add_class("stat-name")
-            head.pack_start(name_label, False, False, 0)
-            value = Gtk.Label(label="…")
+            head.pack_start(name_label, True, True, 0)
+            value = Gtk.Label(label="—")
             value.set_xalign(0)
             value.get_style_context().add_class("stat-value")
+            detail = Gtk.Label(label="Reading…")
+            detail.set_xalign(0)
+            detail.set_ellipsize(Pango.EllipsizeMode.END)
+            detail.get_style_context().add_class("stat-detail")
             bar = Gtk.ProgressBar()
             bar.set_show_text(False)
             card.pack_start(head, False, False, 0)
             card.pack_start(value, False, False, 0)
+            card.pack_start(detail, False, False, 0)
             card.pack_start(bar, False, False, 0)
-            stat_row.pack_start(card, True, True, 0)
+            stat_row.add(card)
             self.stat_bars[key] = (value, bar)
+            self.stat_details[key] = detail
         page.pack_start(stat_row, False, False, 0)
 
-        getting_started, inner = self._frame("Getting started", icon="mail-send-receive-symbolic")
-        steps = [
-            ("1", "Turn on Simulate", "Top-right switch. Nothing is changed; every command is written to Logs."),
-            ("2", "Choose what you need", "Install Apps for software, Optimize System for cleanup and tuning."),
-            ("3", "Review and apply", "Read Logs, then switch Simulate off and repeat the action for real."),
-        ]
-        for number, heading, detail in steps:
-            line = Gtk.Box(spacing=10)
-            badge = Gtk.Label(label=number)
-            badge.set_valign(Gtk.Align.CENTER)
-            badge.get_style_context().add_class("step-number")
-            text = Gtk.Label()
-            text.set_markup("<b>{}:</b> {}".format(_escape_markup(heading),
-                                                    _escape_markup(detail)))
-            text.set_xalign(0)
-            text.set_line_wrap(True)
-            line.pack_start(badge, False, False, 0)
+        section = Gtk.Label(label="Suggested next steps")
+        section.set_xalign(0)
+        section.get_style_context().add_class("card-title")
+        page.pack_start(section, False, False, 0)
+        action_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        action_list.get_style_context().add_class("action-list")
+        for icon, title, detail, target in (
+            ("user-trash-symbolic", "Review cleanup opportunities", "See what can be safely cleaned", "deepclean"),
+            ("application-x-executable-symbolic", "Manage installed applications", "Review software and protected packages", "manage"),
+            ("preferences-system-symbolic", "Optimize system settings", "Review power, memory and desktop settings", "optimize"),
+        ):
+            button = Gtk.Button()
+            button.set_tooltip_text(detail)
+            button.connect("clicked", lambda _button, name=target: self.stack.set_visible_child_name(name))
+            line = Gtk.Box(spacing=12)
+            glyph = self._icon(icon, 18)
+            glyph.get_style_context().add_class("action-icon")
+            line.pack_start(glyph, False, False, 0)
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            name_label = Gtk.Label(label=title)
+            name_label.set_xalign(0)
+            name_label.get_style_context().add_class("settings-title")
+            description = self._hint(detail)
+            text.pack_start(name_label, False, False, 0)
+            text.pack_start(description, False, False, 0)
             line.pack_start(text, True, True, 0)
-            inner.pack_start(line, False, False, 0)
-        page.pack_start(getting_started, False, False, 0)
+            line.pack_end(self._icon("go-next-symbolic", 14), False, False, 0)
+            button.add(line)
+            action_list.pack_start(button, False, False, 0)
+        page.pack_start(action_list, False, False, 0)
 
-        health_frame, health_inner = self._frame("Tool availability", icon="emblem-system-symbolic")
+        # Missing tools are shown in context, not as a permanent empty card.
+        self.health_box = Gtk.Box(spacing=10)
+        self.health_box.set_no_show_all(True)
+        warning_icon = self._icon("dialog-warning-symbolic", 16)
+        warning_icon.get_style_context().add_class("warning-line")
+        self.health_box.pack_start(warning_icon, False, False, 0)
+        health_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         self.health_chips = Gtk.Box(spacing=6)
-        self.lbl_health = Gtk.Label(label="Checking installed tools…")
+        self.lbl_health = Gtk.Label(label="Checking tools…")
         self.lbl_health.set_xalign(0)
         self.lbl_health.set_line_wrap(True)
         self.lbl_health.get_style_context().add_class("hint-label")
-        health_inner.pack_start(self.health_chips, False, False, 0)
-        health_inner.pack_start(self.lbl_health, False, False, 0)
-        page.pack_start(health_frame, False, False, 0)
+        health_text.pack_start(self.health_chips, False, False, 0)
+        health_text.pack_start(self.lbl_health, False, False, 0)
+        self.health_box.pack_start(health_text, True, True, 0)
+        page.pack_start(self.health_box, False, False, 0)
 
-        buttons = self._row(
+        page.pack_start(self._flow(
             self._button("Refresh Status", self._refresh_stats,
-                         "Re-read CPU, memory, disk and OS information", primary=True,
-                         icon="view-refresh-symbolic"),
-            self._button("Run Cleanup Now", self.on_dashboard_cleanup,
-                         "APT autoremove/autoclean plus unused Flatpak runtimes",
-                         icon="user-trash-symbolic"),
+                         "Re-read system information", icon="view-refresh-symbolic"),
+            self._button("Run Cleanup", self.on_dashboard_cleanup,
+                         "APT autoremove/autoclean and unused Flatpak runtimes"),
             self._button("Open Logs", self.on_open_logs_page,
-                         "See the exact commands that were run",
-                         icon="document-open-recent-symbolic"),
-        )
-        page.pack_start(buttons, False, False, 0)
+                         "Review commands and diagnostic messages"),
+        ), False, False, 0)
 
     def _refresh_stats(self, _btn=None):
         self.submit(dash_backend.get_system_info, done=self._apply_stats)
@@ -1251,34 +1254,32 @@ class MainWindow(Gtk.ApplicationWindow):
     def _apply_stats(self, info):
         if not isinstance(info, dict):
             return
-        values = {key: info.get(key, "?") for key in (
-            "cpu_percent", "cpu_cores", "mem_percent", "mem_used",
-            "disk_percent", "disk_used", "swap_percent", "swap_used",
-            "load_average", "os", "kernel", "uptime", "power_profile")}
-
-        def fraction(percent):
-            try:
-                return max(0.0, min(1.0, float(str(percent).rstrip("%")) / 100.0))
-            except (TypeError, ValueError):
-                return 0.0
-
-        self.hero_os.set_text(str(values["os"]))
-        meta = "Kernel {kernel}  ·  uptime {uptime}  ·  power profile: {power_profile}".format(**values)
-        if values.get("load_average") and values["load_average"] != "?":
-            meta += "  ·  load avg: {load_average}".format(**values)
+        self.hero_os.set_text(str(info.get("os") or "Operating system unavailable"))
+        meta = "Kernel {}  ·  Uptime {}  ·  Power {}".format(
+            info.get("kernel") or "Unavailable", info.get("uptime") or "Unavailable",
+            info.get("power_profile") or "Unavailable")
+        if info.get("load_average"):
+            meta += "  ·  Load " + str(info["load_average"])
         self.lbl_stats.set_text(meta)
-        self.stat_bars["cpu"][0].set_text("{}%  ·  {} cores".format(
-            values["cpu_percent"], values["cpu_cores"]))
-        self.stat_bars["cpu"][1].set_fraction(fraction(values["cpu_percent"]))
-        self.stat_bars["mem"][0].set_text("{}%  ·  {}".format(
-            values["mem_percent"], values["mem_used"]))
-        self.stat_bars["mem"][1].set_fraction(fraction(values["mem_percent"]))
-        self.stat_bars["disk"][0].set_text("{}%  ·  {}".format(
-            values["disk_percent"], values["disk_used"]))
-        self.stat_bars["disk"][1].set_fraction(fraction(values["disk_percent"]))
-        self.stat_bars["swap"][0].set_text("{}%  ·  {}".format(
-            values["swap_percent"], values["swap_used"]))
-        self.stat_bars["swap"][1].set_fraction(fraction(values["swap_percent"]))
+        for key in ("cpu", "mem", "disk", "swap"):
+            percent = info.get(key + "_percent")
+            try:
+                number = float(str(percent).rstrip("%"))
+                value = "{}%".format(percent)
+                fraction = max(0.0, min(1.0, number / 100.0))
+                available = True
+            except (TypeError, ValueError):
+                value, fraction, available = "—", 0.0, False
+            self.stat_bars[key][0].set_text(value)
+            self.stat_bars[key][1].set_fraction(fraction)
+            self.stat_bars[key][1].set_visible(available)
+            if key == "cpu":
+                cores = info.get("cpu_cores")
+                detail = "{} logical cores".format(cores) if cores and cores != "Unavailable" else "Details unavailable"
+            else:
+                capacity = info.get(key + "_used")
+                detail = "{} used".format(capacity) if capacity and capacity != "Unavailable" else "Capacity unavailable"
+            self.stat_details[key].set_text(detail)
 
     def on_open_logs_page(self, _btn=None):
         self.stack.set_visible_child_name("logs")
@@ -1294,72 +1295,93 @@ class MainWindow(Gtk.ApplicationWindow):
     def _build_install_page(self):
         page = self._page(
             "install", "Install Apps", "Install Apps",
-            "Tick what you want, then press Install Selected. The preferred source is used "
-            "first; if an app is not available there, the other source is used automatically.",
-            icon="system-software-install-symbolic")
+            "Discover software and install it from your preferred source. "
+            "When a catalogue entry has no package there, Preen uses the other source.")
 
-        toolbar = Gtk.Box(spacing=8)
-        toolbar.pack_start(Gtk.Label(label="Preferred source:"), False, False, 0)
-        self.install_source = self._segmented(
-            ("Flatpak", "APT"),
-            active_index=1 if self.settings.get("default_source") == "apt" else 0,
-            tooltip="Falls back to the other source when an app is unavailable")
-        for button in self._segmented_buttons(self.install_source):
-            button.connect("clicked", lambda _b: self._on_source_changed())
-        toolbar.pack_start(self.install_source, False, False, 0)
-
+        toolbar = Gtk.Box(spacing=10)
         self.install_search = Gtk.SearchEntry()
-        self.install_search.set_placeholder_text("Search apps…")
+        self.install_search.set_placeholder_text("Search applications")
         self.install_search.set_hexpand(True)
         self.install_search.connect("search-changed", self._on_install_search_changed)
         toolbar.pack_start(self.install_search, True, True, 0)
-        toolbar.pack_start(self._header_button("Select all", self.on_select_all,
-                                               "Tick every app currently visible"), False, False, 0)
-        toolbar.pack_start(self._header_button("Clear", self.on_select_none,
-                                               "Untick every app"), False, False, 0)
+        source_label = Gtk.Label(label="Source")
+        source_label.get_style_context().add_class("dim-label")
+        toolbar.pack_start(source_label, False, False, 0)
+        self.install_source = self._segmented(
+            ("Flatpak", "APT"),
+            active_index=1 if self.settings.get("default_source") == "apt" else 0,
+            tooltip="The other source is used when the preferred package is not in the catalogue")
+        for button in self._segmented_buttons(self.install_source):
+            button.connect("clicked", lambda _b: self._on_source_changed())
+        toolbar.pack_start(self.install_source, False, False, 0)
         page.pack_start(toolbar, False, False, 0)
 
-        self.install_empty = self._hint("No apps match your search. Clear the search box to see all apps.")
+        list_tools = Gtk.Box(spacing=8)
+        catalog_label = Gtk.Label(label="APPLICATION CATALOG")
+        catalog_label.set_xalign(0)
+        catalog_label.get_style_context().add_class("eyebrow")
+        list_tools.pack_start(catalog_label, True, True, 0)
+        list_tools.pack_end(self._header_button("Clear", self.on_select_none,
+                                                 "Clear the application selection"), False, False, 0)
+        list_tools.pack_end(self._header_button("Select all", self.on_select_all,
+                                                 "Select every app matching the search"), False, False, 0)
+        page.pack_start(list_tools, False, False, 0)
+
+        self.install_empty = self._hint("No applications match your search. Try a different term.")
         self.install_empty.set_no_show_all(True)
         self.install_empty.hide()
-
         self.install_list = Gtk.ListBox()
         self.install_list.set_selection_mode(Gtk.SelectionMode.NONE)
         self.install_list.set_filter_func(self._install_filter, None)
         for category, items in apps_backend.load_apps().items():
             header_row = Gtk.ListBoxRow()
             header_row.set_activatable(False)
+            header_row.set_selectable(False)
             header_row.is_header = True
             header_row.get_style_context().add_class("list-header")
-            header_label = Gtk.Label()
-            header_label.set_markup("<b>{}</b>".format(_escape_markup(category)))
+            header_label = Gtk.Label(label=category)
             header_label.set_xalign(0)
+            header_label.get_style_context().add_class("settings-title")
             header_row.add(header_label)
             self.install_list.add(header_row)
             for item in items:
                 app_id = item["id"]
                 row = Gtk.ListBoxRow()
+                row.set_activatable(False)
                 row.is_header = False
                 row.app_id = app_id
+                row.item = item
+                row.status_kind = "checking"
                 row.get_style_context().add_class("app-row")
-                row.search_text = (item["name"] + " " + category + " " + app_id).lower()
+                row.search_text = (item["name"] + " " + category + " " + app_id + " " + item.get("note", "")).lower()
                 line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
                 chk = Gtk.CheckButton()
+                chk.set_tooltip_text("Select " + item["name"])
                 chk.connect("toggled", lambda _c: self._update_install_counter())
+                line.pack_start(chk, False, False, 0)
+                line.pack_start(self._app_icon(item), False, False, 0)
+                text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
                 name = Gtk.Label(label=item["name"])
                 name.set_xalign(0)
-                name.set_hexpand(True)
-                name.set_tooltip_text(item.get("note", ""))
-                badge = Gtk.Label(label=self._source_badge(item))
-                badge.set_tooltip_text(item.get("note") or self._source_badge(item))
-                badge.get_style_context().add_class("badge")
+                name.set_ellipsize(Pango.EllipsizeMode.END)
+                name.get_style_context().add_class("settings-title")
+                text.pack_start(name, False, False, 0)
+                if item.get("note"):
+                    description = Gtk.Label(label=item["note"])
+                    description.set_xalign(0)
+                    description.set_ellipsize(Pango.EllipsizeMode.END)
+                    description.set_tooltip_text(item["note"])
+                    description.get_style_context().add_class("settings-sub")
+                    text.pack_start(description, False, False, 0)
+                line.pack_start(text, True, True, 0)
+                source = Gtk.Label(label=self._source_badge(item))
+                source.get_style_context().add_class("badge")
+                source.set_tooltip_text("Sources listed in the catalogue")
                 status = Gtk.Label(label="Checking…")
-                status.set_width_chars(22)
-                status.set_xalign(0)
+                status.set_width_chars(12)
+                status.set_xalign(1)
                 status.get_style_context().add_class("dim-label")
-                line.pack_start(chk, False, False, 0)
-                line.pack_start(name, True, True, 0)
-                line.pack_start(badge, False, False, 0)
+                line.pack_start(source, False, False, 0)
                 line.pack_start(status, False, False, 0)
                 row.add(line)
                 row.chk = chk
@@ -1368,45 +1390,63 @@ class MainWindow(Gtk.ApplicationWindow):
                 self.install_list.add(row)
 
         scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.get_style_context().add_class("list-surface")
         scroller.add(self.install_list)
         page.pack_start(self.install_empty, False, False, 0)
         page.pack_start(scroller, True, True, 0)
 
         self.install_counter = self._counter("No apps selected")
+        self.install_counter.set_xalign(0)
         preset_row = Gtk.Box(spacing=8)
-        preset_row.pack_start(Gtk.Label(label="Quick picks:"), False, False, 0)
+        preset_row.pack_start(self.install_counter, True, True, 0)
         self.cmb_presets = Gtk.ComboBoxText()
-        self.cmb_presets.append_text("Choose a preset…")
+        self.cmb_presets.append_text("Quick picks…")
         self.presets = apps_backend.load_presets()
         for name in self.presets:
             self.cmb_presets.append_text(name)
         self.cmb_presets.set_active(0)
+        self.cmb_presets.set_tooltip_text("Choose a curated app preset")
         preset_row.pack_start(self.cmb_presets, False, False, 0)
-        preset_row.pack_start(self._button("Apply Preset", self.on_apply_preset,
-                                           "Tick all apps in the chosen preset"), False, False, 0)
-        preset_row.pack_end(self.install_counter, True, True, 0)
+        preset_row.pack_start(self._button("Apply", self.on_apply_preset,
+                                           "Select apps in the chosen preset"), False, False, 0)
         page.pack_start(preset_row, False, False, 0)
 
-        actions = self._row(
-            self._button("Install Selected", self.on_install_selected,
-                         "Install the ticked apps (honours Simulate mode)", primary=True,
-                         icon="system-software-install-symbolic"),
-            self._button("Update Selected", self.on_update_selected,
-                         "Update only the ticked apps"),
-            self._button("Update All", self.on_update_all,
-                         "Update every package from the selected source"),
-            self._button("Uninstall Selected", self.on_uninstall_selected,
-                         "Remove the ticked apps", destructive=True),
-            self._button("Refresh Status", self.on_refresh_status,
-                         "Re-check which apps are installed"),
-        )
+        self.install_buttons = {
+            "install": self._button("Install Selected", self.on_install_selected,
+                                    "Install the selected apps", primary=True),
+            "update": self._button("Update Selected", self.on_update_selected,
+                                   "Update the selected installed apps"),
+            "update_all": self._button("Update All", self.on_update_all,
+                                       "Update every package from the preferred source"),
+            "uninstall": self._button("Uninstall Selected", self.on_uninstall_selected,
+                                      "Uninstall the selected installed apps", destructive=True),
+            "refresh": self._button("Refresh Status", self.on_refresh_status,
+                                    "Re-check which apps are installed"),
+        }
+        actions = self._flow(*self.install_buttons.values())
+        actions.get_style_context().add_class("action-bar")
         page.pack_start(actions, False, False, 0)
+        self._update_install_counter()
+
+    def _app_icon(self, item):
+        # A catalogue ID often matches an installed desktop icon. Fall back to
+        # the same symbolic application icon when no theme icon is available.
+        try:
+            theme = Gtk.IconTheme.get_default()
+            candidates = [item.get("icon"), item.get("flatpak"), item.get("id")]
+            for candidate in candidates:
+                if isinstance(candidate, str) and theme.has_icon(candidate):
+                    return self._icon(candidate, 22)
+        except (AttributeError, TypeError):
+            pass
+        return self._icon("application-x-executable-symbolic", 20)
 
     @staticmethod
     def _source_badge(item):
         has_flat, has_apt = bool(item.get("flatpak")), bool(item.get("apt"))
         if has_flat and has_apt:
-            return "Flatpak + APT"
+            return "Flatpak · APT"
         return "Flatpak" if has_flat else "APT"
 
     def _install_query(self):
@@ -1434,10 +1474,20 @@ class MainWindow(Gtk.ApplicationWindow):
         self.on_refresh_status(None)
 
     def _update_install_counter(self):
-        count = len(self._selected_apps())
-        source = (self.install_source.get_active_text() or "Flatpak")
-        self.install_counter.set_text(
-            "{} selected · preferred source: {}".format(count, source))
+        selected = self._selected_apps()
+        count = len(selected)
+        self.install_counter.set_text("{} selected".format(count) if count else "No apps selected")
+        if not hasattr(self, "install_buttons"):
+            return
+        enabled = not self._busy
+        # A failed/partial scan is unknown, not proof that nothing is installed.
+        can_manage = any(self.app_rows[app_id].status_kind != "not installed"
+                         for app_id in selected)
+        self.install_buttons["install"].set_sensitive(enabled and count > 0)
+        self.install_buttons["update"].set_sensitive(enabled and can_manage)
+        self.install_buttons["uninstall"].set_sensitive(enabled and can_manage)
+        self.install_buttons["update_all"].set_sensitive(enabled)
+        self.install_buttons["refresh"].set_sensitive(enabled)
 
     def _source(self):
         return (self.install_source.get_active_text() or "Flatpak").lower()
@@ -1472,17 +1522,24 @@ class MainWindow(Gtk.ApplicationWindow):
         if not isinstance(result, dict):
             return
         for app_id, row in self.app_rows.items():
-            label = result.get(app_id, "Unknown")
-            row.status_label.set_text(label)
+            label = result.get(app_id, "Unavailable")
+            kind = label.lower()
+            if kind.startswith("installed"):
+                display, css_class, row.status_kind = "Installed", "status-installed", "installed"
+            elif kind.startswith("update available"):
+                display, css_class, row.status_kind = "Update available", "status-warning", "update available"
+            elif kind.startswith("not installed"):
+                display, css_class, row.status_kind = "Not installed", "dim-label", "not installed"
+            elif kind.startswith("error"):
+                display, css_class, row.status_kind = "Error", "status-error", "error"
+            else:
+                display, css_class, row.status_kind = "Unavailable", "status-warning", "unavailable"
+            row.status_label.set_text(display)
             row.status_label.set_tooltip_text(label)
             context = row.status_label.get_style_context()
-            for css_class in ("dim-label", "badge", "badge-ok", "badge-bad"):
-                context.remove_class(css_class)
-            context.add_class("badge")
-            if "installed" in label.lower() and "not" not in label.lower():
-                context.add_class("badge-ok")
-            elif label.lower().startswith("not "):
-                context.add_class("badge-bad")
+            for old in ("dim-label", "status-installed", "status-warning", "status-error"):
+                context.remove_class(old)
+            context.add_class(css_class)
         self._update_install_counter()
 
     def on_apply_preset(self, _btn):
@@ -1528,7 +1585,8 @@ class MainWindow(Gtk.ApplicationWindow):
     def on_update_all(self, _btn):
         source = self._source()
         if not self._confirm("Update all {} packages?".format(source.upper()),
-                             "Runs a full {} update and may take several minutes.".format(source)):
+                             "Runs a full {} update and may take several minutes.".format(source),
+                             required=False):
             return
         self.submit(apps_backend.update_all, source,
                     done=lambda _r: self.on_refresh_status())
@@ -1538,56 +1596,64 @@ class MainWindow(Gtk.ApplicationWindow):
     # ------------------------------------------------------------------
     def _build_manage_page(self):
         page = self._page(
-            "manage", "Manage Apps", "Manage Installed Apps",
-            "Shows Flatpak apps and graphical APT applications. Core system packages are "
-            "locked so you cannot break your desktop by accident.",
-            icon="application-x-executable-symbolic")
+            "manage", "Manage Apps", "Manage Apps",
+            "Review installed Flatpak and graphical APT applications. "
+            "Essential desktop packages are protected from removal.")
 
         toolbar = Gtk.Box(spacing=8)
         self.manage_search = Gtk.SearchEntry()
-        self.manage_search.set_placeholder_text("Search installed apps…")
+        self.manage_search.set_placeholder_text("Search installed applications")
         self.manage_search.set_hexpand(True)
         self.manage_search.connect("search-changed", self._on_manage_search_changed)
         toolbar.pack_start(self.manage_search, True, True, 0)
         toolbar.pack_start(self._button("Scan Installed", self.on_scan_installed,
-                                        "Re-scan Flatpak and APT applications", primary=True,
-                                        icon="edit-find-symbolic"),
-                           False, False, 0)
+                                        "Re-scan Flatpak and graphical APT applications",
+                                        icon="view-refresh-symbolic"), False, False, 0)
         page.pack_start(toolbar, False, False, 0)
 
-        self.manage_empty = self._hint(
-            "No installed apps found. Install Flatpak, then press Scan Installed.")
+        self._manage_scan_warnings = []
+        self.manage_scan_notice = self._hint("")
+        self.manage_scan_notice.get_style_context().add_class("status-warning")
+        self.manage_scan_notice.set_no_show_all(True)
+        self.manage_scan_notice.hide()
+        page.pack_start(self.manage_scan_notice, False, False, 0)
+
+        self.manage_empty = self._hint("No installed applications found. Scan again to refresh the list.")
         self.manage_empty.set_no_show_all(True)
         self.manage_empty.hide()
-
         self.manage_listbox = Gtk.ListBox()
         self.manage_listbox.set_selection_mode(Gtk.SelectionMode.NONE)
         self.manage_listbox.set_filter_func(self._manage_filter, None)
         scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.get_style_context().add_class("list-surface")
         scroller.add(self.manage_listbox)
         page.pack_start(self.manage_empty, False, False, 0)
         page.pack_start(scroller, True, True, 0)
 
         self.manage_counter = self._counter("Nothing selected")
-        counter_row = Gtk.Box(spacing=8)
-        counter_row.pack_end(self.manage_counter, True, True, 0)
-        page.pack_start(counter_row, False, False, 0)
-
-        actions = self._row(
-            self._button("Update Selected", self.on_update_scanned,
-                         "Update the ticked installed apps", primary=True),
-            self._button("Uninstall Selected", self.on_uninstall_scanned,
-                         "Remove the ticked installed apps", destructive=True),
-        )
+        self.manage_counter.set_xalign(0)
+        page.pack_start(self.manage_counter, False, False, 0)
+        self.manage_buttons = {
+            "update": self._button("Update Selected", self.on_update_scanned,
+                                   "Update the selected installed apps", primary=True),
+            "uninstall": self._button("Uninstall Selected", self.on_uninstall_scanned,
+                                      "Remove the selected installed apps", destructive=True),
+        }
+        actions = self._flow(*self.manage_buttons.values())
+        actions.get_style_context().add_class("action-bar")
         page.pack_start(actions, False, False, 0)
         page.pack_start(self._hint(
-            "Rows marked protected are core desktop packages. Their checkboxes are "
-            "disabled so a cleanup cannot break your session."),
+            "Protected packages are essential to the desktop and cannot be selected for removal."),
             False, False, 0)
+        self._update_manage_counter()
 
     @staticmethod
-    def _scan_installed_worker():
-        return apps_backend.list_installed_flatpak() + apps_backend.list_installed_apt()
+    def _scan_installed_worker(log=None):
+        warnings = []
+        entries = (apps_backend.list_installed_flatpak(warnings, log) +
+                   apps_backend.list_installed_apt(warnings, log))
+        return entries, warnings
 
     def _manage_filter(self, row, _data):
         query = self.manage_search.get_text().strip().lower()
@@ -1605,7 +1671,9 @@ class MainWindow(Gtk.ApplicationWindow):
             self.manage_empty.set_text(
                 "No apps match your search. Clear the search box to see them all."
                 if query else
-                "No installed apps found. Install Flatpak, then press Scan Installed.")
+                "Scan incomplete; installed applications may be missing. See Logs."
+                if self._manage_scan_warnings else
+                "No installed applications found. Scan again to refresh the list.")
             self.manage_empty.show()
         else:
             self.manage_empty.hide()
@@ -1615,37 +1683,63 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _update_manage_counter(self):
         count = len(self._selected_manage())
-        self.manage_counter.set_text("{} selected".format(count))
+        self.manage_counter.set_text("{} selected".format(count) if count else "Nothing selected")
+        if hasattr(self, "manage_buttons"):
+            for button in self.manage_buttons.values():
+                button.set_sensitive(not self._busy and count > 0)
 
-    def _fill_manage_rows(self, entries):
+    def _fill_manage_rows(self, result):
+        if isinstance(result, tuple) and len(result) == 2:
+            entries, warnings = result
+        else:
+            entries, warnings = result, []
         if not isinstance(entries, list):
             return
+        self._manage_scan_warnings = warnings
+        if warnings:
+            self.manage_scan_notice.set_text("Some sources could not be scanned. See Logs for details.")
+            self.manage_scan_notice.set_tooltip_text("\n".join(warnings))
+            self.manage_scan_notice.show()
+        else:
+            self.manage_scan_notice.hide()
+        previously_selected = {
+            (row.entry["source"], row.entry["id"])
+            for row in self.manage_listbox.get_children()
+            if getattr(row, "chk", None) is not None and row.chk.get_active()
+        }
         for row in list(self.manage_listbox.get_children()):
             self.manage_listbox.remove(row)
         for entry in sorted(entries, key=lambda e: (e["source"], e["name"].lower())):
             row = Gtk.ListBoxRow()
+            row.set_activatable(False)
             row.entry = entry
             row.get_style_context().add_class("app-row")
             row.search_text = (entry["name"] + " " + entry["id"] + " " + entry["source"]).lower()
             line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
             chk = Gtk.CheckButton()
-            chk.set_sensitive(not entry.get("protected"))
+            protected = bool(entry.get("protected"))
+            chk.set_sensitive(not protected)
+            chk.set_tooltip_text("Essential desktop package, protected from removal" if protected
+                                 else "Select " + entry["name"])
+            chk.set_active(not protected and (entry["source"], entry["id"]) in previously_selected)
             chk.connect("toggled", lambda _c: self._update_manage_counter())
+            line.pack_start(chk, False, False, 0)
+            line.pack_start(self._app_icon(entry), False, False, 0)
             label = Gtk.Label(label=entry["name"])
             label.set_xalign(0)
             label.set_hexpand(True)
-            source = Gtk.Label(label=entry["source"])
-            source.get_style_context().add_class("badge")
-            line.pack_start(chk, False, False, 0)
+            label.set_ellipsize(Pango.EllipsizeMode.END)
+            label.set_tooltip_text(entry["id"])
+            label.get_style_context().add_class("settings-title")
             line.pack_start(label, True, True, 0)
+            source = Gtk.Label(label="APT" if entry["source"] == "apt" else "Flatpak")
+            source.get_style_context().add_class("badge")
             line.pack_start(source, False, False, 0)
-            if entry.get("protected"):
-                lock = Gtk.Box(spacing=5)
-                lock.pack_start(self._icon("changes-prevent-symbolic", 14), False, False, 0)
-                lock_label = Gtk.Label(label="protected")
-                lock_label.get_style_context().add_class("hint-label")
-                lock.pack_start(lock_label, False, False, 0)
-                line.pack_start(lock, False, False, 0)
+            status = Gtk.Label(label="Protected" if protected else "Installed")
+            status.get_style_context().add_class("status-warning" if protected else "status-installed")
+            if protected:
+                status.set_tooltip_text("A core package required by the desktop; removal is blocked")
+            line.pack_start(status, False, False, 0)
             row.add(line)
             row.chk = chk
             self.manage_listbox.add(row)
@@ -1733,15 +1827,17 @@ class MainWindow(Gtk.ApplicationWindow):
         self.cmb_power = Gtk.ComboBoxText()
         for profile in perf_backend.POWER_PROFILES:
             self.cmb_power.append_text(profile)
-        self.cmb_power.set_active(0)
-        self.cmb_power.set_tooltip_text("Requires power-profiles-daemon")
+        self.cmb_power.append_text("Unavailable")
+        self.cmb_power.set_active(len(perf_backend.POWER_PROFILES))
+        self.cmb_power.set_sensitive(False)
+        self.cmb_power.set_tooltip_text("Requires a working power-profiles-daemon")
         power.pack_start(self._value_row("Power profile", self.cmb_power,
                                          "Requires power-profiles-daemon"),
                          False, False, 0)
         page.pack_start(power_frame, False, False, 0)
         self._on_swap_toggle(None)
 
-        page.pack_start(self._row(
+        page.pack_start(self._flow(
             self._button("Apply Changes", self.on_run_optimize,
                          "Apply only the settings you changed", primary=True,
                          icon="object-select-symbolic"),
@@ -1756,12 +1852,17 @@ class MainWindow(Gtk.ApplicationWindow):
         # The size combo only matters while a swapfile is being enabled.
         self.cmb_swap_size.set_sensitive(self.chk_swap.get_active())
 
+    def _sync_power_control(self):
+        # An unavailable or failed daemon read is not a 'balanced' profile.
+        available = self.baseline.get("power") in perf_backend.POWER_PROFILES
+        self.cmb_power.set_sensitive(available and not self._busy)
+
     def _read_settings(self):
         return {
             "animations_off": not system_backend.are_animations_enabled(),
             "swap": perf_backend.is_swapfile_active(),
             "zram": perf_backend.is_zram_active() or perf_backend.is_zram_configured(),
-            "power": perf_backend.get_power_profile() or "balanced",
+            "power": perf_backend.get_power_profile(),
             "theme": ui_backend.get_theme_mode(),
             "round": ui_backend.are_rounded_corners_enabled(),
             "scaling": ui_backend.get_text_scaling(),
@@ -1775,9 +1876,12 @@ class MainWindow(Gtk.ApplicationWindow):
         self.chk_animations.set_active(bool(info.get("animations_off")))
         self.chk_swap.set_active(bool(info.get("swap")))
         self.chk_zram.set_active(bool(info.get("zram")))
-        profile = info.get("power", "balanced")
+        profile = info.get("power")
         if profile in perf_backend.POWER_PROFILES:
             self.cmb_power.set_active(perf_backend.POWER_PROFILES.index(profile))
+        else:
+            self.cmb_power.set_active(len(perf_backend.POWER_PROFILES))
+        self._sync_power_control()
         self.cmb_theme.set_active(1 if info.get("theme") == "dark" else 0)
         self.chk_round.set_active(bool(info.get("round")))
         current_scaling = float(info.get("scaling", 1.0) or 1.0)
@@ -1794,17 +1898,18 @@ class MainWindow(Gtk.ApplicationWindow):
             self.health_chips.remove(child)
         if warnings:
             self.health_chips.pack_start(
-                self._chip("{} tool(s) missing".format(len(warnings)), "chip-bad"),
-                False, False, 0)
+                self._chip("Tool availability · {} need attention".format(len(warnings)),
+                           "status-warning"), False, False, 0)
             self.lbl_health.set_text("\n".join("• " + w for w in warnings))
+            self.health_box.set_no_show_all(False)
+            self.health_box.show_all()
+            self.health_box.show()
             if self.settings.get("show_dependency_warnings", True):
                 self._notify(
-                    "{} optional tool(s) missing, so some features are unavailable. "
-                    "See Dashboard → Tool availability.".format(len(warnings)), "warning")
+                    "Some tools are unavailable. See the Dashboard for details.", "warning")
         else:
-            self.health_chips.pack_start(
-                self._chip("All tools available", "chip-ok"), False, False, 0)
-            self.lbl_health.set_text("Everything is ready. Every optional tool is installed.")
+            self.health_box.hide()
+            self.health_box.set_no_show_all(True)
 
     def _refresh_settings(self, *_args):
         self.submit(self._read_settings, done=self._apply_settings)
@@ -1816,7 +1921,7 @@ class MainWindow(Gtk.ApplicationWindow):
             "swap": self.chk_swap.get_active(),
             "swap_size": self._swap_size(),
             "zram": self.chk_zram.get_active(),
-            "power": self.cmb_power.get_active_text() or "balanced",
+            "power": self.cmb_power.get_active_text(),
         }
         actions = []
         if opts["cleanup"]:
@@ -1824,7 +1929,9 @@ class MainWindow(Gtk.ApplicationWindow):
         if opts["animations_off"] != self.baseline.get("animations_off"):
             actions.append(("GNOME animations", system_backend.set_animations,
                             (not opts["animations_off"],)))
-        if opts["power"] != self.baseline.get("power"):
+        if (self.baseline.get("power") in perf_backend.POWER_PROFILES
+                and opts["power"] in perf_backend.POWER_PROFILES
+                and opts["power"] != self.baseline["power"]):
             actions.append(("Power profile", perf_backend.set_power_profile, (opts["power"],)))
         if opts["swap"] != self.baseline.get("swap"):
             actions.append(("Swapfile", perf_backend.enable_swapfile if opts["swap"] else perf_backend.disable_swapfile,
@@ -1834,6 +1941,11 @@ class MainWindow(Gtk.ApplicationWindow):
         if not actions:
             self._notify("Nothing to apply. Your settings already match.", "info")
             return
+        if (opts["cleanup"] or (not opts["swap"] and self.baseline.get("swap"))
+                or (not opts["zram"] and self.baseline.get("zram"))):
+            if not self._confirm("Apply system changes?",
+                                 "The selected cleanup or memory changes may remove data or alter system configuration."):
+                return
         self.submit(utils.run_actions, actions, done=lambda _r: self._refresh_settings())
 
     def on_manage_startup(self, _btn):
@@ -1935,7 +2047,7 @@ class MainWindow(Gtk.ApplicationWindow):
                           False, False, 0)
         page.pack_start(extras_frame, False, False, 0)
 
-        page.pack_start(self._row(
+        page.pack_start(self._flow(
             self._button("Apply Look Changes", self.on_apply_look,
                          "Apply the theme and corner changes you made", primary=True,
                          icon="object-select-symbolic"),
@@ -1983,42 +2095,61 @@ class MainWindow(Gtk.ApplicationWindow):
     def _build_deepclean_page(self):
         page = self._page(
             "deepclean", "Deep Clean", "Deep Clean",
-            "See exactly how much space each item reclaims before anything is deleted. "
-            "Root items need your password via polkit; Simulate mode previews every step.",
-            icon="user-trash-symbolic")
+            "Review and remove selected caches, temporary files and logs. "
+            "Scanned sizes are estimates, not a guarantee of recovered space.")
 
-        scan_card, scan_inner = self._frame(
-            "Reclaimable space", icon="drive-harddisk-symbolic")
-        scan_toolbar = Gtk.Box(spacing=8)
-        scan_toolbar.pack_start(self._header_button(
-            "Select all", self.on_clean_select_all, "Tick every cleanable item"), False, False, 0)
-        scan_toolbar.pack_start(self._header_button(
-            "Clear", self.on_clean_select_none, "Untick every item"), False, False, 0)
+        summary = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        summary.get_style_context().add_class("hero-card")
+        caption = Gtk.Label(label="ESTIMATED RECLAIMABLE SPACE")
+        caption.set_xalign(0)
+        caption.get_style_context().add_class("eyebrow")
+        self.clean_total = Gtk.Label(label="—")
+        self.clean_total.set_xalign(0)
+        self.clean_total.get_style_context().add_class("summary-value")
+        self.clean_summary = Gtk.Label(label="Scanning cleanup items…")
+        self.clean_summary.set_xalign(0)
+        self.clean_summary.get_style_context().add_class("summary-caption")
+        summary.pack_start(caption, False, False, 0)
+        summary.pack_start(self.clean_total, False, False, 0)
+        summary.pack_start(self.clean_summary, False, False, 0)
+        page.pack_start(summary, False, False, 0)
+
+        tools = Gtk.Box(spacing=8)
+        heading = Gtk.Label(label="CLEANUP ITEMS")
+        heading.set_xalign(0)
+        heading.get_style_context().add_class("eyebrow")
+        tools.pack_start(heading, True, True, 0)
+        tools.pack_end(self._header_button("Clear", self.on_clean_select_none,
+                                            "Clear the cleanup selection"), False, False, 0)
+        tools.pack_end(self._header_button("Select all", self.on_clean_select_all,
+                                            "Select items with a measured size"), False, False, 0)
+        page.pack_start(tools, False, False, 0)
+        self.clean_rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.get_style_context().add_class("list-surface")
+        scroller.add(self.clean_rows)
+        page.pack_start(scroller, True, True, 0)
+
         self.clean_counter = self._counter("No items selected")
-        scan_toolbar.pack_end(self.clean_counter, True, True, 0)
-        scan_inner.pack_start(scan_toolbar, False, False, 0)
-        self.clean_rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        self.clean_total = self._hint("Press Scan Now to measure what can be reclaimed.")
-        scan_inner.pack_start(self.clean_rows, False, False, 0)
-        scan_inner.pack_start(self.clean_total, False, False, 0)
-        page.pack_start(scan_card, False, False, 0)
-
-        page.pack_start(self._row(
+        self.clean_counter.set_xalign(0)
+        page.pack_start(self.clean_counter, False, False, 0)
+        self.clean_button = self._button("Clean Selected", self.on_clean_selected,
+                                         "Clean the selected items after confirmation",
+                                         primary=True, icon="user-trash-symbolic")
+        actions = self._flow(
             self._button("Scan Now", self.on_scan_cleanable,
-                         "Measure reclaimable space", primary=True,
-                         icon="edit-find-symbolic"),
-            self._button("Clean Selected", self.on_clean_selected,
-                         "Delete the ticked items (honours Simulate mode)",
-                         icon="user-trash-symbolic"),
-        ), False, False, 0)
-        page.pack_start(self._hint(
-            "Thumbnails are regenerated automatically; trash cleaning empties "
-            "the wastebasket. The journal keeps its most recent 100 MB."),
-            False, False, 0)
+                         "Measure cleanup items again", icon="view-refresh-symbolic"),
+            self.clean_button,
+        )
+        actions.get_style_context().add_class("action-bar")
+        page.pack_start(actions, False, False, 0)
+        self._update_clean_counter()
 
     def on_clean_select_all(self, _btn=None):
-        for chk, _item in self.clean_checkbuttons.values():
-            chk.set_active(True)
+        for chk, item in self.clean_checkbuttons.values():
+            if chk.get_sensitive() and (item.get("size") or 0) > 0:
+                chk.set_active(True)
         self._update_clean_counter()
 
     def on_clean_select_none(self, _btn=None):
@@ -2026,58 +2157,110 @@ class MainWindow(Gtk.ApplicationWindow):
             chk.set_active(False)
         self._update_clean_counter()
 
+    def _selected_clean_items(self):
+        return [item for chk, item in self.clean_checkbuttons.values()
+                if chk.get_active() and chk.get_sensitive()]
+
     def _update_clean_counter(self, *_args):
-        selected = [item for chk, item in self.clean_checkbuttons.values()
-                    if chk.get_active()]
+        selected = self._selected_clean_items()
         if not selected:
             self.clean_counter.set_text("No items selected")
-            return
-        total = deepclean_backend.total_size(selected)
-        self.clean_counter.set_text("{} selected · reclaim {}".format(
-            len(selected), deepclean_backend.format_size(total)))
+        else:
+            total = deepclean_backend.total_size(selected)
+            unknown = any(item.get("size") is None for item in selected)
+            measured = any(item.get("size") is not None for item in selected)
+            if unknown and not measured:
+                estimate = "size unavailable"
+            elif unknown:
+                estimate = "{} measured + unknown".format(deepclean_backend.format_size(total))
+            else:
+                estimate = "up to {} estimated".format(deepclean_backend.format_size(total))
+            self.clean_counter.set_text("{} selected · {}".format(len(selected), estimate))
+        if hasattr(self, "clean_button"):
+            self.clean_button.set_sensitive(not self._busy and bool(selected))
 
     def _apply_clean_scan(self, items):
         if not isinstance(items, list):
             return
+        selected_keys = {item["key"] for item in self._selected_clean_items()}
         for child in list(self.clean_rows.get_children()):
             self.clean_rows.remove(child)
         self.clean_checkbuttons = {}
-        for item in items:
-            line = Gtk.Box(spacing=10)
-            chk = Gtk.CheckButton()
-            chk.set_valign(Gtk.Align.CENTER)
-            chk.connect("toggled", self._update_clean_counter)
-            line.pack_start(chk, False, False, 0)
-            text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-            name = Gtk.Label(label=item["label"])
-            name.set_xalign(0)
-            text_box.pack_start(name, False, False, 0)
-            detail = Gtk.Label(label=item["detail"])
-            detail.set_xalign(0)
-            detail.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-            detail.get_style_context().add_class("hint-label")
-            text_box.pack_start(detail, False, False, 0)
-            size = Gtk.Label(label=deepclean_backend.format_size(item["size"]))
-            size.get_style_context().add_class("chip")
-            if item["size"] > 0:
-                size.get_style_context().add_class("chip-ok")
-            line.pack_start(text_box, True, True, 0)
-            line.pack_start(size, False, False, 0)
-            self.clean_rows.pack_start(line, False, False, 0)
-            self.clean_checkbuttons[item["key"]] = (chk, item)
+        groups = (
+            ("SYSTEM PACKAGES & LOGS", {"apt_cache", "journal"}),
+            ("REGENERABLE CACHES", {"thumbnails", "pip_cache"}),
+            ("PERSONAL DATA", {"trash"}),
+        )
+        for group_name, keys in groups:
+            group = [item for item in items if item.get("key") in keys]
+            if not group:
+                continue
+            header = Gtk.Label(label=group_name)
+            header.set_xalign(0)
+            header.get_style_context().add_class("eyebrow")
+            header.get_style_context().add_class("list-header")
+            self.clean_rows.pack_start(header, False, False, 0)
+            for item in group:
+                line = Gtk.Box(spacing=10)
+                line.get_style_context().add_class("clean-row")
+                chk = Gtk.CheckButton()
+                chk.set_valign(Gtk.Align.CENTER)
+                size_value = item.get("size")
+                chk.set_sensitive(size_value is None or size_value > 0)
+                if size_value is None:
+                    tooltip = "Size unavailable; select manually if you still want to clean this item"
+                elif size_value > 0:
+                    tooltip = "Select " + item["label"]
+                else:
+                    tooltip = "No measurable space found"
+                chk.set_tooltip_text(tooltip)
+                chk.set_active(item["key"] in selected_keys and chk.get_sensitive())
+                chk.connect("toggled", self._update_clean_counter)
+                line.pack_start(chk, False, False, 0)
+                text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+                name = Gtk.Label(label=item["label"])
+                name.set_xalign(0)
+                name.get_style_context().add_class("settings-title")
+                text_box.pack_start(name, False, False, 0)
+                detail = Gtk.Label(label=item["detail"])
+                detail.set_xalign(0)
+                detail.set_ellipsize(Pango.EllipsizeMode.END)
+                detail.set_tooltip_text(item["detail"])
+                detail.get_style_context().add_class("hint-label")
+                text_box.pack_start(detail, False, False, 0)
+                if item.get("root") or item["key"] == "trash":
+                    risk = Gtk.Label(label="Requires administrator access" if item.get("root")
+                                     else "Permanently deletes trash contents")
+                    risk.set_xalign(0)
+                    risk.get_style_context().add_class("status-warning")
+                    text_box.pack_start(risk, False, False, 0)
+                size = Gtk.Label(label=deepclean_backend.format_size(size_value))
+                size.set_tooltip_text("Estimated size; journal usage is an upper bound" if size_value is not None
+                                      else "This item could not be measured")
+                line.pack_start(text_box, True, True, 0)
+                line.pack_end(size, False, False, 0)
+                self.clean_rows.pack_start(line, False, False, 0)
+                self.clean_checkbuttons[item["key"]] = (chk, item)
         self.clean_rows.show_all()
-        self.clean_total.set_text("Total reclaimable: {}".format(
-            deepclean_backend.format_size(deepclean_backend.total_size(items))))
+        available = sum(1 for item in items if (item.get("size") or 0) > 0)
+        unknown = sum(1 for item in items if item.get("size") is None)
+        known = len(items) - unknown
+        total = deepclean_backend.format_size(deepclean_backend.total_size(items))
+        self.clean_total.set_text((total + " + unknown") if unknown and known else
+                                  "Unavailable" if unknown else total)
+        summary = "{} item(s) with measurable space · sizes are estimates".format(available)
+        if unknown:
+            summary += " · {} size(s) unavailable".format(unknown)
+        self.clean_summary.set_text(summary)
         self._update_clean_counter()
 
     def on_scan_cleanable(self, _btn=None):
         self.submit(deepclean_backend.scan_cleanable, done=self._apply_clean_scan)
 
     def on_clean_selected(self, _btn):
-        selected = [item for chk, item in self.clean_checkbuttons.values()
-                    if chk.get_active()]
+        selected = self._selected_clean_items()
         if not selected:
-            self._notify("Tick at least one item to clean.", "warning")
+            self._notify("Select at least one item to clean.", "warning")
             return
         actions = deepclean_backend.build_clean_actions(selected)
         if not actions:
@@ -2087,8 +2270,33 @@ class MainWindow(Gtk.ApplicationWindow):
                 "Clean {} item(s)?".format(len(selected)),
                 "Deletes the selected caches and trash contents. This cannot be undone."):
             return
-        self.submit(utils.run_actions, actions,
-                    done=lambda _r: self.on_scan_cleanable())
+        was_simulated = utils.is_simulate()
+        before = {item["key"]: item["size"] for item in selected}
+
+        def finished(result):
+            if was_simulated:
+                if isinstance(result, utils.Outcome) and result.ok:
+                    self._notify("Simulation complete. No files were removed; see Logs for the preview.", "info")
+                return
+            if isinstance(result, utils.Outcome) and result.ok:
+                self.submit(deepclean_backend.scan_cleanable,
+                            done=lambda items: self._after_clean_scan(items, before))
+            else:
+                self.on_scan_cleanable()
+
+        self.submit(utils.run_actions, actions, done=finished)
+
+    def _after_clean_scan(self, items, before):
+        if not isinstance(items, list):
+            return
+        after = {item["key"]: item["size"] for item in items}
+        self._apply_clean_scan(items)
+        if any(before[key] is None or after.get(key) is None for key in before):
+            self._notify("Cleanup completed; a size comparison is unavailable.", "info")
+            return
+        difference = max(0, sum(before.values()) - sum(after[key] for key in before))
+        self._notify("Cleanup completed. Selected items now measure {} less (estimated).".format(
+            deepclean_backend.format_size(difference)), "info")
 
     # ------------------------------------------------------------------
     # Services & Boot page
@@ -2127,6 +2335,7 @@ class MainWindow(Gtk.ApplicationWindow):
         services_inner.pack_start(toolbar, False, False, 0)
 
         self.services_count = self._hint("Loading services…")
+        self._services_available = None
         services_inner.pack_start(self.services_count, False, False, 0)
 
         self.services_listbox = Gtk.ListBox()
@@ -2139,18 +2348,18 @@ class MainWindow(Gtk.ApplicationWindow):
         services_inner.pack_start(scroller, True, True, 0)
         page.pack_start(services_card, True, True, 0)
 
-        page.pack_start(self._row(
-            self._button("Start", lambda b: self.on_service_action("start"),
-                         "Start the selected service now"),
-            self._button("Stop", lambda b: self.on_service_action("stop"),
-                         "Stop the selected service"),
-            self._button("Restart", lambda b: self.on_service_action("restart"),
-                         "Restart the selected service"),
-            self._button("Enable", lambda b: self.on_service_action("enable"),
-                         "Enable at boot"),
-            self._button("Disable", lambda b: self.on_service_action("disable"),
-                         "Do not start at boot"),
-        ), False, False, 0)
+        self.service_buttons = {}
+        for action, label, tooltip in (
+            ("start", "Start", "Start the selected service"),
+            ("stop", "Stop", "Stop the selected service"),
+            ("restart", "Restart", "Restart the selected service"),
+            ("enable", "Enable", "Enable the selected service at boot"),
+            ("disable", "Disable", "Disable the selected service at boot"),
+        ):
+            self.service_buttons[action] = self._button(
+                label, lambda _button, value=action: self.on_service_action(value), tooltip)
+        page.pack_start(self._flow(*self.service_buttons.values()), False, False, 0)
+        self._update_service_actions()
         page.pack_start(self._hint(
             "Green means running, red means failed, grey means stopped. Only change "
             "services you understand, since some are needed for sound, networking or the desktop."),
@@ -2158,6 +2367,9 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _on_services_filter_changed(self, _widget=None):
         self.services_listbox.invalidate_filter()
+        if self._services_available is False:
+            self.services_count.set_text("Services unavailable. Check Logs for details, then try Refresh.")
+            return
         visible = sum(1 for row in self.services_listbox.get_children()
                       if self._services_filter(row, None))
         total = len(self.services_listbox.get_children())
@@ -2174,12 +2386,22 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _on_service_row_selected(self, _box, row):
         self.selected_service_row = row
+        self._update_service_actions()
+
+    def _update_service_actions(self):
+        if hasattr(self, "service_buttons"):
+            for button in self.service_buttons.values():
+                button.set_sensitive(not self._busy and self.selected_service_row is not None)
 
     def _apply_services(self, entries):
-        if not isinstance(entries, list):
-            return
+        self._services_available = isinstance(entries, list)
+        self.selected_service_row = None
+        self._update_service_actions()
         for child in list(self.services_listbox.get_children()):
             self.services_listbox.remove(child)
+        if not self._services_available:
+            self._on_services_filter_changed()
+            return
         for entry in entries:
             row = Gtk.ListBoxRow()
             row.unit = entry["unit"]
@@ -2216,17 +2438,16 @@ class MainWindow(Gtk.ApplicationWindow):
         self._on_services_filter_changed(None)
 
     def _apply_boot(self, info):
+        for child in list(self.boot_blame.get_children()):
+            self.boot_blame.remove(child)
         if not isinstance(info, dict) or not info.get("total"):
-            self.lbl_boot.set_text(
-                "Boot-time data is not available on this system (systemd-analyze missing).")
+            self.lbl_boot.set_text("Boot-time data is unavailable. Check Logs for details.")
             return
         phases = "  ·  ".join(
             "{} {}".format(info[key], key) for key in
             ("firmware", "loader", "kernel", "userspace") if info.get(key))
         self.lbl_boot.set_text(
             "Total boot: {}  ·  {}".format(info["total"], phases or "phase breakdown unavailable"))
-        for child in list(self.boot_blame.get_children()):
-            self.boot_blame.remove(child)
         for unit, seconds in info.get("blame", []):
             line = Gtk.Box(spacing=8)
             name = Gtk.Label(label=unit.replace(".service", ""))
@@ -2243,7 +2464,6 @@ class MainWindow(Gtk.ApplicationWindow):
     def on_refresh_services(self, _btn=None):
         self.submit(services_backend.list_services, done=self._apply_services)
         self.submit(services_backend.boot_info, done=self._apply_boot)
-        self.submit(backup_backend.list_snapshots, done=self._apply_snapshots)
 
     def on_service_action(self, action):
         row = getattr(self, "selected_service_row", None)
@@ -2270,7 +2490,7 @@ class MainWindow(Gtk.ApplicationWindow):
             icon="drive-multidisk-symbolic")
 
         snap_frame, snap = self._frame("System snapshots (Timeshift)")
-        snap.pack_start(self._row(
+        snap.pack_start(self._flow(
             self._button("Create Snapshot", self.on_snapshot,
                          "Create a Timeshift snapshot (needs Timeshift installed)"),
             self._button("Open Timeshift", self.on_open_timeshift,
@@ -2282,6 +2502,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.snapshot_listbox = Gtk.ListBox()
         self.snapshot_listbox.set_selection_mode(Gtk.SelectionMode.NONE)
         self.snapshot_empty = self._hint("No snapshots found, or Timeshift is not installed.")
+        self.snapshot_empty.set_no_show_all(True)
         snap.pack_start(self.snapshot_empty, False, False, 0)
         snapshot_scroller = Gtk.ScrolledWindow()
         snapshot_scroller.set_min_content_height(130)
@@ -2291,6 +2512,19 @@ class MainWindow(Gtk.ApplicationWindow):
                                    "install it first: sudo apt install timeshift"), False, False, 0)
         page.pack_start(snap_frame, True, True, 0)
 
+        config_frame, config = self._frame("Personal settings (~/.config)")
+        config.pack_start(self._flow(
+            self._button("Export Settings…", self.on_export_config,
+                         "Save ~/.config to a .tar.xz archive", primary=True,
+                         icon="document-save-symbolic"),
+            self._button("Import Settings…", self.on_import_config,
+                         "Restore ~/.config from an archive"),
+        ), False, False, 0)
+        config.pack_start(self._hint(
+            "Import overwrites matching files in ~/.config. Export first if you are unsure."),
+            False, False, 0)
+        page.pack_start(config_frame, False, False, 0)
+
     def on_refresh_snapshots(self, _btn=None):
         self.submit(backup_backend.list_snapshots, done=self._apply_snapshots)
 
@@ -2299,7 +2533,10 @@ class MainWindow(Gtk.ApplicationWindow):
             return
         for row in list(self.snapshot_listbox.get_children()):
             self.snapshot_listbox.remove(row)
-        self.snapshot_empty.set_visible(not snapshots)
+        if snapshots:
+            self.snapshot_empty.hide()
+        else:
+            self.snapshot_empty.show()
         for item in snapshots:
             row = Gtk.ListBoxRow()
             row.get_style_context().add_class("snapshot-row")
@@ -2320,18 +2557,6 @@ class MainWindow(Gtk.ApplicationWindow):
             self.snapshot_listbox.add(row)
         self.snapshot_listbox.show_all()
 
-        config_frame, config = self._frame("Personal settings (~/.config)")
-        config.pack_start(self._row(
-            self._button("Export Settings…", self.on_export_config,
-                         "Save ~/.config to a .tar.xz archive", primary=True,
-                         icon="document-save-symbolic"),
-            self._button("Import Settings…", self.on_import_config,
-                         "Restore ~/.config from an archive"),
-        ), False, False, 0)
-        config.pack_start(self._hint(
-            "Import overwrites matching files in ~/.config. Export first if you are unsure."),
-            False, False, 0)
-        page.pack_start(config_frame, False, False, 0)
 
     def on_snapshot(self, _btn):
         self.submit(backup_backend.timeshift_snapshot,
@@ -2389,16 +2614,16 @@ class MainWindow(Gtk.ApplicationWindow):
     # ------------------------------------------------------------------
     def _build_logs_page(self):
         page = self._page(
-            "logs", "Logs", "Activity Log",
-            "Every command the app runs (or would run in Simulate mode) is written here "
-            "with its exit code. Save a copy before asking for help.",
+            "logs", "Logs", "Logs",
+            "Review commands, simulation previews and diagnostic messages. "
+            "The complete log can be saved for support.",
             icon="document-open-recent-symbolic")
 
         tools = Gtk.Box(spacing=8)
         save = self._button("Save Log…", self.on_save_log,
-                            "Write the whole log to a text file", primary=True)
-        clear = self._button("Clear", self.on_clear_log,
-                             "Empty the log view")
+                            "Save the complete log, including filtered lines")
+        clear = self._button("Clear Log", self.on_clear_log,
+                             "Clear the complete log")
         tools.pack_start(save, False, False, 0)
         tools.pack_start(clear, False, False, 0)
         scroll_switch = Gtk.Switch()
@@ -2416,11 +2641,10 @@ class MainWindow(Gtk.ApplicationWindow):
         page.pack_start(tools, False, False, 0)
 
         scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroller.get_style_context().add_class("log-surface")
         scroller.add(self.log_view)
-        log_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        log_card.get_style_context().add_class("card")
-        log_card.pack_start(scroller, True, True, 0)
-        page.pack_start(log_card, True, True, 0)
+        page.pack_start(scroller, True, True, 0)
 
     def on_log_filter_changed(self, entry):
         self.log_buf.set_filter(entry.get_text())
@@ -2430,7 +2654,6 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def on_clear_log(self, _btn):
         self.log_buf.clear()
-        self._notice("Log cleared.")
 
     def on_save_log(self, _btn):
         path = self._save_dialog("Save log", "preen.log")
@@ -2447,6 +2670,10 @@ class MainWindow(Gtk.ApplicationWindow):
     def on_toggle_simulate(self, switch, _param):
         enabled = switch.get_active()
         utils.set_simulate(enabled)
+        if utils.is_simulate() != enabled:
+            # An environment-forced dry run must never appear switched off.
+            switch.set_active(True)
+            return
         self._update_sim_banner()
         self.log_buf.append("[simulate] {}\n".format("ON" if enabled else "OFF"))
         self.status_label.set_text("Simulate ON, no changes will be made" if enabled else "Ready")
@@ -2512,8 +2739,8 @@ class MainWindow(Gtk.ApplicationWindow):
         sim_switch = add_switch("Start in Simulate mode",
                                 "Safe default: preview all actions until you switch it off",
                                 bool(self.settings.get("simulate_on_startup")))
-        confirm_switch = add_switch("Confirm destructive actions",
-                                    "Ask before uninstalling or restoring settings",
+        confirm_switch = add_switch("Confirm full package updates",
+                                    "Cleanup, uninstall and restore always require confirmation",
                                     bool(self.settings.get("confirm_destructive", True)))
         warn_switch = add_switch("Show dependency warnings",
                                  "Warn at startup when flatpak, polkit or gsettings is missing",

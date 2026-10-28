@@ -144,6 +144,15 @@ def run_cmd(
     if argv[0] == "pkexec":
         argv = argv[1:]
         use_pkexec = True
+    # A dry run must be able to show the command even when polkit is not
+    # installed. Nothing is spawned in this branch.
+    if mutate and is_simulate():
+        preview = (["pkexec"] + argv) if use_pkexec and not is_root else argv
+        line = "[simulate] would run: " + format_cmd(preview)
+        if log and not quiet:
+            log.append(line + "\n")
+        return CommandResult(0, "[simulated] " + format_cmd(preview), "")
+
     if use_pkexec and not is_root:
         if not has_command("pkexec"):
             result = CommandResult(
@@ -156,12 +165,6 @@ def run_cmd(
                 log.append("[error] " + result.err + "\n")
             return result
         argv = ["pkexec"] + argv
-
-    if mutate and is_simulate():
-        line = "[simulate] would run: " + format_cmd(argv)
-        if log and not quiet:
-            log.append(line + "\n")
-        return CommandResult(0, "[simulated] " + format_cmd(argv), "")
 
     full_env = os.environ.copy()
     if env:
@@ -194,12 +197,15 @@ def run_cmd(
             result = CommandResult(proc.returncode, out or "", err or "")
 
     if log and not quiet:
-        if result.ok:
-            detail = result.detail(600)
-            if detail and not detail.startswith("[simulated]"):
-                log.append("    " + detail.replace("\n", "\n    ") + "\n")
-        else:
-            log.append("[failed] exit {}: {}\n".format(result.code, result.detail(600) or "no output"))
+        if not result.ok:
+            log.append("[failed] exit {}{}\n".format(
+                result.code, ": no output" if not (result.out or result.err) else ""))
+        # Preserve both complete streams for diagnostics. Outcome summaries
+        # may be shortened, but the saved log must retain the original output.
+        for label, stream in (("stdout", result.out), ("stderr", result.err)):
+            if stream:
+                log.append("[{}]\n{}{}".format(
+                    label, stream, "" if stream.endswith("\n") else "\n"))
 
     if check and not result.ok:
         raise subprocess.CalledProcessError(result.code, argv, output=result.out, stderr=result.err)
@@ -213,6 +219,7 @@ class Report:
         self.log = log
         self.failures: List[str] = []
         self.commands: int = 0
+        self.simulated: int = 0
 
     def note(self, text: str) -> None:
         if self.log:
@@ -223,6 +230,8 @@ class Report:
         kwargs.setdefault("log", self.log)
         result = run_cmd(args, **kwargs)
         self.commands += 1
+        if result.simulated:
+            self.simulated += 1
         if not result.ok and not allow_failure:
             self.failures.append("{} → exit {} {}".format(
                 format_cmd(args), result.code, result.detail(300) or "(no output)"))
@@ -232,6 +241,8 @@ class Report:
         if self.failures:
             message = "{} ({} of {} commands failed)".format(failure, len(self.failures), self.commands)
             return Outcome(False, message, list(self.failures))
+        if self.simulated:
+            return Outcome(True, "Simulation complete. No changes were made.", [])
         return Outcome(True, success, [])
 
 
@@ -254,13 +265,17 @@ def run_actions(actions, log=None) -> "Outcome":
             continue
         if isinstance(result, Outcome):
             outcomes.append(result)
+        else:
+            outcomes.append(fail("{} did not report an outcome".format(label)))
     if not actions:
         return ok("No changes requested. Everything already matches.")
     failed = [o for o in outcomes if not o.ok]
     if failed:
         details = ["{}: {}".format(o.message, "; ".join(o.details)) for o in failed]
         return fail("{} of {} step(s) failed".format(len(failed), len(actions)), *details)
-    return ok("Applied {} optimization step(s).".format(len(actions)))
+    if is_simulate():
+        return ok("Simulation complete. No changes were made.")
+    return ok("Completed {} step(s).".format(len(actions)))
 
 
 def elevated_script(script: str) -> List[str]:

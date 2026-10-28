@@ -23,6 +23,9 @@ class FormatSizeTest(unittest.TestCase):
     def test_negative_is_clamped(self):
         self.assertEqual(deepclean.format_size(-5), "0 B")
 
+    def test_unavailable_is_not_zero(self):
+        self.assertEqual(deepclean.format_size(None), "Unavailable")
+
 
 class JournalUsageTest(unittest.TestCase):
     def test_gigabytes(self):
@@ -37,6 +40,26 @@ class JournalUsageTest(unittest.TestCase):
         self.assertEqual(deepclean.parse_journal_usage("no numbers here"), 0)
         self.assertEqual(deepclean.parse_journal_usage(""), 0)
 
+    def test_scan_estimates_only_usage_above_retention_and_reports_unknown(self):
+        with mock.patch.object(deepclean, "_journal_size", return_value=350 * 1024 ** 2):
+            journal = next(item for item in deepclean.scan_cleanable() if item["key"] == "journal")
+        self.assertEqual(journal["size"], 250 * 1024 ** 2)
+        with mock.patch.object(deepclean, "_journal_size", return_value=None):
+            journal = next(item for item in deepclean.scan_cleanable() if item["key"] == "journal")
+        self.assertIsNone(journal["size"])
+        with mock.patch.object(utils, "has_command", return_value=True), \
+                mock.patch.object(utils, "run_cmd", return_value=utils.CommandResult(1, "", "denied")):
+            self.assertIsNone(deepclean._journal_size())
+
+    def test_vacuum_failure_is_propagated_and_never_called_success(self):
+        with mock.patch.object(utils, "run_cmd",
+                               return_value=utils.CommandResult(17, "", "permission denied")):
+            outcome = deepclean.vacuum_journal()
+        self.assertFalse(outcome.ok)
+        self.assertIn("Could not vacuum", outcome.message)
+        self.assertIn("exit 17", " ".join(outcome.details))
+        self.assertIn("permission denied", " ".join(outcome.details))
+
 
 class DuSizeTest(unittest.TestCase):
     def test_sums_files_and_tolerates_missing(self):
@@ -48,6 +71,11 @@ class DuSizeTest(unittest.TestCase):
                 handle.write(b"x" * 50)
             self.assertEqual(deepclean.du_size(tmp), 150)
         self.assertEqual(deepclean.du_size("/nonexistent/path/xyz"), 0)
+
+    def test_unreadable_tree_is_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(deepclean.os, "walk", side_effect=PermissionError("denied")):
+            self.assertIsNone(deepclean.du_size(tmp))
 
 
 class CleanUserPathsTest(unittest.TestCase):
@@ -85,6 +113,21 @@ class CleanUserPathsTest(unittest.TestCase):
             outcome = deepclean.clean_user_paths(["trash", "mystery-key"])
             self.assertFalse(outcome.ok)
             self.assertTrue(os.path.exists(os.path.join(tmp, "file.txt")))
+
+    def test_symlink_clean_root_is_not_followed(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(utils, "is_simulate", return_value=False):
+            outside = Path(tmp) / "outside"
+            outside.mkdir()
+            marker = outside / "important"
+            marker.write_text("keep", encoding="utf-8")
+            link = Path(tmp) / "cache-link"
+            link.symlink_to(outside, target_is_directory=True)
+            with mock.patch.dict(deepclean.USER_CLEAN_PATHS, {"trash": str(link)}):
+                self.assertIsNone(deepclean.du_size(str(link)))
+                outcome = deepclean.clean_user_paths(["trash"])
+            self.assertFalse(outcome.ok)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
 
     def test_missing_dir_is_not_an_error(self):
         with mock.patch.dict(deepclean.USER_CLEAN_PATHS,
