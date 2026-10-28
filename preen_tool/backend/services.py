@@ -14,6 +14,7 @@ from . import utils
 #: Only well-formed unit names ever reach systemctl, defence in depth on top
 #: of never passing user input through a shell.
 _UNIT_RE = re.compile(r"^[A-Za-z0-9@._\-\\]+\.service$")
+_TIME_RE = r"[0-9]+(?:\.[0-9]+)?(?:h|min|ms|us|s)(?:\s+[0-9]+(?:\.[0-9]+)?(?:h|min|ms|us|s))*"
 ACTIONS = ("enable", "disable", "start", "stop", "restart")
 _PAST_TENSE = {
     "enable": "enabled",
@@ -35,9 +36,13 @@ def parse_list_units(text: str) -> List[dict]:
     """
     units: List[dict] = []
     for line in (text or "").splitlines():
-        line = line.rstrip()
+        line = line.strip()
         if not line:
             continue
+        # systemctl prefixes failed units with a status bullet on many
+        # systems; it is not part of the unit name.
+        if line.startswith("●"):
+            line = line[1:].lstrip()
         parts = line.split(None, 4)
         if len(parts) < 5 or not parts[0].endswith(".service"):
             continue
@@ -99,13 +104,11 @@ def set_service_state(unit: str, action: str, log=None) -> utils.Outcome:
 def parse_analyze(text: str) -> Dict[str, str]:
     """Parse ``systemd-analyze`` summary output into phase -> seconds."""
     info: Dict[str, str] = {}
-    match = re.search(
-        r"=\s*([0-9.]+(?:ms|s|min))\s*$", text or "")
+    match = re.search(r"=\s*(" + _TIME_RE + r")\s*(?:$|\n)", text or "")
     if match:
         info["total"] = match.group(1)
     for phase in ("firmware", "loader", "kernel", "userspace", "initrd"):
-        match = re.search(
-            r"([0-9.]+(?:ms|s|min))\s*\(\s*" + phase, text or "")
+        match = re.search(r"(" + _TIME_RE + r")\s*\(\s*" + phase, text or "")
         if match:
             info[phase] = match.group(1)
     return info
@@ -115,9 +118,9 @@ def parse_blame(text: str, limit: int = 8) -> List[Tuple[str, str]]:
     """Parse ``systemd-analyze blame`` into (unit, seconds), slowest first."""
     rows: List[Tuple[str, str]] = []
     for line in (text or "").splitlines():
-        parts = line.split(None, 1)
-        if len(parts) == 2 and parts[0][0].isdigit() and parts[1].endswith(".service"):
-            rows.append((parts[1].strip(), parts[0].strip()))
+        match = re.match(r"^\s*(" + _TIME_RE + r")\s+(\S+\.service)\s*$", line)
+        if match:
+            rows.append((match.group(2), match.group(1)))
         if len(rows) >= limit:
             break
     return rows

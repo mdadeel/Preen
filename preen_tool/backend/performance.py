@@ -17,6 +17,9 @@ SWAPFILE = "/swapfile"
 FSTAB_ENTRY = SWAPFILE + " none swap sw 0 0"
 ZRAM_CFG = "/etc/systemd/zram-generator.conf"
 ZRAM_UNIT = "systemd-zram-setup@zram0.service"
+ZRAM_MARKER = "# Managed by Preen"
+_LEGACY_ZRAM_CONFIG = "[zram0]\nzram-size = ram / 2\ncompression-algorithm = zstd\n"
+_ZRAM_CONFIG = ZRAM_MARKER + "\n" + _LEGACY_ZRAM_CONFIG
 POWER_PROFILES = ("balanced", "power-saver", "performance")
 
 
@@ -86,17 +89,30 @@ def enable_swapfile(size_gb: int = 2, log=None) -> Outcome:
 
     if is_swapfile_active():
         return ok("{} is already active.".format(SWAPFILE))
+    if os.path.lexists(SWAPFILE):
+        return fail("{} already exists but is not active; Preen will not overwrite or format it.".format(SWAPFILE))
 
     size_mb = size_gb * 1024
     script = "\n".join([
         "set -e",
-        "if [ ! -e {f} ]; then".format(f=shlex.quote(SWAPFILE)),
-        "  fallocate -l {n}G {f} 2>/dev/null || dd if=/dev/zero of={f} bs=1M count={m} status=none".format(
+        # Repeat the check under polkit and atomically create a new file; do
+        # not format an inactive file that appeared while authorising.
+        "if [ -e {f} ] || [ -L {f} ]; then echo 'Swapfile already exists; refusing to overwrite' >&2; exit 1; fi".format(
+            f=shlex.quote(SWAPFILE)),
+        "(umask 077; set -C; : > {f}) || {{ echo 'Could not create new swapfile safely' >&2; exit 1; }}".format(
+            f=shlex.quote(SWAPFILE)),
+        # If setup fails before swapon, remove only the new file. Once active,
+        # keep it even if adding the fstab entry fails.
+        "activated=0",
+        "cleanup_new_swap() {{ if [ \"$activated\" = 0 ]; then rm -f -- {f}; fi; }}".format(
+            f=shlex.quote(SWAPFILE)),
+        "trap cleanup_new_swap EXIT",
+        "fallocate -l {n}G {f} 2>/dev/null || dd if=/dev/zero of={f} bs=1M count={m} status=none".format(
             n=size_gb, f=shlex.quote(SWAPFILE), m=size_mb),
-        "fi",
         "chmod 600 " + shlex.quote(SWAPFILE),
         "mkswap " + shlex.quote(SWAPFILE) + " >/dev/null",
         "swapon " + shlex.quote(SWAPFILE),
+        "activated=1",
         "if [ -n \"$(tail -c 1 /etc/fstab)\" ]; then printf '\\n' >> /etc/fstab; fi",
         "grep -qxF {entry} /etc/fstab || printf '%s\\n' {entry} >> /etc/fstab".format(
             entry=shlex.quote(FSTAB_ENTRY)),
@@ -113,6 +129,8 @@ def disable_swapfile(log=None) -> Outcome:
     # Do NOT touch anything unless this tool's swapfile actually exists.
     # (The old implementation ran `rm -f /swapfile` and rewrote /etc/fstab
     # every single time the user pressed "Run Optimization".)
+    if os.path.islink(SWAPFILE) or (os.path.exists(SWAPFILE) and not os.path.isfile(SWAPFILE)):
+        return fail("{} is not a regular file; refusing to remove it.".format(SWAPFILE))
     if not os.path.exists(SWAPFILE) and not is_swapfile_active():
         return ok("No {} to disable.".format(SWAPFILE))
     if is_simulate():
@@ -122,7 +140,10 @@ def disable_swapfile(log=None) -> Outcome:
     sed_expr = r"/^[[:space:]]*\/swapfile[[:space:]]/d"
     script = "\n".join([
         "set -e",
-        "if swapon --show=NAME --noheadings 2>/dev/null | grep -qx {f}; then swapoff {f}; fi".format(
+        "if [ -L {f} ] || {{ [ -e {f} ] && [ ! -f {f} ]; }}; then echo 'Swapfile is not a regular file; refusing' >&2; exit 1; fi".format(
+            f=shlex.quote(SWAPFILE)),
+        "devices=$(swapon --show=NAME --noheadings) || { echo 'Cannot read active swap devices; refusing' >&2; exit 1; }",
+        "if printf '%s\\n' \"$devices\" | grep -qxF {f}; then swapoff {f}; fi".format(
             f=shlex.quote(SWAPFILE)),
         "sed -i.zoptim.bak " + shlex.quote(sed_expr) + " /etc/fstab",
         "rm -f " + shlex.quote(SWAPFILE),
@@ -146,17 +167,44 @@ def _has_zram_generator() -> bool:
     return any(os.path.exists(path) for path in candidates)
 
 
+def _owns_zram_config() -> bool:
+    if os.path.islink(ZRAM_CFG) or not os.path.isfile(ZRAM_CFG):
+        return False
+    try:
+        with open(ZRAM_CFG, "r", encoding="utf-8") as handle:
+            return handle.read() in (_ZRAM_CONFIG, _LEGACY_ZRAM_CONFIG)
+    except (OSError, UnicodeError):
+        return False
+
+
+def _zram_config_guard():
+    """Recheck exact contents after authorisation, not just the marker."""
+    path = shlex.quote(ZRAM_CFG)
+    return ("if [ -L {p} ] || [ ! -f {p} ] || "
+            "{{ [ \"$(cat {p})\" != {new} ] && [ \"$(cat {p})\" != {old} ]; }}; "
+            "then echo 'ZRAM config changed or is not managed by Preen; refusing' >&2; exit 1; fi").format(
+                p=path, new=shlex.quote(_ZRAM_CONFIG.rstrip("\n")),
+                old=shlex.quote(_LEGACY_ZRAM_CONFIG.rstrip("\n")))
+
+
 def enable_zram(log=None) -> Outcome:
     if not _has_zram_generator():
         return fail("systemd-zram-generator is not installed. Install systemd-zram-generator first.")
-    if is_zram_configured() and is_zram_active():
+    configured = os.path.lexists(ZRAM_CFG)
+    if configured and not _owns_zram_config():
+        return fail("Existing ZRAM configuration is not managed by Preen; it will not be overwritten.")
+    if configured and is_zram_active():
         return ok("ZRAM is already configured and active.")
-    config = "[zram0]\nzram-size = ram / 2\ncompression-algorithm = zstd\n"
-    script = " && ".join([
-        "printf '%s' {cfg} > {path}".format(cfg=shlex.quote(config), path=shlex.quote(ZRAM_CFG)),
-        "systemctl daemon-reload",
-        "systemctl start " + shlex.quote(ZRAM_UNIT),
-    ])
+    if not configured and is_zram_active():
+        return fail("ZRAM is already active without a Preen-managed configuration; it was left unchanged.")
+    if configured:
+        setup = _zram_config_guard()
+    else:
+        path = shlex.quote(ZRAM_CFG)
+        setup = ("if [ -e {p} ] || [ -L {p} ]; then echo 'ZRAM config already exists; refusing' >&2; exit 1; fi; "
+                 "(umask 022; set -C; printf '%s' {cfg} > {p}) || exit 1").format(
+                     p=path, cfg=shlex.quote(_ZRAM_CONFIG))
+    script = " && ".join([setup, "systemctl daemon-reload", "systemctl start " + shlex.quote(ZRAM_UNIT)])
     result = run_cmd(["bash", "-c", script], use_pkexec=True, mutate=True, log=log)
     if not result.ok and not result.simulated:
         return fail("Could not enable ZRAM: {}".format(result.detail()))
@@ -164,17 +212,22 @@ def enable_zram(log=None) -> Outcome:
 
 
 def disable_zram(log=None) -> Outcome:
-    if not is_zram_configured() and not is_zram_active():
+    configured = os.path.lexists(ZRAM_CFG)
+    active = is_zram_active()
+    if not configured and not active:
         return ok("ZRAM is not configured.")
+    if not configured or not _owns_zram_config():
+        return fail("ZRAM is not managed by Preen or its configuration was edited; it was left unchanged.")
     if is_simulate():
         if log:
             log.append("[simulate] would disable ZRAM and remove {}\n".format(ZRAM_CFG))
         return ok("Would disable ZRAM.")
-    script = " && ".join([
-        "(systemctl stop {unit} 2>/dev/null || true)".format(unit=shlex.quote(ZRAM_UNIT)),
-        "rm -f " + shlex.quote(ZRAM_CFG),
-        "systemctl daemon-reload",
-    ])
+    steps = [_zram_config_guard()]
+    if active:
+        # Do not delete the config or claim success if stopping active swap fails.
+        steps.append("systemctl stop " + shlex.quote(ZRAM_UNIT))
+    steps.extend(["rm -f " + shlex.quote(ZRAM_CFG), "systemctl daemon-reload"])
+    script = " && ".join(steps)
     result = run_cmd(["bash", "-c", script], use_pkexec=True, mutate=True, log=log)
     if not result.ok and not result.simulated:
         return fail("Could not disable ZRAM: {}".format(result.detail()))

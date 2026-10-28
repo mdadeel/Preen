@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
+import shutil
+import stat
 import subprocess
 import tarfile
 import time
@@ -70,6 +73,89 @@ def export_configs(dest_tar: str, log=None) -> Outcome:
     return ok("Config exported to {}.".format(dest_tar))
 
 
+def _destination_conflicts(members):
+    """Detect existing links/non-regular files before changing any config."""
+    conflicts = []
+    if os.path.islink(CONFIG_DIR):
+        return ["configuration directory is a symbolic link"]
+    for member in members:
+        path = CONFIG_DIR
+        parts = member.name.rstrip("/").split("/")
+        for index, part in enumerate(parts):
+            path = os.path.join(path, part)
+            try:
+                mode = os.lstat(path).st_mode
+            except FileNotFoundError:
+                break
+            except OSError as exc:
+                conflicts.append("{} ({})".format(member.name, exc))
+                break
+            needs_dir = index < len(parts) - 1 or member.isdir()
+            if stat.S_ISLNK(mode) or (needs_dir and not stat.S_ISDIR(mode)) or (
+                    not needs_dir and not stat.S_ISREG(mode)):
+                conflicts.append("{} (destination is a link or incompatible file)".format(member.name))
+                break
+    return conflicts
+
+
+def _extract_configs(tar, members):
+    """Extract via directory descriptors without following destination links.
+
+    This works on Python versions without tarfile's ``filter=`` argument and
+    avoids a check-then-extract race through an existing symlink. Each file is
+    written to a sibling temporary file and atomically replaces the old file.
+    """
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    root_fd = os.open(CONFIG_DIR, directory_flags)
+    try:
+        for member in members:
+            parts = member.name.rstrip("/").split("/")
+            parent_fd = os.dup(root_fd)
+            try:
+                for part in parts[:-1]:
+                    try:
+                        os.mkdir(part, 0o700, dir_fd=parent_fd)
+                    except FileExistsError:
+                        pass
+                    next_fd = os.open(part, directory_flags, dir_fd=parent_fd)
+                    os.close(parent_fd)
+                    parent_fd = next_fd
+                leaf = parts[-1]
+                if member.isdir():
+                    try:
+                        os.mkdir(leaf, member.mode, dir_fd=parent_fd)
+                    except FileExistsError:
+                        fd = os.open(leaf, directory_flags, dir_fd=parent_fd)
+                        os.close(fd)
+                    continue
+                try:
+                    existing = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    existing = None
+                if existing is not None and not stat.S_ISREG(existing.st_mode):
+                    raise OSError("Refusing non-regular destination: {}".format(member.name))
+                source = tar.extractfile(member)
+                if source is None:
+                    raise tarfile.ExtractError("Cannot read {}".format(member.name))
+                temporary = ".preen-restore-" + secrets.token_hex(12)
+                fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             member.mode, dir_fd=parent_fd)
+                try:
+                    with source, os.fdopen(fd, "wb") as output:
+                        shutil.copyfileobj(source, output)
+                    os.replace(temporary, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+                finally:
+                    try:
+                        os.unlink(temporary, dir_fd=parent_fd)
+                    except FileNotFoundError:
+                        pass
+            finally:
+                os.close(parent_fd)
+    finally:
+        os.close(root_fd)
+
+
 def import_configs(src_tar: str, log=None, dry_safety_check: bool = True) -> Outcome:
     """Restore a config archive inside ~/.config and nowhere else."""
     src_tar = os.path.abspath(os.path.expanduser(src_tar))
@@ -93,14 +179,13 @@ def import_configs(src_tar: str, log=None, dry_safety_check: bool = True) -> Out
             return fail("Archive has no safe files to restore.")
         if dry_safety_check and rejected:
             return fail("Refusing to import: archive contains unsafe entries (path traversal, links or devices).")
+        conflicts = _destination_conflicts(members)
+        if conflicts:
+            return fail("Refusing to import through unsafe or incompatible destination paths.", *conflicts[:5])
         try:
-            os.makedirs(CONFIG_DIR, exist_ok=True)
-            try:
-                tar.extractall(path=CONFIG_DIR, members=members, filter="data")
-            except TypeError:  # Python < 3.12
-                tar.extractall(path=CONFIG_DIR, members=members)
+            _extract_configs(tar, members)
         except (OSError, tarfile.TarError) as exc:
-            return fail("Import failed: {}".format(exc))
+            return fail("Import failed; some earlier files may already have been restored: {}".format(exc))
 
     if log:
         log.append("[backup] imported {} file(s) into {}\n".format(len(members), CONFIG_DIR))
@@ -112,6 +197,7 @@ def inspect_archive(src_tar: str):
     try:
         with tarfile.open(src_tar, "r:*") as tar:
             members, rejected = utils.safe_tar_members(tar, strip_prefixes=(".config/", "config/"))
+            rejected.extend(_destination_conflicts(members))
             return len(members), rejected
     except (OSError, tarfile.TarError):
         return 0, ["cannot read archive"]
@@ -123,17 +209,21 @@ def inspect_archive(src_tar: str):
 def parse_snapshot_list(text: str):
     """Parse ``timeshift --list`` rows into plain dicts.
 
-    Rows look like ``0  2024-01-15_10-00-00  D  daily snapshot  2024-01-15 10:00:01``.
-    The date always occupies the last two tokens; the description is whatever
-    sits between the tags and the date and may be empty.
+    Rows may contain a ``>`` marker and often have no description or separate
+    date column. Some Timeshift versions add a date as the last two tokens.
     """
     snapshots = []
     for line in (text or "").splitlines():
         fields = line.split()
-        if len(fields) < 4 or not fields[0].isdigit():
+        if not fields or not fields[0].isdigit():
             continue
-        num, name, tags = fields[0], fields[1], fields[2]
-        tail = fields[3:]
+        num, fields = fields[0], fields[1:]
+        if fields and fields[0] == ">":
+            fields = fields[1:]
+        if len(fields) < 2:
+            continue
+        name, tags = fields[:2]
+        tail = fields[2:]
         description, date = "", ""
         # The date always occupies the final two tokens (date then time),
         # so peel it off from the right and keep every word of the
@@ -153,20 +243,48 @@ def parse_snapshot_list(text: str):
     return snapshots
 
 
-def list_snapshots(log=None):
-    """Read-only Timeshift snapshot list; empty when Timeshift is absent."""
+def list_snapshots(privileged=False, log=None):
+    """List snapshots, using polkit only for an explicit user refresh.
+
+    Timeshift normally requires root even to list snapshots. Startup probes
+    without prompting; an explicit refresh can request authorisation. In
+    simulation the privileged command is previewed but never executed.
+    """
     if not has_command("timeshift"):
-        return []
-    result = run_cmd(["timeshift", "--list"], log=log, timeout=utils.DEFAULT_TIMEOUT)
+        if log:
+            log.append("[warning] Timeshift is not installed; snapshot list unavailable.\n")
+        return None
+    if is_simulate() and not privileged:
+        if log:
+            log.append("[simulate] skipped the Timeshift startup probe.\n")
+        return None
+    if privileged and not is_simulate() and log:
+        log.append("[timeshift] Requesting administrator access to list snapshots.\n")
+    result = run_cmd(["timeshift", "--list"], use_pkexec=privileged, mutate=privileged,
+                     env={"LC_ALL": "C"}, log=log, timeout=120,
+                     quiet=not (privileged and is_simulate()))
+    if result.simulated:
+        return None
     if not result.ok:
-        return []
+        # Timeshift itself exits 1 for a successful query with no snapshots.
+        if "No snapshots found" in result.out and not result.err.strip():
+            if log:
+                log.append("[timeshift] No snapshots found.\n")
+            return []
+        if log:
+            log.append("[warning] Timeshift list unavailable (exit {}). "
+                       "Use Refresh List or Open Timeshift for administrator access.\n".format(result.code))
+            for label, output in (("stdout", result.out), ("stderr", result.err)):
+                if output:
+                    log.append("[{}]\n{}{}".format(label, output, "" if output.endswith("\n") else "\n"))
+        return None
     return parse_snapshot_list(result.out)
 
 def timeshift_snapshot(comment: str = None, log=None) -> Outcome:
     if not has_command("timeshift"):
         return fail("Timeshift is not installed. Install it first (sudo apt install timeshift).")
     comment = comment or "Preen {}".format(time.strftime("%Y-%m-%d %H:%M"))
-    result = run_cmd(["timeshift", "--create", "--comments", comment, "--tags", "D"],
+    result = run_cmd(["timeshift", "--create", "--comments", comment, "--tags", "O"],
                      use_pkexec=True, mutate=True, log=log, timeout=utils.DEFAULT_TIMEOUT)
     if not result.ok and not result.simulated:
         return fail("Timeshift snapshot failed: {}".format(result.detail()))

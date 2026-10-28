@@ -64,11 +64,26 @@ elif name == "dpkg":
         code = 1
 elif name == "gsettings":
     action = args[0] if args else ""
-    if action == "get":
-        key = args[-1] if args else ""
-        out = "'" + str(state.get("gsettings", {}).get(key, "true")) + "'\n"
-    elif action == "set":
-        pass
+    defaults = {"color-scheme": "default", "gtk-theme": "Adwaita",
+                "enable-animations": "true", "text-scaling-factor": "1.0",
+                "icon-theme": "Adwaita"}
+    keys = state.get("gsettings_keys", list(defaults))
+    if action == "list-keys":
+        out = "\n".join(keys) + "\n"
+    elif action in ("get", "set") and len(args) >= 3:
+        key = args[2]
+        if key not in keys:
+            err, code = "No such key '{}'".format(key), 1
+        elif action == "get" and state.get("gsettings_fail_get") == key:
+            err, code = "Could not read {}".format(key), 1
+        elif action == "get":
+            out = "'" + str(state.get("gsettings", {}).get(key, defaults.get(key, ""))) + "'\n"
+        elif state.get("gsettings_fail_set") == key:
+            err, code = "Could not write {}".format(key), 1
+        else:
+            state.setdefault("gsettings", {})[key] = args[3]
+            with open(state_path, "w", encoding="utf-8") as handle:
+                json.dump(state, handle)
     else:
         code = 1
 elif name == "swapon":
@@ -76,7 +91,13 @@ elif name == "swapon":
 elif name == "powerprofilesctl":
     if args and args[0] == "get":
         out = state.get("power", "balanced") + "\n"
-elif name in ("pkexec", "bash", "sh", "timeshift", "timeshift-gtk", "timeshift-launcher"):
+elif name == "timeshift":
+    if args and args[0] == "--list":
+        out = state.get("timeshift_list", "")
+        err = state.get("timeshift_error", "")
+        code = state.get("timeshift_exit", 0)
+    # Never execute a privileged snapshot in tests.
+elif name in ("pkexec", "bash", "sh", "timeshift-gtk", "timeshift-launcher"):
     pass  # deliberately do NOT execute privileged scripts in tests
 elif name == "failcmd":
     out, err, code = "", "boom: something broke", 3
@@ -151,7 +172,7 @@ class FakeSystem:
         result = []
         for entry in self.commands():
             cmd, args = entry["cmd"], entry["args"]
-            if cmd in MUTATING:
+            if cmd in MUTATING and not (cmd == "timeshift" and args and args[0] == "--list"):
                 result.append(entry)
             elif cmd == "gsettings" and args and args[0] == "set":
                 result.append(entry)

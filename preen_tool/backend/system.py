@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from . import utils
 from .utils import Outcome, Report, fail, format_cmd, has_command, is_simulate, ok, run_cmd
@@ -33,13 +33,15 @@ def run_cleanup(log=None) -> Outcome:
 # ---------------------------------------------------------------------------
 # Animations
 # ---------------------------------------------------------------------------
-def are_animations_enabled() -> bool:
+def are_animations_enabled() -> Optional[bool]:
     if not has_command("gsettings"):
-        return True
-    result = run_cmd(["gsettings", "get", "org.gnome.desktop.interface", "enable-animations"])
+        return None
+    result = run_cmd(["gsettings", "get", "org.gnome.desktop.interface", "enable-animations"],
+                     quiet=True)
     if not result.ok:
-        return True
-    return result.out.strip().lower() in ("true", "'true'")
+        return None
+    value = result.out.strip().strip("'\"").lower()
+    return {"true": True, "false": False}.get(value)
 
 
 def set_animations(enabled: bool, log=None) -> Outcome:
@@ -60,16 +62,18 @@ def set_animations(enabled: bool, log=None) -> Outcome:
 # ---------------------------------------------------------------------------
 # Startup applications
 # ---------------------------------------------------------------------------
-def list_startup_apps() -> List[Dict]:
-    """Merge system entries with user overrides (user wins, no duplicates)."""
+def list_startup_apps(log=None) -> Optional[List[Dict]]:
+    """Merge startup entries; return None if a directory could not be read."""
     by_name: Dict[str, Dict] = {}
     for directory in AUTOSTART_DIRS:
         if not os.path.isdir(directory):
             continue
         try:
             names = sorted(os.listdir(directory))
-        except OSError:
-            continue
+        except OSError as exc:
+            if log:
+                log.append("[warning] Could not read startup applications in {}: {}\n".format(directory, exc))
+            return None
         for filename in names:
             if not filename.endswith(".desktop"):
                 continue

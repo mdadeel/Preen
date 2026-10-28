@@ -23,6 +23,9 @@ from preen_tool.backend import utils  # noqa: E402
 
 
 class FakeTextBuffer:
+    def __init__(self):
+        self.text = ""
+
     def get_end_iter(self):
         return object()
 
@@ -35,8 +38,8 @@ class FakeTextBuffer:
     def get_line_count(self):
         return 1
 
-    def insert(self, *_args):
-        return None
+    def insert(self, _where, text):
+        self.text += text
 
     def delete(self, *_args):
         return None
@@ -47,8 +50,8 @@ class FakeTextBuffer:
     def delete_mark(self, *_args):
         return None
 
-    def set_text(self, *_args):
-        return None
+    def set_text(self, text):
+        self.text = text
 
 
 class FakeStyleContext:
@@ -131,7 +134,9 @@ class Widget:
             child.show_all()
 
     def remove(self, child):
-        if child in self._children:
+        if isinstance(child, int) and 0 <= child < len(self._texts):
+            self._texts.pop(child)
+        elif child in self._children:
             self._children.remove(child)
 
     def get_content_area(self):
@@ -199,11 +204,31 @@ class FakeImage(Widget):
         return cls()
 
 
+class FakeToggleButton(Widget):
+    """GTK 3 may emit clicked from set_active, not just on pointer clicks."""
+
+    def set_active(self, value):
+        changed = bool(value) != bool(self._active)
+        self._active = bool(value)
+        if changed:
+            for handler in self._handlers.get("clicked", []):
+                handler(self)
+
+    def clicked(self):
+        self.set_active(not self.get_active())
+
+
+class FakeCssProvider(Widget):
+    def load_from_data(self, css):
+        self.css = css
+
+
 class FakeGtk:
     ApplicationWindow = Widget
     Application = Widget
     Box = Widget
     Button = Widget
+    ToggleButton = FakeToggleButton
     CheckButton = Widget
     ComboBoxText = Widget
     Dialog = Widget
@@ -228,7 +253,7 @@ class FakeGtk:
     Spinner = Widget
     Frame = Widget
     AboutDialog = Widget
-    CssProvider = Widget
+    CssProvider = FakeCssProvider
 
     class StyleContext:
         @staticmethod
@@ -285,6 +310,7 @@ class GuiRuntimeTest(unittest.TestCase):
         repo = types.ModuleType("gi.repository")
         repo.Gtk = FakeGtk()
         repo.GLib = FakeGLib()
+        repo.Gio = SimpleNamespace(SettingsSchemaSource=SimpleNamespace(get_default=lambda: None))
         repo.Gdk = SimpleNamespace(
             Screen=SimpleNamespace(get_default=lambda: object()))
         repo.Pango = SimpleNamespace(
@@ -331,6 +357,12 @@ class GuiRuntimeTest(unittest.TestCase):
                         if getattr(r, "page_name", False) is None]
         self.assertEqual(len(section_rows), 4)
 
+    def test_startup_prioritizes_reading_appearance_before_package_scans(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        with mock.patch.object(window, "submit") as submit:
+            window._start_initial_tasks()
+        self.assertEqual(submit.call_args_list[0].args[0], window._read_settings)
+
     def test_snapshot_refresh_keeps_export_and_import_controls(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
         callbacks = [handler.__name__ for button in window.action_widgets
@@ -344,6 +376,9 @@ class GuiRuntimeTest(unittest.TestCase):
         self.assertEqual(len(window.snapshot_listbox.get_children()), 1)
         window.submit(lambda: [], done=window._apply_snapshots)
         self.assertEqual(len(window.snapshot_listbox.get_children()), 0)
+        self.assertIn("No snapshots found", window.snapshot_empty.get_text())
+        window._apply_snapshots(None)
+        self.assertIn("unavailable", window.snapshot_empty.get_text().lower())
         self.assertNotIn("UI update failed", "".join(window.log_buf.lines))
 
     def test_busy_queue_is_serial_and_locks_simulation_until_callbacks_finish(self):
@@ -434,6 +469,242 @@ class GuiRuntimeTest(unittest.TestCase):
             actions = submit.call_args.args[1]
             self.assertEqual([action[0] for action in actions], ["Power profile"])
 
+    def test_segmented_source_handles_recursive_gtk_toggle_signals_once(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        source = window.install_source
+        changed = mock.Mock()
+        source.on_changed = changed
+        source.buttons[1].clicked()
+        self.assertEqual(source.get_active_text(), "APT")
+        self.assertFalse(source.buttons[0].get_active())
+        self.assertTrue(source.buttons[1].get_active())
+        changed.assert_called_once()
+        source.buttons[1].clicked()  # selected item stays selected, no refresh
+        self.assertEqual(source.get_active_text(), "APT")
+        self.assertTrue(source.buttons[1].get_active())
+        changed.assert_called_once()
+        source.set_active(0)  # preference restore is not a user click
+        self.assertEqual(source.get_active_text(), "Flatpak")
+        changed.assert_called_once()
+
+    def test_startup_app_scan_runs_in_worker_before_showing_dialog(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        with mock.patch.object(window, "submit") as submit, \
+                mock.patch.object(self.gui.system_backend, "list_startup_apps") as scan:
+            window.on_manage_startup(None)
+            scan.assert_not_called()
+            self.assertIs(submit.call_args.args[0], scan)
+            self.assertEqual(submit.call_args.kwargs["done"], window._show_startup_dialog)
+
+    def test_backup_inspection_is_queued_and_unsafe_archives_are_not_confirmed(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        with mock.patch.object(window, "_open_dialog", return_value="/tmp/config.tar"), \
+                mock.patch.object(window, "submit") as submit, \
+                mock.patch.object(self.gui.backup_backend, "inspect_archive") as inspect, \
+                mock.patch.object(window, "_confirm", return_value=True) as confirm:
+            window.on_import_config(None)
+            inspect.assert_not_called()  # inspection is handed to the worker
+            self.assertIs(submit.call_args.args[0], inspect)
+            callback = submit.call_args.kwargs["done"]
+            submit.reset_mock()
+            callback((1, ["unsafe symlink"]))
+            confirm.assert_not_called()
+            submit.assert_not_called()
+            self.assertIn("Nothing was restored", window.banner_label.get_text())
+            window._dismiss_banner()
+            callback((2, []))
+            confirm.assert_called_once()
+            self.assertIs(submit.call_args.args[0], self.gui.backup_backend.import_configs)
+
+    def test_theme_changes_palette_without_discarding_other_staged_settings(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_settings({"animations_off": False, "swap": False, "zram": False,
+                                "power": "balanced", "theme": "light", "round": False,
+                                "scaling": 1.0, "warnings": []})
+        self.assertEqual(window._app_theme, "light")
+        self.assertEqual(window._css_provider.css, self.gui._LIGHT_CSS)
+        window.chk_animations.set_active(True)
+        window.chk_round.set_active(True)
+        window.cmb_scaling.set_active(2)
+        window.cmb_theme.set_active(1)
+        with mock.patch.object(utils, "_simulate", False), \
+                mock.patch.object(self.gui.ui_backend, "apply_theme_mode",
+                                  return_value=utils.ok("Applied")) as apply, \
+                mock.patch.object(self.gui.ui_backend, "get_theme_mode", return_value="dark"):
+            window.on_apply_theme(None)
+        apply.assert_called_once()
+        self.assertEqual(window._app_theme, "dark")
+        self.assertEqual(window._css_provider.css, self.gui._CSS)
+        self.assertTrue(window.chk_animations.get_active())
+        self.assertTrue(window.chk_round.get_active())
+        self.assertEqual(window.cmb_scaling.get_active(), 2)
+        self.assertEqual(window.baseline["scaling"], 1.0)
+        self.assertFalse(window.baseline["round"])
+
+    def test_snapshot_refresh_requests_authorization_only_on_explicit_click(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        with mock.patch.object(utils, "_simulate", False), mock.patch.object(window, "submit") as submit:
+            window.on_refresh_snapshots(None)
+            self.assertIs(submit.call_args.args[0], self.gui.backup_backend.list_snapshots)
+            self.assertEqual(submit.call_args.args[1:], (True,))
+        with mock.patch.object(utils, "_simulate", True), mock.patch.object(window, "submit") as submit:
+            window.on_refresh_snapshots(None)
+            submit.assert_not_called()
+            self.assertIn("not refreshed", window.banner_label.get_text())
+        with mock.patch.object(utils, "_simulate", False), mock.patch.object(window, "submit") as submit:
+            window.on_snapshot(None)
+            callback = submit.call_args.kwargs["done"]
+            submit.reset_mock()
+            callback(utils.ok("Snapshot requested"))
+            submit.assert_not_called()  # no automatic second authentication prompt
+
+    def test_theme_monitor_registers_only_available_gnome_keys(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        schema = SimpleNamespace(has_key=lambda key: key == "gtk-theme")
+        source = SimpleNamespace(lookup=lambda _name, _recursive: schema)
+        settings = mock.Mock()
+        with mock.patch.object(self.gui.Gio.SettingsSchemaSource, "get_default", return_value=source), \
+                mock.patch.object(self.gui.Gio, "Settings", create=True) as settings_type:
+            settings_type.new_full.return_value = settings
+            window._watch_desktop_appearance()
+        settings.connect.assert_called_once_with("changed::gtk-theme", window._on_desktop_appearance_changed)
+
+    def test_external_theme_change_updates_palette_without_losing_staged_choice(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_theme_setting("light")
+        window.cmb_theme.set_active(1)  # user has staged Dark
+        with mock.patch.object(self.gui.ui_backend, "get_theme_mode", return_value="light"):
+            window._on_desktop_appearance_changed()
+        self.assertEqual(window._app_theme, "light")
+        self.assertEqual(window.cmb_theme.get_active_text(), "Dark")
+        with mock.patch.object(self.gui.ui_backend, "get_theme_mode", return_value="dark"):
+            window._on_desktop_appearance_changed()
+        self.assertEqual(window._app_theme, "dark")
+        self.assertEqual(window.baseline["theme"], "dark")
+        self.assertEqual(window.cmb_theme.get_active_text(), "Dark")
+
+    def test_simulated_theme_keeps_actual_palette_and_can_be_retried(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_theme_setting("light")
+        window.cmb_theme.set_active(1)
+        with mock.patch.object(self.gui.ui_backend, "apply_theme_mode",
+                               return_value=utils.ok("Simulation complete")), \
+                mock.patch.object(self.gui.ui_backend, "get_theme_mode", return_value="light"):
+            window.on_apply_theme(None)
+        self.assertEqual(window._app_theme, "light")
+        self.assertEqual(window.cmb_theme.get_active_text(), "Light")
+        self.assertEqual(window.baseline["theme"], "light")
+        window.cmb_theme.set_active(1)
+        with mock.patch.object(window, "submit") as submit:
+            window.on_apply_look(None)
+            self.assertEqual(submit.call_args.args[1][0][0], "Theme")
+
+    def test_custom_and_unreadable_scaling_are_never_silently_overwritten(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        info = {"theme": "light", "round": False, "scaling": 1.23}
+        window._apply_look_settings(info)
+        self.assertEqual(window.cmb_scaling.get_active_text(), "Custom (123%)")
+        window.cmb_theme.set_active(1)
+        with mock.patch.object(window, "submit") as submit:
+            window.on_apply_look(None)
+            self.assertEqual([action[0] for action in submit.call_args.args[1]], ["Theme"])
+        window.cmb_scaling.set_active(0)
+        with mock.patch.object(window, "submit") as submit:
+            window.on_apply_look(None)
+            self.assertEqual([action[0] for action in submit.call_args.args[1]], ["Theme", "Text size"])
+        window._apply_look_settings(dict(info, scaling=None))
+        self.assertEqual(window.cmb_scaling.get_active_text(), "Unavailable")
+        self.assertFalse(window.cmb_scaling.get_sensitive())
+        window.cmb_theme.set_active(1)
+        with mock.patch.object(window, "submit") as submit:
+            window.on_apply_look(None)
+            self.assertEqual([action[0] for action in submit.call_args.args[1]], ["Theme"])
+
+    def test_optimize_builds_only_requested_actions_and_confirms_cleanup(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_settings({"animations_off": False, "swap": False, "zram": False,
+                                "power": "balanced", "theme": "light", "round": False,
+                                "scaling": 1.0, "warnings": []})
+        window.chk_cleanup.set_active(True)
+        window.chk_animations.set_active(True)
+        window.chk_swap.set_active(True)
+        window.cmb_swap_size.set_active(2)  # 4 GB
+        window.chk_zram.set_active(True)
+        window.cmb_power.set_active(self.gui.perf_backend.POWER_PROFILES.index("performance"))
+        with mock.patch.object(window, "submit") as submit, \
+                mock.patch.object(window, "_confirm", return_value=True) as confirm:
+            window.on_run_optimize(None)
+            confirm.assert_called_once()
+            actions = submit.call_args.args[1]
+        self.assertEqual([item[0] for item in actions],
+                         ["System cleanup", "GNOME animations", "Power profile", "Swapfile", "ZRAM"])
+        self.assertEqual(actions[1][2], (False,))
+        self.assertEqual(actions[2][2], ("performance",))
+        self.assertEqual(actions[3][2], (4,))
+        with mock.patch.object(window, "submit") as submit, \
+                mock.patch.object(window, "_confirm", return_value=False):
+            window.on_run_optimize(None)
+            submit.assert_not_called()
+
+    def test_disabling_swap_confirmation_names_the_file_to_be_removed(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_settings({"animations_off": False, "swap": True, "zram": False,
+                                "power": "balanced", "theme": "light", "round": False,
+                                "scaling": 1.0, "warnings": []})
+        window.chk_swap.set_active(False)
+        with mock.patch.object(window, "submit") as submit, \
+                mock.patch.object(window, "_confirm", return_value=False) as confirm:
+            window.on_run_optimize(None)
+            submit.assert_not_called()
+            self.assertIn("/swapfile", confirm.call_args.args[1])
+            self.assertIn("permanently removed", confirm.call_args.args[1])
+
+    def test_look_apply_dispatches_rounding_and_explicit_scaling(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_look_settings({"theme": "light", "round": False, "scaling": 1.0})
+        window.chk_round.set_active(True)
+        window.cmb_scaling.set_active(3)
+        with mock.patch.object(window, "submit") as submit:
+            window.on_apply_look(None)
+        actions = submit.call_args.args[1]
+        self.assertEqual([item[0] for item in actions], ["Rounded corners", "Text size"])
+        self.assertEqual(actions[0][2], (True,))
+        self.assertEqual(actions[1][2], (0.85,))
+
+    def test_optimize_and_look_refreshes_do_not_reset_other_page(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_settings({"animations_off": False, "swap": False, "zram": False,
+                                "power": "balanced", "theme": "light", "round": False,
+                                "scaling": 1.0, "warnings": []})
+        window.cmb_theme.set_active(1)
+        window.chk_round.set_active(True)
+        window._apply_optimize_settings({"animations_off": None, "swap": False,
+                                         "zram": False, "power": "balanced"})
+        self.assertEqual(window.cmb_theme.get_active_text(), "Dark")
+        self.assertTrue(window.chk_round.get_active())
+        self.assertFalse(window.chk_animations.get_sensitive())
+        self.assertIsNone(window.baseline["animations_off"])
+        window.chk_animations.set_active(True)
+        with mock.patch.object(window, "submit") as submit:
+            window.on_run_optimize(None)
+            submit.assert_not_called()
+
+    def test_service_actions_confirm_stop_restart_disable_and_queue_start_enable(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_services([{"unit": "demo.service", "active": "active", "sub": "running",
+                                 "description": "Demo", "unit_state": "enabled"}])
+        window._on_service_row_selected(window.services_listbox, window.services_listbox.get_children()[0])
+        with mock.patch.object(window, "submit") as submit, \
+                mock.patch.object(window, "_confirm", return_value=False) as confirm:
+            for action in ("stop", "restart", "disable"):
+                window.on_service_action(action)
+            self.assertEqual(confirm.call_count, 3)
+            submit.assert_not_called()
+            for action in ("start", "enable"):
+                window.on_service_action(action)
+            self.assertEqual(submit.call_count, 2)
+            self.assertEqual([c.args[2] for c in submit.call_args_list], ["start", "enable"])
+
     def test_partial_scans_and_unknown_cleanup_sizes_are_not_reported_as_zero(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
         window._fill_manage_rows(([], ["Flatpak scan failed"]))
@@ -474,6 +745,48 @@ class GuiRuntimeTest(unittest.TestCase):
             self.assertEqual(target.read_text(encoding="utf-8"), "keep")
             self.assertIn("No files were removed", window.banner_label.get_text())
             self.assertIn("[simulate] would clean", "".join(window.log_buf.lines))
+
+    def test_queued_log_filter_clear_and_append_render_each_line_once(self):
+        pending = []
+        buffer = FakeTextBuffer()
+        log = self.gui.LogBuffer(buffer, Widget())
+        with mock.patch.object(self.gui.GLib, "idle_add",
+                               side_effect=lambda func, *args: pending.append((func, args))):
+            log.append("alpha\n")
+            log.set_filter("")
+            log.append("beta\n")
+            self.assertEqual(len(pending), 1)
+            while pending:
+                func, args = pending.pop(0)
+                func(*args)
+            self.assertEqual(buffer.text.count("alpha"), 1)
+            self.assertEqual(buffer.text.count("beta"), 1)
+            log.set_filter("beta")
+            log.append("beta again\n")
+            while pending:
+                func, args = pending.pop(0)
+                func(*args)
+            self.assertNotIn("alpha", buffer.text)
+            self.assertEqual(buffer.text.count("beta"), 2)
+            log.clear()
+            log.set_filter("")
+            log.append("after clear\n")
+            while pending:
+                func, args = pending.pop(0)
+                func(*args)
+            self.assertNotIn("beta", buffer.text)
+            self.assertEqual(buffer.text.count("after clear"), 1)
+
+    def test_log_retention_drops_old_lines_from_view_and_saved_history(self):
+        buffer = FakeTextBuffer()
+        log = self.gui.LogBuffer(buffer, Widget())
+        with mock.patch.object(self.gui, "MAX_LOG_LINES", 3):
+            log.append("one\ntwo\nthree\n")
+            log.append("four\n")
+        self.assertEqual(len(log.lines), 3)
+        self.assertNotIn("one", buffer.text)
+        self.assertIn("four", buffer.text)
+        self.assertNotIn("one", "".join(log.lines))
 
     def test_log_filter_rebuilds_the_view(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
@@ -600,6 +913,13 @@ class GuiRuntimeTest(unittest.TestCase):
         # Clearing the query restores every row.
         window._on_sidebar_search_changed(SimpleNamespace(get_text=lambda: ""))
         self.assertTrue(all(window._sidebar_filter(row) for row in rows))
+
+    def test_every_swap_size_option_maps_to_its_requested_capacity(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        for index, size in enumerate((1, 2, 4, 8)):
+            with self.subTest(size=size):
+                window.cmb_swap_size.set_active(index)
+                self.assertEqual(window._swap_size(), size)
 
     def test_swap_size_combo_sensitivity_follows_switch(self):
         window = self.gui.MainWindow(self.gui.PreenApp())

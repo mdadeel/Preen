@@ -29,6 +29,25 @@ backend, package catalogue and serial task queue.
 
 ### Fixed
 
+- Light and dark appearance now update both Preen and supported GNOME
+  settings, including older GTK-theme-only desktops, external theme changes,
+  repeated toggles and simulation. Custom text scaling and settings staged on
+  other pages are preserved.
+- The package-source selector no longer recursively emits GTK toggle signals
+  and crash when switching Flatpak / APT. A failed Flathub setup no longer
+  silently skips an unrelated APT batch.
+- Timeshift lists parse the actual `>` marker and empty descriptions; an
+  explicit Refresh List can request polkit while startup never prompts.
+  Failed reads are not shown as empty, and manual snapshots use the on-demand tag.
+- Config restore inspects archives off the UI thread and refuses existing
+  destination symlinks; descriptor-based extraction protects older Python
+  versions too. Existing icon themes are backed up instead of deleted.
+- Existing inactive swapfiles and custom ZRAM configurations are not
+  reformatted or removed. Trash cleanup removes matching metadata safely.
+- Failed systemd rows and multi-part boot durations are parsed correctly;
+  queued log filtering, clearing and appends no longer duplicate entries.
+  Startup-app scans run in the worker, duplicate desktop keys are corrected,
+  and multi-step exceptions retain tracebacks.
 - Backup snapshot refresh no longer references an out-of-scope `page`; export
   and import controls are constructed with the Backup page.
 - Journal vacuum failures now reach the GUI and log instead of reporting success.

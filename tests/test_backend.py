@@ -6,6 +6,7 @@ Run with:  python3 -m unittest discover -s tests -v
 from __future__ import annotations
 
 import io
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -193,6 +194,8 @@ class BackendTestCase(unittest.TestCase):
         outcome = utils.run_actions([("broken step", broken, ())], log=self.log)
         self.assertFalse(outcome.ok)
         self.assertEqual(len(counter), 1, "a TypeError must not cause a second execution")
+        self.assertIn("Traceback", self.log.text())
+        self.assertIn("internal bug", self.log.text())
 
     # ------------------------------------------------------------------
     # Detection
@@ -288,6 +291,48 @@ class BackendTestCase(unittest.TestCase):
         scripts = [c["args"][-1] for c in self.fake.commands() if c["cmd"] == "pkexec"]
         self.assertTrue(any("apt-get install -y git" in script for script in scripts))
 
+    def test_update_and_uninstall_selected_use_installed_formats_once(self):
+        self.fake.update(flatpaks=["org.videolan.VLC"], apt={"vlc": "install ok installed"})
+        for operation, flatpak_action, apt_action in (
+                (apps.update_apps, "update", "--only-upgrade"),
+                (apps.uninstall_apps, "uninstall", "remove")):
+            with self.subTest(operation=operation.__name__):
+                self.fake.clear_log()
+                apps.invalidate_state()
+                result = operation(["vlc", "vlc"], "apt", log=self.log)
+                self.assertTrue(result.ok, result.message)
+                flatpak_calls = [c for c in self.fake.commands() if c["cmd"] == "flatpak" and
+                                 c["args"] and c["args"][0] == flatpak_action]
+                self.assertEqual(len(flatpak_calls), 1)
+                self.assertEqual(flatpak_calls[0]["args"].count("org.videolan.VLC"), 1)
+                apt_calls = [c for c in self.fake.commands() if c["cmd"] in ("pkexec", "bash")]
+                self.assertEqual(len(apt_calls), 1)
+                self.assertIn(apt_action, apt_calls[0]["args"][-1])
+
+    def test_update_all_dispatches_the_selected_source(self):
+        for source in ("flatpak", "apt"):
+            with self.subTest(source=source):
+                self.fake.clear_log()
+                result = apps.update_all(source, log=self.log)
+                self.assertTrue(result.ok, result.message)
+                commands = self.fake.mutating_commands()
+                self.assertEqual(len(commands), 1)
+                if source == "flatpak":
+                    self.assertEqual(commands[0]["cmd"], "flatpak")
+                    self.assertEqual(commands[0]["args"][0], "update")
+                else:
+                    self.assertIn("apt-get upgrade -y", commands[0]["args"][-1])
+
+    def test_flathub_failure_still_runs_unrelated_apt_fallback_and_reports_partial_failure(self):
+        with mock.patch.object(apps, "ensure_flathub", return_value=False):
+            result = apps.install_apps(["spotify", "git"], "flatpak", log=self.log)
+        self.assertFalse(result.ok)
+        self.assertIn("flathub", " ".join(result.details))
+        calls = self.fake.mutating_commands()
+        self.assertTrue(any(c["cmd"] in ("pkexec", "bash") and
+                            "apt-get install -y git" in c["args"][-1] for c in calls))
+        self.assertFalse(any(c["cmd"] == "flatpak" and c["args"][0] == "install" for c in calls))
+
     def test_scanner_entries_are_validated_and_essentials_protected(self):
         outcome = apps.uninstall_installed([
             {"source": "apt", "id": "foo; touch /tmp/pwned"},
@@ -376,7 +421,80 @@ class BackendTestCase(unittest.TestCase):
     def test_power_profile_is_validated(self):
         self.assertFalse(performance.set_power_profile("; rm -rf /", log=self.log).ok)
         self.assertEqual(self.fake.mutating_commands(), [])
-        self.assertTrue(performance.set_power_profile("performance", log=self.log).ok)
+        for profile in performance.POWER_PROFILES:
+            with self.subTest(profile=profile):
+                self.fake.clear_log()
+                self.assertTrue(performance.set_power_profile(profile, log=self.log).ok)
+                self.assertEqual(self.fake.mutating_commands()[-1]["args"], ["set", profile])
+
+    def test_all_gui_swap_sizes_produce_the_requested_safe_script(self):
+        self.fake.update(swap=[])
+        for size in (1, 2, 4, 8):
+            with self.subTest(size=size):
+                self.fake.clear_log()
+                self.assertTrue(performance.enable_swapfile(size, log=self.log).ok)
+                command = next(c for c in self.fake.commands() if c["cmd"] in ("pkexec", "bash"))
+                self.assertIn("fallocate -l {}G".format(size), command["args"][-1])
+
+    def test_swap_enable_refuses_existing_inactive_files_and_links(self):
+        self.fake.update(swap=[])
+        self.swapfile.write_bytes(b"important data")
+        result = performance.enable_swapfile(2, log=self.log)
+        self.assertFalse(result.ok)
+        self.assertIn("will not overwrite", result.message)
+        self.assertEqual(self.swapfile.read_bytes(), b"important data")
+        self.assertFalse(self.fake.mutating_commands())
+        self.swapfile.unlink()
+        self.swapfile.symlink_to(self.root / "missing")
+        self.assertFalse(performance.enable_swapfile(2).ok)
+        self.assertFalse(performance.disable_swapfile().ok)
+        self.assertFalse(self.fake.mutating_commands())
+        self.swapfile.unlink()
+        self.assertTrue(performance.enable_swapfile(2, log=self.log).ok)
+        script = [c for c in self.fake.commands() if c["cmd"] in ("pkexec", "bash")][-1]["args"][-1]
+        self.assertIn("set -C", script)
+        self.assertIn("refusing to overwrite", script)
+
+    def test_failed_swap_setup_removes_only_its_new_temporary_file(self):
+        self.fake.update(swap=[])
+        self.assertTrue(performance.enable_swapfile(2, log=self.log).ok)
+        script = [c for c in self.fake.commands() if c["cmd"] in ("pkexec", "bash")][-1]["args"][-1]
+        tools = self.root / "safe-tools"
+        tools.mkdir()
+        for name, exit_code in (("fallocate", 0), ("mkswap", 7)):
+            path = tools / name
+            path.write_text("#!/bin/sh\nexit {}\n".format(exit_code), encoding="utf-8")
+            path.chmod(0o755)
+        result = subprocess.run(["/bin/bash", "-c", script],
+                                env={"PATH": str(tools) + ":/usr/bin:/bin"},
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 7)
+        self.assertFalse(self.swapfile.exists())
+        self.assertIn("activated=1", script)
+        self.assertIn("trap cleanup_new_swap EXIT", script)
+
+    def test_custom_zram_config_is_never_replaced_or_removed(self):
+        custom = "[zram0]\nzram-size = ram\n# my settings\n"
+        self.zram_cfg.write_text(custom, encoding="utf-8")
+        self.fake.update(swap=[])
+        self.assertFalse(performance.enable_zram(log=self.log).ok)
+        self.assertFalse(performance.disable_zram(log=self.log).ok)
+        self.assertEqual(self.zram_cfg.read_text(encoding="utf-8"), custom)
+        self.assertFalse(self.fake.mutating_commands())
+        self.zram_cfg.unlink()
+        self.zram_cfg.symlink_to(self.root / "missing")
+        self.assertFalse(performance.enable_zram().ok)
+        self.assertFalse(performance.disable_zram().ok)
+        self.zram_cfg.unlink()
+        self.zram_cfg.write_text(performance._LEGACY_ZRAM_CONFIG, encoding="utf-8")
+        self.assertTrue(performance.enable_zram(log=self.log).ok)
+        self.assertTrue(performance.disable_zram(log=self.log).ok)
+        scripts = [c["args"][-1] for c in self.fake.commands() if c["cmd"] in ("pkexec", "bash")]
+        self.assertEqual(len(scripts), 2)
+        self.assertTrue(all("not managed by Preen" in script for script in scripts))
+        for script in scripts:
+            result = subprocess.run(["/bin/bash", "-n", "-c", script], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_startup_entries_are_merged_and_toggled_safely(self):
         system_entry = self.sys_autostart / "demo.desktop"
@@ -430,6 +548,17 @@ class BackendTestCase(unittest.TestCase):
         self.assertIn("X-GNOME-Autostart-enabled=false\n", content)
         self.assertTrue(utils.read_desktop_entry(str(path))[1])
 
+    def test_autostart_toggle_removes_conflicting_duplicate_keys(self):
+        path = self.user_autostart / "duplicates.desktop"
+        path.write_text("[Desktop Entry]\nType=Application\nName=Demo\nExec=demo\n"
+                        "Hidden=false\nHidden=true\nX-GNOME-Autostart-enabled=false\n"
+                        "X-GNOME-Autostart-enabled=true\n", encoding="utf-8")
+        self.assertTrue(system.set_startup_app(str(path), True).ok)
+        content = path.read_text(encoding="utf-8")
+        self.assertEqual(content.count("Hidden="), 1)
+        self.assertEqual(content.count("X-GNOME-Autostart-enabled="), 1)
+        self.assertTrue(system.list_startup_apps()[0]["enabled"])
+
     def test_config_export_import_roundtrip_with_symlinks_present(self):
         """An exported archive must always be restorable by this same tool."""
         (self.config_dir / "settings.ini").write_text("original\n", encoding="utf-8")
@@ -467,6 +596,43 @@ class BackendTestCase(unittest.TestCase):
         self.assertFalse((self.fake.home / "escape2.txt").exists())
         self.assertFalse((self.config_dir / "good.txt").exists())
 
+    def test_archive_restore_does_not_create_group_or_world_writable_files(self):
+        archive = self.root / "permissive.tar"
+        with tarfile.open(archive, "w") as tar:
+            payload = b"test"
+            member = tarfile.TarInfo(".config/writable.txt")
+            member.size = len(payload)
+            member.mode = 0o7777
+            tar.addfile(member, io.BytesIO(payload))
+        self.assertTrue(backup.import_configs(str(archive)).ok)
+        mode = (self.config_dir / "writable.txt").stat().st_mode
+        self.assertEqual(mode & 0o7022, 0)
+
+    def test_config_restore_refuses_preexisting_symlink_destinations(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        victim = outside / "victim.ini"
+        victim.write_text("keep", encoding="utf-8")
+        archive = self.root / "links.tar"
+        self._make_archive(archive, [(".config/linked/victim.ini", "file", "overwritten")])
+        (self.config_dir / "linked").symlink_to(outside, target_is_directory=True)
+        count, rejected = backup.inspect_archive(str(archive))
+        self.assertEqual(count, 1)
+        self.assertTrue(rejected)
+        self.assertFalse(backup.import_configs(str(archive)).ok)
+        self.assertEqual(victim.read_text(encoding="utf-8"), "keep")
+        # Even if a link appears after preflight, descriptor-based extraction
+        # refuses to follow it on Python versions lacking tarfile filters.
+        with mock.patch.object(backup, "_destination_conflicts", return_value=[]):
+            self.assertFalse(backup.import_configs(str(archive)).ok)
+        self.assertEqual(victim.read_text(encoding="utf-8"), "keep")
+
+        (self.config_dir / "linked").unlink()
+        (self.config_dir / "linked").mkdir()
+        (self.config_dir / "linked" / "victim.ini").symlink_to(victim)
+        self.assertFalse(backup.import_configs(str(archive)).ok)
+        self.assertEqual(victim.read_text(encoding="utf-8"), "keep")
+
     def test_icon_pack_refuses_traversal_and_installs_a_real_theme(self):
         evil = self.root / "evil-icons.tar.xz"
         self._make_archive(evil, [("../escaped-icons.txt", "file", "pwned")])
@@ -486,6 +652,34 @@ class BackendTestCase(unittest.TestCase):
                      if c["cmd"] == "gsettings" and c["args"][0] == "set"]
         self.assertTrue(any("MyIcons" in c["args"] for c in set_calls))
 
+    def test_nested_icon_theme_keeps_existing_theme_as_backup(self):
+        existing = self.fake.icons_dir / "MyIcons"
+        existing.mkdir()
+        (existing / "old.png").write_bytes(b"keep")
+        archive = self.root / "nested-icons.tar"
+        self._make_archive(archive, [
+            ("wrapper/MyIcons/index.theme", "file", "[Icon Theme]\nName=MyIcons\n"),
+            ("wrapper/MyIcons/new.png", "file", b"new"),
+        ])
+        outcome = ui_customization.install_icon_pack(str(archive), log=self.log)
+        self.assertTrue(outcome.ok, outcome.message)
+        self.assertTrue((existing / "index.theme").exists())
+        self.assertTrue((existing / "new.png").exists())
+        backups = list((self.fake.icons_dir / ".preen-backups").glob("MyIcons-*"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual((backups[0] / "old.png").read_bytes(), b"keep")
+        self.assertIn(str(backups[0]), self.log.text())
+        self.assertIn("MyIcons", self.fake.commands()[-1]["args"])
+
+    def test_icon_install_without_gsettings_does_not_claim_activation(self):
+        archive = self.root / "Standalone.tar"
+        self._make_archive(archive, [("index.theme", "file", "[Icon Theme]\nName=Standalone\n")])
+        with mock.patch.object(ui_customization, "has_command", return_value=False):
+            outcome = ui_customization.install_icon_pack(str(archive), log=self.log)
+        self.assertTrue(outcome.ok)
+        self.assertIn("could not activate", outcome.message)
+        self.assertTrue((self.fake.icons_dir / "Standalone" / "index.theme").exists())
+
     def test_rounded_corners_css_is_idempotent_and_removable(self):
         self.assertTrue(ui_customization.set_rounded_corners(True, log=self.log).ok)
         self.assertTrue(ui_customization.set_rounded_corners(True, log=self.log).ok)
@@ -494,6 +688,14 @@ class BackendTestCase(unittest.TestCase):
         self.assertTrue(ui_customization.set_rounded_corners(False, log=self.log).ok)
         self.assertNotIn("BEGIN ZORIN_OPTIMIZER_ROUNDED_CORNERS",
                          (self.css_dir / "gtk.css").read_text(encoding="utf-8"))
+
+    def test_incomplete_rounded_corners_marker_preserves_user_css(self):
+        self.css_dir.mkdir(exist_ok=True)
+        path = self.css_dir / "gtk.css"
+        original = "label { color: red; }\n" + ui_customization.START_GUARD + "user rules\n"
+        path.write_text(original, encoding="utf-8")
+        self.assertFalse(ui_customization.set_rounded_corners(False).ok)
+        self.assertEqual(path.read_text(encoding="utf-8"), original)
 
     # ------------------------------------------------------------------
     # CLI / doctor
@@ -549,10 +751,10 @@ class BackendTestCase(unittest.TestCase):
                 if c["cmd"] == "gsettings" and c["args"][:2] == ["set", "org.gnome.desktop.interface"]]
         self.assertTrue(any("text-scaling-factor" in c["args"] for c in sets))
 
-        # Unreadable values fall back to 1.0 instead of crashing.
+        # An unreadable value must not silently become a real 100% setting.
         with mock.patch.object(ui_customization, "run_cmd",
                                return_value=utils.CommandResult(0, "not-a-number\n", "")):
-            self.assertEqual(ui_customization.get_text_scaling(), 1.0)
+            self.assertIsNone(ui_customization.get_text_scaling())
 
     def test_snapshot_list_is_parsed_into_plain_dicts(self):
         sample = (
@@ -570,7 +772,44 @@ class BackendTestCase(unittest.TestCase):
         self.assertEqual(snapshots[0]["date"], "2024-01-15 10:00:01")
         self.assertEqual(snapshots[1]["description"], "")
         self.assertEqual(snapshots[1]["date"], "2024-01-14 10:00:01")
+        marked = backup.parse_snapshot_list(
+            "0  >  2025-01-01_09-00-00  O  Before update\n"
+            "1  >  2025-01-02_10-00-00  D\n")
+        self.assertEqual([row["name"] for row in marked],
+                         ["2025-01-01_09-00-00", "2025-01-02_10-00-00"])
+        self.assertEqual(marked[0]["description"], "Before update")
+        self.assertEqual(marked[1]["description"], "")
         self.assertEqual(backup.parse_snapshot_list(""), [])
+
+    def test_timeshift_failure_is_not_an_empty_snapshot_list_or_privilege_prompt(self):
+        self.fake.update(timeshift_exit=1, timeshift_error="root access required")
+        self.assertIsNone(backup.list_snapshots(log=self.log))
+        self.assertIn("root access required", self.log.text())
+        self.assertIn("exit 1", self.log.text())
+        self.assertFalse(self.fake.mutating_commands())
+        self.fake.update(timeshift_exit=1, timeshift_error="", timeshift_list="No snapshots found\n")
+        self.assertEqual(backup.list_snapshots(log=self.log), [])
+        self.fake.update(timeshift_exit=0, timeshift_error="", timeshift_list="")
+        self.assertEqual(backup.list_snapshots(log=self.log), [])
+
+    def test_manual_snapshot_uses_on_demand_tag(self):
+        with mock.patch.object(utils.os, "geteuid", return_value=1000):
+            result = backup.timeshift_snapshot("Before testing", log=self.log)
+        self.assertTrue(result.ok)
+        command = next(c for c in self.fake.commands() if c["cmd"] == "pkexec")
+        self.assertEqual(command["args"][-2:], ["--tags", "O"])
+
+    def test_manual_snapshot_refresh_uses_polkit_only_when_requested(self):
+        self.fake.clear_log()
+        with mock.patch.object(utils.os, "geteuid", return_value=1000):
+            self.assertEqual(backup.list_snapshots(privileged=True, log=self.log), [])
+        self.assertTrue(any(c["cmd"] == "pkexec" and c["args"] == ["timeshift", "--list"]
+                            for c in self.fake.commands()))
+        self.fake.clear_log()
+        utils.set_simulate(True)
+        self.assertIsNone(backup.list_snapshots(privileged=True, log=self.log))
+        self.assertFalse(self.fake.mutating_commands())
+        self.assertIn("[simulate]", self.log.text())
 
 
 if __name__ == "__main__":
