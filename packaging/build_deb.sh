@@ -15,6 +15,7 @@ install -d "$SITE/preen_tool/backend" "$SITE/preen_tool/config"
 cp preen_tool/*.py "$SITE/preen_tool/"
 cp preen_tool/backend/*.py "$SITE/preen_tool/backend/"
 cp preen_tool/config/*.json "$SITE/preen_tool/config/"
+cp -R preen_tool/assets "$SITE/preen_tool/assets"
 find "$PKG" -name '__pycache__' -type d -exec rm -rf {} +
 
 # --- Launcher (desktop entry Exec=preen) ---
@@ -29,8 +30,10 @@ EOF
 chmod 755 "$PKG/usr/bin/preen"
 
 # --- Desktop entry + docs ---
-install -d "$PKG/usr/share/applications" "$PKG/usr/share/doc/preen"
-install -m 644 data/preen.desktop "$PKG/usr/share/applications/"
+install -d "$PKG/usr/share/applications" "$PKG/usr/share/doc/preen" \
+          "$PKG/usr/share/icons/hicolor/256x256/apps"
+install -m 644 data/preen.desktop data/io.github.mdadeel.Preen.desktop "$PKG/usr/share/applications/"
+install -m 644 preen_tool/assets/preen.png "$PKG/usr/share/icons/hicolor/256x256/apps/preen.png"
 gzip -9 -c debian/changelog > "$PKG/usr/share/doc/preen/changelog.gz"
 
 # --- Control ---

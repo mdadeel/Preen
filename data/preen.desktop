@@ -3,8 +3,10 @@ Type=Application
 Name=Preen
 Comment=System setup and optimization for Linux
 Exec=preen
-Icon=utilities-system-monitor
+Icon=preen
 Terminal=false
+# Keep legacy desktop IDs usable without showing a duplicate launcher.
+NoDisplay=true
 Categories=System;Settings;Utility;
 Keywords=optimize;apps;flatpak;apt;cleanup;services;preen;
 StartupNotify=true

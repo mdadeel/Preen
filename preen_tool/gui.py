@@ -16,12 +16,14 @@ import threading
 import traceback
 from collections import deque
 from datetime import datetime
+from pathlib import Path
 
 import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")  # systems shipping Gdk 4.0 otherwise load it by default and clash with Gtk 3
-from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import __version__  # noqa: E402
 from .backend import (  # noqa: E402
@@ -40,6 +42,7 @@ from .backend import (  # noqa: E402
 APP_NAME = "Preen"
 APP_ID = "io.github.mdadeel.Preen"
 MAX_LOG_LINES = 4000
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 
 # GTK 3 design tokens. Keeping the palette and control states together makes
 # all pages (and native GTK dialogs) read as one application. No system theme
@@ -53,6 +56,8 @@ _CSS = b"""
 @define-color preen_muted #a5a9b0;
 @define-color preen_border #3b3e42;
 @define-color preen_accent #3584e4;
+/* White text on the base accent is only 3.77:1. Use a darker action fill. */
+@define-color preen_action #2463b5;
 @define-color preen_success #57a773;
 @define-color preen_warning #e5a84b;
 @define-color preen_error #e45b5b;
@@ -184,12 +189,14 @@ progressbar progress {
 .warning-line { color: @preen_warning; }
 
 .badge, .chip, .chip-muted { color: @preen_muted; font-size: 0.86em; }
-.badge-ok, .chip-ok, .status-installed { color: @preen_success; }
-.badge-bad, .chip-bad, .status-error { color: @preen_error; }
+.badge-ok, .chip-ok, .status-installed { color: #70c28a; }
+.badge-bad, .chip-bad, .status-error { color: #f08080; }
 .status-warning { color: @preen_warning; }
 .segmented { background-color: @preen_sidebar; border: 1px solid @preen_border; border-radius: 7px; padding: 2px; }
-.segmented button { background: transparent; border: none; border-radius: 5px; box-shadow: none; padding: 5px 12px; }
-.segmented button:checked { background-color: @preen_elevated; color: @preen_text; }
+.segmented button { background: transparent; border: 1px solid transparent; border-radius: 5px; box-shadow: none; padding: 5px 12px; }
+.segmented button label { color: @preen_muted; }
+.segmented button:checked { background-color: @preen_elevated; color: @preen_text; border-color: @preen_accent; }
+.segmented button:checked label { color: @preen_text; font-weight: 700; }
 
 button {
     background-image: none;
@@ -202,17 +209,18 @@ button {
 }
 button:hover { background-color: #3a3d42; }
 button:active { background-color: #43464b; }
-button:disabled { color: alpha(@preen_muted, 0.55); background-color: @preen_surface; border-color: @preen_border; }
-button.suggested-action { background-color: @preen_accent; color: #ffffff; border-color: @preen_accent; font-weight: 600; }
-button.suggested-action label { color: #ffffff; }
-button.suggested-action:hover { background-color: #4a94ee; }
-button.suggested-action:disabled { background-color: #34475c; color: #8d9bab; border-color: #34475c; }
-button.suggested-action:disabled label { color: #8d9bab; }
+button:disabled { color: @preen_muted; background-color: @preen_surface; border-color: @preen_border; }
+button:disabled label, button:disabled image { color: @preen_muted; }
+button.suggested-action { background-color: @preen_action; color: #ffffff; border-color: @preen_accent; font-weight: 600; }
+button.suggested-action label, button.suggested-action image { color: #ffffff; }
+button.suggested-action:hover { background-color: #1f5faa; }
+button.suggested-action:disabled { background-color: @preen_elevated; color: @preen_muted; border-color: @preen_border; }
+button.suggested-action:disabled label, button.suggested-action:disabled image { color: @preen_muted; }
 button.destructive-action { color: #f08080; background-color: @preen_surface; border-color: alpha(@preen_error, 0.55); }
-button.destructive-action label { color: #f08080; }
+button.destructive-action label, button.destructive-action image { color: #f08080; }
 button.destructive-action:hover { background-color: alpha(@preen_error, 0.17); }
-button.destructive-action:disabled { color: alpha(@preen_muted, 0.55); border-color: @preen_border; }
-button.destructive-action:disabled label { color: alpha(@preen_muted, 0.55); }
+button.destructive-action:disabled { color: @preen_muted; border-color: @preen_border; }
+button.destructive-action:disabled label, button.destructive-action:disabled image { color: @preen_muted; }
 button.flat { background: transparent; border-color: transparent; box-shadow: none; }
 button.flat:hover { background-color: @preen_elevated; }
 button:focus, entry:focus, check:focus, switch:focus, row:focus {
@@ -231,18 +239,27 @@ entry {
 }
 entry:focus { border-color: @preen_accent; }
 entry image { color: @preen_muted; }
-check, radio { background-color: @preen_surface; border: 1px solid @preen_muted; border-radius: 4px; min-width: 16px; min-height: 16px; }
-check:checked, radio:checked { background-color: @preen_accent; border-color: @preen_accent; color: #ffffff; }
+check, radio { background-image: none; background-color: @preen_surface; border: 1px solid @preen_muted; border-radius: 4px; min-width: 16px; min-height: 16px; }
+check:checked, check:indeterminate, radio:checked { background-color: @preen_action; border-color: @preen_accent; color: #ffffff; }
+/* Bundled indicators work even when an icon theme lacks symbolic checkmarks. */
+check:checked { -gtk-icon-source: url("__PREEN_CHECK_ICON__"); }
+check:indeterminate { -gtk-icon-source: url("__PREEN_MIXED_ICON__"); }
 radio { border-radius: 50%; }
-switch { background-image: none; background-color: @preen_border; border: none; border-radius: 999px; }
-switch:checked { background-color: @preen_accent; }
-switch slider { background-color: #ffffff; border-radius: 999px; }
+radio:checked { -gtk-icon-source: url("__PREEN_RADIO_ICON__"); }
+switch { background-image: none; background-color: #7a8088; border: 1px solid #7a8088; border-radius: 999px; min-height: 20px; }
+switch:checked { background-color: @preen_accent; border-color: @preen_accent; }
+switch slider { background-image: none; background-color: #ffffff; border-radius: 999px; min-width: 18px; min-height: 18px; }
 separator { background-color: @preen_border; }
 scrollbar { background: transparent; border: none; }
 scrollbar slider { background-color: #62666c; border-radius: 8px; min-width: 6px; min-height: 6px; border: none; }
 scrollbar trough { background: transparent; border: none; }
 
 .app-row { padding: 9px 12px; border-bottom: 1px solid @preen_border; }
+.app-icon-tile { min-width: 32px; min-height: 32px; border-radius: 8px; }
+.app-icon-brand { background-color: @preen_action; }
+.app-icon-generic { background-color: @preen_elevated; border: 1px solid @preen_border; }
+.app-icon-generic label { color: @preen_text; font-weight: 700; font-size: 0.85em; }
+.control-fallback-icon { font-weight: 700; }
 .app-row:last-child { border-bottom: none; }
 .app-row:hover { background-color: alpha(@preen_text, 0.035); }
 .list-header { padding: 12px 12px 6px; }
@@ -260,6 +277,12 @@ popover, menu { background-color: @preen_elevated; border: 1px solid @preen_bord
 dialog > box { padding: 8px; }
 """
 
+# Resolve indicator assets to absolute file URIs so CSS works from any cwd and
+# when Preen is installed as a wheel, .deb or AppImage.
+for _control in ("check", "mixed", "radio"):
+    _marker = "__PREEN_{}_ICON__".format(_control.upper()).encode("ascii")
+    _CSS = _CSS.replace(_marker, (ASSETS_DIR / "controls" / (_control + ".png")).as_uri().encode("ascii"))
+
 # Keep the required dark design intact, while providing a high-contrast light
 # counterpart for the same native GTK controls. No desktop theme files change.
 _LIGHT_CSS = _CSS
@@ -268,7 +291,8 @@ for _dark, _light in (
     (b"#282a2d", b"#ffffff"), (b"#303236", b"#e8ebef"),
     (b"#f1f3f4", b"#202124"), (b"#a5a9b0", b"#58616c"),
     (b"#3b3e42", b"#ccd2d9"), (b"#57a773", b"#237a48"),
-    (b"#e5a84b", b"#996000"), (b"#e45b5b", b"#bc3434"),
+    (b"#70c28a", b"#1d713f"),
+    (b"#e5a84b", b"#8a5200"), (b"#e45b5b", b"#bc3434"),
     (b"#293747", b"#dbeafb"), (b"#3a3d42", b"#d9dee5"),
     (b"#43464b", b"#cbd1da"), (b"#34475c", b"#dbe4f0"),
     (b"#8d9bab", b"#66717e"), (b"#f08080", b"#a52323"),
@@ -420,6 +444,10 @@ class LogBuffer:
 class MainWindow(Gtk.ApplicationWindow):
     def __init__(self, app: Gtk.Application):
         super().__init__(application=app, title=APP_NAME)
+        try:
+            self.set_icon_from_file(str(ASSETS_DIR / "preen.png"))
+        except Exception:
+            self.set_icon_name("utilities-system-monitor")
         self.set_default_size(1180, 780)
         self.set_size_request(720, 480)
         window_position = getattr(getattr(Gtk, "WindowPosition", None), "CENTER", None)
@@ -440,6 +468,7 @@ class MainWindow(Gtk.ApplicationWindow):
             "power": None, "theme": None, "round": False, "scaling": None,
         }
         self.settings = settings_backend.load()
+        self._desktop_theme = None
         if self.settings.get("simulate_on_startup"):
             utils.set_simulate(True)
 
@@ -469,6 +498,7 @@ class MainWindow(Gtk.ApplicationWindow):
         sim_box.set_valign(Gtk.Align.CENTER)
         sim_box.set_tooltip_text("Preview commands and file changes in Logs without changing the system")
         self.sim_switch = Gtk.Switch()
+        self._accessible_name(self.sim_switch, "Simulate")
         self._simulation_forced = os.environ.get(utils.SIMULATE_ENV) == "1"
         self.sim_switch.set_tooltip_text(
             "Simulation is forced by {}".format(utils.SIMULATE_ENV) if self._simulation_forced
@@ -517,7 +547,9 @@ class MainWindow(Gtk.ApplicationWindow):
         brand.get_style_context().add_class("sidebar-brand")
         brand_icon = Gtk.Box()
         brand_icon.get_style_context().add_class("brand-icon")
-        glyph = self._icon("utilities-system-monitor-symbolic", 20)
+        glyph = self._image_from_file(str(ASSETS_DIR / "preen.png"), 28)
+        if glyph is None:
+            glyph = self._icon("utilities-system-monitor-symbolic", 20)
         glyph.set_halign(Gtk.Align.CENTER)
         glyph.set_valign(Gtk.Align.CENTER)
         brand_icon.pack_start(glyph, True, True, 0)
@@ -576,6 +608,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.log_view.set_left_margin(8)
         self.log_view.set_right_margin(8)
         self.log_buf = LogBuffer(self.log_view.get_buffer(), self.log_view)
+        self.log_buf.set_theme(self._app_theme or "dark")
         if self._style_error:
             self.log_buf.append("[error] Could not load the Preen stylesheet: {}\n".format(self._style_error))
 
@@ -590,6 +623,9 @@ class MainWindow(Gtk.ApplicationWindow):
         self._build_backup_page()
         self._build_logs_page()
         self._populate_sidebar()
+        if self._style_error:
+            self._notify("Preen's appearance could not be loaded. See Logs for details.",
+                         "error", log=False)
 
         # Saved preferences were applied while building the widgets, so no
         # "changed" signal can start a task before the startup chain does.
@@ -615,32 +651,42 @@ class MainWindow(Gtk.ApplicationWindow):
             if screen is not None:
                 Gtk.StyleContext.add_provider_for_screen(
                     screen, self._css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-            # Use the specified dark design until the asynchronous desktop
-            # settings read supplies the actual current appearance.
-            self._set_app_theme("dark")
+            # Explicit choices can be shown immediately; Follow system uses
+            # the dark palette until the asynchronous desktop read completes.
+            choice = self.settings.get("appearance_mode", "system")
+            self._set_app_theme(choice if choice in ("light", "dark") else "dark")
         except Exception as exc:
             self._style_error = str(exc)
 
     def _set_app_theme(self, mode):
-        """Update this process's palette only; the backend owns desktop changes."""
+        """Update GTK settings and the palette in this process only."""
         if mode not in ("light", "dark") or mode == self._app_theme:
             return
         try:
-            if self._css_provider is not None:
-                self._css_provider.load_from_data(_LIGHT_CSS if mode == "light" else _CSS)
-            gtk_settings = Gtk.Settings.get_default()
-            if gtk_settings is not None:
-                gtk_settings.set_property("gtk-application-prefer-dark-theme", mode == "dark")
-        except (AttributeError, TypeError):
-            pass  # GTK test doubles/minimal installations may lack Settings.
+            if self._css_provider is None:
+                raise RuntimeError("GTK style provider is unavailable")
+            loaded = self._css_provider.load_from_data(_LIGHT_CSS if mode == "light" else _CSS)
+            if loaded is False:
+                raise RuntimeError("GTK rejected the stylesheet")
+            try:
+                gtk_settings = Gtk.Settings.get_default()
+                if gtk_settings is not None:
+                    gtk_settings.set_property("gtk-application-prefer-dark-theme", mode == "dark")
+            except (AttributeError, TypeError):
+                pass  # GTK test doubles/minimal installations may lack Settings.
         except Exception as exc:
             self._style_error = str(exc)
-            if hasattr(self, "log_buf"):
-                self.log_buf.append("[error] Could not update application appearance: {}\n".format(exc))
+            log_buf = self.__dict__.get("log_buf")
+            if log_buf is not None:
+                log_buf.append("[error] Could not update application appearance: {}\n".format(exc))
+                self._notify("Preen's appearance could not be updated. See Logs for details.",
+                             "error", log=False)
             return
+        self._style_error = None
         self._app_theme = mode
-        if hasattr(self, "log_buf"):
-            self.log_buf.set_theme(mode)
+        log_buf = self.__dict__.get("log_buf")
+        if log_buf is not None:
+            log_buf.set_theme(mode)
 
     def _watch_desktop_appearance(self):
         """Follow external GNOME appearance changes without blocking GTK."""
@@ -668,22 +714,34 @@ class MainWindow(Gtk.ApplicationWindow):
         def finished(mode):
             self._theme_watch_pending = False
             if mode in ("light", "dark"):
-                old_mode = self.baseline.get("theme")
-                staged_mode = self._theme_mode()
-                self.baseline["theme"] = mode
-                self._set_app_theme(mode)
-                # An external desktop change must not discard a choice the
-                # user has staged but not yet applied in Customize Look.
-                if staged_mode is None or staged_mode in (old_mode, mode):
-                    self.cmb_theme.set_active(1 if mode == "dark" else 0)
+                self._desktop_theme = mode
+                # Follow external changes only when that is the saved app
+                # preference. Never overwrite a staged or explicit choice.
+                if self.settings.get("appearance_mode", "system") == "system":
+                    self._set_app_theme(mode)
             if self._theme_watch_dirty:
                 self._theme_watch_dirty = False
                 self._on_desktop_appearance_changed()
 
         self.submit(ui_backend.get_theme_mode, done=finished)
 
+    @staticmethod
+    def _accessible_name(widget, text):
+        try:
+            accessible = widget.get_accessible()
+            if accessible is not None:
+                accessible.set_name(text)
+        except (AttributeError, TypeError):
+            pass
+
     def _header_button(self, label, callback, tooltip):
-        button = Gtk.Button(label=label)
+        button = Gtk.Button()
+        inner = Gtk.Box(spacing=6)
+        name = "edit-select-all-symbolic" if label == "Select all" else "edit-clear-symbolic"
+        inner.pack_start(self._icon(name, 14), False, False, 0)
+        inner.pack_start(Gtk.Label(label=label), False, False, 0)
+        button.add(inner)
+        self._accessible_name(button, label)
         button.set_tooltip_text(tooltip)
         button.connect("clicked", callback)
         return button
@@ -721,16 +779,38 @@ class MainWindow(Gtk.ApplicationWindow):
         menu_button.set_popover(popover)
         return menu_button
 
-    @staticmethod
-    def _icon(name, size=16):
-        # Gtk.IconSize.MENU == 1; a literal keeps the fake-GTK tests happy,
-        # which cannot resolve Gtk.IconSize attribute chains.
+    _ICON_FALLBACKS = {
+        "document-save-symbolic": "↓", "object-select-symbolic": "✓",
+        "edit-select-all-symbolic": "✓", "edit-clear-symbolic": "×",
+        "view-refresh-symbolic": "⟳", "folder-download-symbolic": "↓",
+        "open-menu-symbolic": "⋮", "go-next-symbolic": "›",
+        "dialog-warning-symbolic": "!", "dialog-information-symbolic": "i",
+        "help-about-symbolic": "?", "list-add-symbolic": "+",
+        "user-trash-symbolic": "×", "view-grid-symbolic": "▦",
+        "document-open-recent-symbolic": "≡", "text-x-generic-symbolic": "≡",
+        "preferences-system-symbolic": "⚙", "preferences-desktop-theme-symbolic": "◐",
+        "preferences-desktop-appearance": "◐", "speedometer-symbolic": "◴",
+        "system-run-symbolic": "▶", "system-shutdown-symbolic": "⏻",
+        "system-software-install-symbolic": "+", "media-memory-symbolic": "▥",
+        "drive-harddisk-symbolic": "▣", "drive-multidisk-symbolic": "▣",
+        "utilities-system-monitor-symbolic": "▥", "application-x-executable-symbolic": "◇",
+    }
+
+    @classmethod
+    def _icon(cls, name, size=16):
+        # Check the theme before constructing Gtk.Image: GTK otherwise shows
+        # its missing-image glyph instead of raising an exception.
         try:
-            icon = Gtk.Image.new_from_icon_name(name, 1)
-            icon.set_pixel_size(size)
-            return icon
+            theme = Gtk.IconTheme.get_default()
+            if theme is not None and theme.has_icon(name):
+                icon = Gtk.Image.new_from_icon_name(name, 1)  # Gtk.IconSize.MENU
+                icon.set_pixel_size(size)
+                return icon
         except Exception:
-            return Gtk.Label(label="•")
+            pass  # a broken or incomplete icon theme should not break controls
+        label = Gtk.Label(label=cls._ICON_FALLBACKS.get(name, "•"))
+        label.get_style_context().add_class("control-fallback-icon")
+        return label
 
     def _segmented(self, options, active_index=0, tooltip=None):
         """A compact GTK linked-button source selector.
@@ -804,6 +884,7 @@ class MainWindow(Gtk.ApplicationWindow):
             button.add(inner)
         else:
             button = Gtk.Button(label=label)
+        self._accessible_name(button, label)
         button.connect("clicked", callback)
         if tooltip:
             button.set_tooltip_text(tooltip)
@@ -904,8 +985,8 @@ class MainWindow(Gtk.ApplicationWindow):
         row.pack_start(text_box, True, True, 0)
         switch = Gtk.Switch()
         switch.set_valign(Gtk.Align.CENTER)
-        if tooltip:
-            switch.set_tooltip_text(tooltip)
+        self._accessible_name(switch, title)
+        switch.set_tooltip_text(tooltip or subtitle or title)
         row.pack_end(switch, False, False, 0)
         return row, switch
 
@@ -1485,6 +1566,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
                 chk = Gtk.CheckButton()
                 chk.set_tooltip_text("Select " + item["name"])
+                self._accessible_name(chk, "Select " + item["name"])
                 chk.connect("toggled", lambda _c: self._update_install_counter())
                 line.pack_start(chk, False, False, 0)
                 line.pack_start(self._app_icon(item), False, False, 0)
@@ -1557,18 +1639,92 @@ class MainWindow(Gtk.ApplicationWindow):
         page.pack_start(actions, False, False, 0)
         self._update_install_counter()
 
+    @staticmethod
+    def _image_from_file(path, size=22):
+        """Load a scaled local icon without allowing a missing/corrupt file to break a row."""
+        if not isinstance(path, str) or not os.path.isabs(path) or not os.path.isfile(path):
+            return None
+        try:
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, size, size, True)
+            return Gtk.Image.new_from_pixbuf(pixbuf)
+        except Exception:
+            return None
+
     def _app_icon(self, item):
-        # A catalogue ID often matches an installed desktop icon. Fall back to
-        # the same symbolic application icon when no theme icon is available.
+        """Prefer installed app icons, then a licensed offline mark or generic initials."""
+        tile = Gtk.Box()
+        tile.set_size_request(32, 32)
+        tile.get_style_context().add_class("app-icon-tile")
         try:
             theme = Gtk.IconTheme.get_default()
-            candidates = [item.get("icon"), item.get("flatpak"), item.get("id")]
+        except Exception:
+            theme = None
+
+        def image_for(value):
+            if not isinstance(value, str) or not value:
+                return None
+            if os.path.isabs(value):
+                return self._image_from_file(value)
+            try:
+                if theme is not None and theme.has_icon(value):
+                    image = Gtk.Image.new_from_icon_name(value, 1)
+                    image.set_pixel_size(22)
+                    return image
+            except Exception:
+                pass  # fall through to a bundled or generic icon
+            return None
+
+        # APT desktop entries can specify an absolute icon or a themed name.
+        image = image_for(item.get("icon"))
+        candidates = []
+        for value in (item.get("flatpak"), item.get("id"), item.get("apt")):
+            candidates.extend(apps_backend.as_list(value))
+
+        # The desktop file can name an icon that differs from its package ID.
+        # Resolve GIcon names/files without creating an image-missing widget.
+        desktop_type = getattr(Gio, "DesktopAppInfo", None)
+        if image is None and desktop_type is not None:
             for candidate in candidates:
-                if isinstance(candidate, str) and theme.has_icon(candidate):
-                    return self._icon(candidate, 22)
-        except (AttributeError, TypeError):
-            pass
-        return self._icon("application-x-executable-symbolic", 20)
+                try:
+                    info = desktop_type.new(candidate + ".desktop")
+                    gicon = info.get_icon() if info else None
+                    names = gicon.get_names() if gicon and hasattr(gicon, "get_names") else []
+                    for name in names or []:
+                        image = image_for(name)
+                        if image is not None:
+                            break
+                    if image is None and gicon and hasattr(gicon, "get_file"):
+                        file = gicon.get_file()
+                        image = image_for(file.get_path() if file else None)
+                except Exception:
+                    continue  # malformed/missing desktop entries are optional
+                if image is not None:
+                    break
+        if image is None:
+            for candidate in candidates:
+                image = image_for(candidate)
+                if image is not None:
+                    break
+
+        if image is None:
+            slug = item.get("icon_asset")
+            if isinstance(slug, str) and slug.isascii() and slug.isalnum() and slug == slug.lower():
+                image = self._image_from_file(str(ASSETS_DIR / "brand" / (slug + ".png")))
+                if image is not None:
+                    tile.get_style_context().add_class("app-icon-brand")
+        if image is None:
+            # Do not invent a branded logo for apps without an available mark.
+            words = [word for word in str(item.get("name") or item.get("id") or "?").split()
+                     if any(char.isalnum() for char in word)]
+            initials = "".join(next((c for c in word if c.isalnum()), "") for word in words[:2])
+            if len(initials) < 2 and words:
+                initials = "".join(c for c in words[0] if c.isalnum())[:2]
+            image = Gtk.Label(label=initials.upper() or "?")
+            tile.get_style_context().add_class("app-icon-generic")
+        image.set_halign(Gtk.Align.CENTER)
+        image.set_valign(Gtk.Align.CENTER)
+        tile.pack_start(image, True, True, 0)
+        return tile
 
     @staticmethod
     def _source_badge(item):
@@ -1781,6 +1937,16 @@ class MainWindow(Gtk.ApplicationWindow):
         warnings = []
         entries = (apps_backend.list_installed_flatpak(warnings, log) +
                    apps_backend.list_installed_apt(warnings, log))
+        marks = {}
+        for item in apps_backend.all_apps().values():
+            if item.get("icon_asset"):
+                for source in ("flatpak", "apt"):
+                    for ref in apps_backend.as_list(item.get(source)):
+                        marks[(source, ref)] = item["icon_asset"]
+        for entry in entries:
+            asset = marks.get((entry.get("source"), entry.get("id")))
+            if asset:
+                entry["icon_asset"] = asset
         return entries, warnings
 
     def _manage_filter(self, row, _data):
@@ -1849,6 +2015,7 @@ class MainWindow(Gtk.ApplicationWindow):
             chk.set_sensitive(not protected)
             chk.set_tooltip_text("Essential desktop package, protected from removal" if protected
                                  else "Select " + entry["name"])
+            self._accessible_name(chk, ("Protected " if protected else "Select ") + entry["name"])
             chk.set_active(not protected and (entry["source"], entry["id"]) in previously_selected)
             chk.connect("toggled", lambda _c: self._update_manage_counter())
             line.pack_start(chk, False, False, 0)
@@ -1994,12 +2161,19 @@ class MainWindow(Gtk.ApplicationWindow):
             "power": perf_backend.get_power_profile(),
         }
 
-    def _read_look_settings(self):
+    def _read_appearance_setting(self):
         return {
-            "theme": ui_backend.get_theme_mode(),
+            "theme": settings_backend.get("appearance_mode"),
+            "desktop_theme": ui_backend.get_theme_mode(),
+        }
+
+    def _read_look_settings(self):
+        info = self._read_appearance_setting()
+        info.update({
             "round": ui_backend.are_rounded_corners_enabled(),
             "scaling": ui_backend.get_text_scaling(),
-        }
+        })
+        return info
 
     def _read_settings(self):
         info = self._read_optimize_settings()
@@ -2028,17 +2202,26 @@ class MainWindow(Gtk.ApplicationWindow):
         self._on_swap_toggle(None)
 
     def _apply_theme_setting(self, mode):
-        if mode not in ("light", "dark"):
-            mode = None
+        if mode not in settings_backend.VALID_APPEARANCE:
+            mode = "system"
         self.baseline["theme"] = mode
-        self.cmb_theme.set_active({"light": 0, "dark": 1}.get(mode, 2))
-        self._set_app_theme(mode)
+        self.settings["appearance_mode"] = mode
+        self.cmb_theme.set_active({"system": 0, "light": 1, "dark": 2}[mode])
+        effective = (self._desktop_theme or "dark") if mode == "system" else mode
+        self._set_app_theme(effective)
+
+    def _apply_appearance_setting(self, info):
+        if not isinstance(info, dict):
+            return
+        if info.get("desktop_theme") in ("light", "dark"):
+            self._desktop_theme = info["desktop_theme"]
+        self._apply_theme_setting(info.get("theme"))
 
     def _apply_look_settings(self, info):
         if not isinstance(info, dict):
             return
         self.baseline.update(info)
-        self._apply_theme_setting(info.get("theme"))
+        self._apply_appearance_setting(info)
         self.chk_round.set_active(bool(info.get("round")))
         current = info.get("scaling")
         if self._extra_scaling_option:
@@ -2059,7 +2242,8 @@ class MainWindow(Gtk.ApplicationWindow):
             return
         self._apply_optimize_settings({key: info.get(key) for key in
                                        ("animations_off", "swap", "zram", "power")})
-        self._apply_look_settings({key: info.get(key) for key in ("theme", "round", "scaling")})
+        self._apply_look_settings({key: info.get(key) for key in
+                                   ("theme", "desktop_theme", "round", "scaling")})
         warnings = info.get("warnings") or []
         for child in list(self.health_chips.get_children()):
             self.health_chips.remove(child)
@@ -2088,7 +2272,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.submit(self._read_look_settings, done=self._apply_look_settings)
 
     def _refresh_theme_setting(self, *_args):
-        self.submit(ui_backend.get_theme_mode, done=self._apply_theme_setting)
+        self.submit(self._read_appearance_setting, done=self._apply_appearance_setting)
 
     def on_run_optimize(self, _btn):
         opts = {
@@ -2160,6 +2344,7 @@ class MainWindow(Gtk.ApplicationWindow):
             label.set_xalign(0)
             label.set_hexpand(True)
             switch = Gtk.Switch()
+            self._accessible_name(switch, "Start " + item["name"] + " at login")
             switch.set_active(item["enabled"])
             line.pack_start(label, True, True, 0)
             line.pack_start(switch, False, False, 0)
@@ -2182,20 +2367,33 @@ class MainWindow(Gtk.ApplicationWindow):
     def _build_customize_page(self):
         page = self._page(
             "customize", "Customize Look", "Customize Look",
-            "Change the light/dark theme, install an icon pack and add rounded corners. "
-            "Only GTK themes already installed on your system are applied.",
+            "Choose Preen's appearance without changing your desktop. "
+            "Optional desktop-wide settings are grouped separately below.",
             icon="preferences-desktop-appearance")
 
-        theme_frame, theme = self._frame("Theme", tight=True)
+        theme_frame, theme = self._frame("Preen appearance", tight=True)
         self.cmb_theme = Gtk.ComboBoxText()
-        self.cmb_theme.append_text("Light")
-        self.cmb_theme.append_text("Dark")
-        self.cmb_theme.append_text("Not detected")
-        self.cmb_theme.set_active(2)
+        self._accessible_name(self.cmb_theme, "Preen appearance")
+        for label in ("Follow system", "Light", "Dark"):
+            self.cmb_theme.append_text(label)
+        self.cmb_theme.set_active(0)
+        self.cmb_theme.set_tooltip_text("Changes Preen only; does not change GNOME or other apps")
         theme.pack_start(self._value_row("Appearance", self.cmb_theme,
-                                         "Switch the GNOME colour scheme"),
+                                         "Preen only · Follow system reads, but never changes, GNOME"),
                          False, False, 0)
+        apply_theme_row = Gtk.Box()
+        apply_theme_row.get_style_context().add_class("settings-row")
+        apply_theme_row.pack_start(
+            self._button("Apply Preen Appearance", self.on_apply_theme,
+                         "Change only Preen's appearance", icon="object-select-symbolic", flat=True),
+            False, False, 0)
+        theme.pack_start(apply_theme_row, False, False, 0)
+        page.pack_start(theme_frame, False, False, 0)
 
+        extras_frame, extras = self._frame("Desktop-wide options", tight=True)
+        extras.pack_start(self._hint(
+            "These optional settings affect other applications. You will be asked before applying them."),
+            False, False, 0)
         self.SCALING_OPTIONS = (
             ("Default (100%)", 1.0),
             ("Large (115%)", 1.15),
@@ -2203,56 +2401,47 @@ class MainWindow(Gtk.ApplicationWindow):
             ("Small (85%)", 0.85),
         )
         self.cmb_scaling = Gtk.ComboBoxText()
+        self._accessible_name(self.cmb_scaling, "Desktop text size")
         self._extra_scaling_option = False
         for label, _factor in self.SCALING_OPTIONS:
             self.cmb_scaling.append_text(label)
         self.cmb_scaling.set_active(0)
         self.cmb_scaling.set_tooltip_text("GNOME text scaling factor, applied desktop-wide")
-        theme.pack_start(self._value_row("Text size", self.cmb_scaling,
-                                         "GNOME scaling factor, applied desktop-wide"),
-                         False, False, 0)
-        apply_theme_row = Gtk.Box()
-        apply_theme_row.get_style_context().add_class("settings-row")
-        apply_theme_row.pack_start(
-            self._button("Apply Theme Now", self.on_apply_theme,
-                         "Switch the GNOME colour scheme immediately", icon="object-select-symbolic",
-                         flat=True),
-            False, False, 0)
-        theme.pack_start(apply_theme_row, False, False, 0)
-        page.pack_start(theme_frame, False, False, 0)
-
-        extras_frame, extras = self._frame("Extras", tight=True)
+        extras.pack_start(self._value_row("Desktop text size", self.cmb_scaling,
+                                          "GNOME scaling factor, applied to other apps too"),
+                          False, False, 0)
         round_row, self.chk_round = self._toggle_row(
-            "Rounded corners",
-            "Adds a reversible rule to ~/.config/gtk-3.0/gtk.css")
+            "Rounded GTK corners",
+            "Adds a reversible rule to ~/.config/gtk-3.0/gtk.css for GTK 3 apps")
         extras.pack_start(round_row, False, False, 0)
         icon_row = Gtk.Box()
         icon_row.get_style_context().add_class("settings-row")
-        icon_row.pack_start(self._button("Install Icon Pack…", self.on_install_icon,
-                                         "Choose a .tar.xz or .tar.gz icon theme",
+        icon_row.pack_start(self._button("Install Desktop Icon Pack…", self.on_install_icon,
+                                         "Install and activate an icon theme for the desktop",
                                          icon="folder-download-symbolic", flat=True),
                             False, False, 0)
         extras.pack_start(icon_row, False, False, 0)
-        extras.pack_start(self._hint("Rounded-corner CSS is reversible and may need an app restart to show."),
+        extras.pack_start(self._hint("Desktop GTK corner changes may need an app restart to show."),
                           False, False, 0)
         page.pack_start(extras_frame, False, False, 0)
 
         page.pack_start(self._flow(
             self._button("Apply Look Changes", self.on_apply_look,
-                         "Apply the theme and corner changes you made", primary=True,
+                         "Apply staged changes; desktop-wide changes require confirmation", primary=True,
                          icon="object-select-symbolic"),
             self._button("Reload Current Look", self._refresh_look_settings,
-                         "Re-read the current theme and CSS state"),
+                         "Re-read Preen and desktop look settings"),
         ), False, False, 0)
 
     def _theme_mode(self):
-        text = (self.cmb_theme.get_active_text() or "").lower()
-        return text if text in ("light", "dark") else None
+        index = self.cmb_theme.get_active()
+        modes = settings_backend.VALID_APPEARANCE
+        return modes[index] if 0 <= index < len(modes) else None
 
     def on_apply_theme(self, _btn):
         mode = self._theme_mode()
         if mode is None:
-            self._notify("Choose Light or Dark first.", "warning")
+            self._notify("Choose a Preen appearance first.", "warning")
             return
         self.submit(ui_backend.apply_theme_mode, mode,
                     done=lambda _r: self._refresh_theme_setting())
@@ -2273,6 +2462,13 @@ class MainWindow(Gtk.ApplicationWindow):
         if not actions:
             self._notify("Nothing to apply. Your look already matches.", "info")
             return
+        desktop_changes = [label for label, _func, _args in actions if label != "Theme"]
+        if desktop_changes and not self._confirm(
+                "Apply desktop-wide look changes?",
+                "{} affect other applications, not just Preen. "
+                "The rounded-corner rule changes GTK 3 user CSS; text size changes GNOME scaling."
+                .format(", ".join(desktop_changes))):
+            return
         self.submit(utils.run_actions, actions, done=lambda _r: self._refresh_look_settings())
 
     def on_install_icon(self, _btn):
@@ -2283,7 +2479,10 @@ class MainWindow(Gtk.ApplicationWindow):
         response = dialog.run()
         path = dialog.get_filename()
         dialog.destroy()
-        if response == Gtk.ResponseType.OK and path:
+        if response == Gtk.ResponseType.OK and path and self._confirm(
+                "Install and activate a desktop icon pack?",
+                "This installs the archive in ~/.icons and changes the GNOME icon theme "
+                "for other applications, not just Preen."):
             self.submit(ui_backend.install_icon_pack, path)
 
     # ------------------------------------------------------------------
@@ -2411,6 +2610,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 else:
                     tooltip = "No measurable space found"
                 chk.set_tooltip_text(tooltip)
+                self._accessible_name(chk, "Select " + item["label"])
                 chk.set_active(item["key"] in selected_keys and chk.get_sensitive())
                 chk.connect("toggled", self._update_clean_counter)
                 line.pack_start(chk, False, False, 0)
@@ -2838,12 +3038,14 @@ class MainWindow(Gtk.ApplicationWindow):
 
         tools = Gtk.Box(spacing=8)
         save = self._button("Save Log…", self.on_save_log,
-                            "Save the complete log, including filtered lines")
+                            "Save the complete log, including filtered lines",
+                            icon="document-save-symbolic")
         clear = self._button("Clear Log", self.on_clear_log,
-                             "Clear the complete log")
+                             "Clear the complete log", icon="edit-clear-symbolic")
         tools.pack_start(save, False, False, 0)
         tools.pack_start(clear, False, False, 0)
         scroll_switch = Gtk.Switch()
+        self._accessible_name(scroll_switch, "Auto-scroll log")
         scroll_switch.set_active(True)
         scroll_switch.set_tooltip_text("Automatically scroll to the newest line")
         scroll_switch.connect("notify::active", self.on_toggle_auto_scroll)
@@ -2914,6 +3116,8 @@ class MainWindow(Gtk.ApplicationWindow):
             text.set_hexpand(True)
             text.set_tooltip_text(tooltip)
             switch = Gtk.Switch()
+            self._accessible_name(switch, label)
+            switch.set_tooltip_text(tooltip)
             switch.set_active(active)
             line.pack_start(text, True, True, 0)
             line.pack_start(switch, False, False, 0)
@@ -2977,7 +3181,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 "confirm_destructive": confirm_switch.get_active(),
                 "show_dependency_warnings": warn_switch.get_active(),
             }
-            if settings_backend.save(values):
+            if settings_backend.update(values):
                 self.settings = settings_backend.load()
                 self.install_source.set_active(0 if values["default_source"] == "flatpak" else 1)
                 self._notify("Preferences saved. Startup and refresh options apply after a restart.",
@@ -3008,7 +3212,11 @@ class MainWindow(Gtk.ApplicationWindow):
         dialog.set_website_label("Project on GitHub")
         dialog.set_license("MIT")
         dialog.set_authors(["Preen contributors"])
-        dialog.set_logo_icon_name("utilities-system-monitor")
+        try:
+            logo = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(ASSETS_DIR / "preen.png"), 64, 64, True)
+            dialog.set_logo(logo)
+        except Exception:
+            dialog.set_logo_icon_name("utilities-system-monitor")
         dialog.run()
         dialog.destroy()
 

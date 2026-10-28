@@ -24,6 +24,7 @@ install -d "$SITE/preen_tool/backend" "$SITE/preen_tool/config"
 cp preen_tool/*.py "$SITE/preen_tool/"
 cp preen_tool/backend/*.py "$SITE/preen_tool/backend/"
 cp preen_tool/config/*.json "$SITE/preen_tool/config/"
+cp -R preen_tool/assets "$SITE/preen_tool/assets"
 find "$APPDIR" -name '__pycache__' -type d -exec rm -rf {} +
 
 # --- Launcher + AppRun ---
@@ -47,19 +48,10 @@ chmod 755 "$APPDIR/AppRun"
 # --- Desktop entry + icons ---
 install -d "$APPDIR/usr/share/applications" \
           "$APPDIR/usr/share/icons/hicolor/256x256/apps"
-sed 's/^Icon=.*/Icon=preen/' data/preen.desktop > "$APPDIR/preen.desktop"
-chmod 644 "$APPDIR/preen.desktop"
-ICON=$(find /usr/share/icons -path '*apps*utilities-system-monitor.png' \
-       -size +48k 2>/dev/null | sort -r | head -1)
-if [ -z "$ICON" ]; then
-  ICON=$(find /usr/share/icons /usr/share/pixmaps -name 'utilities-system-monitor*' 2>/dev/null | head -1)
-fi
-if [ -n "$ICON" ]; then
-  install -m 644 "$ICON" "$APPDIR/preen.png"
-  install -m 644 "$ICON" "$APPDIR/usr/share/icons/hicolor/256x256/apps/preen.png"
-else
-  echo "WARNING: no system icon found; AppImage will use a placeholder icon" >&2
-fi
+install -m 644 data/io.github.mdadeel.Preen.desktop "$APPDIR/io.github.mdadeel.Preen.desktop"
+install -m 644 data/io.github.mdadeel.Preen.desktop "$APPDIR/usr/share/applications/io.github.mdadeel.Preen.desktop"
+install -m 644 preen_tool/assets/preen.png "$APPDIR/preen.png"
+install -m 644 preen_tool/assets/preen.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/preen.png"
 ln -sf preen.png "$APPDIR/.DirIcon"
 
 mkdir -p dist

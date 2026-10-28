@@ -1,9 +1,19 @@
 # Functional review
 
-This review covers the nine GTK pages and Preferences. It fixes the regressions
-listed in the changelog while retaining the existing Python/GTK architecture,
-FIFO worker queue, package protections and simulation mode. The checks below
-are not a substitute for testing on a supported GNOME desktop.
+The previous review covered the nine GTK pages and Preferences while retaining
+Python/GTK, the FIFO queue, package protections and simulation. Its historical
+checks are listed below; they are not a substitute for testing the current
+changes on a supported GNOME desktop.
+
+## Current appearance and icon follow-up
+
+The current `python3 -m unittest discover -s tests -q` run passes 151 tests.
+Headless regressions cover Preen-only preference persistence, simulated changes,
+read-only GNOME detection, staged choices, confirmation of explicitly
+desktop-wide controls, palette contrast calculations, icon resolution, launcher
+identity and packaged assets. They use fake GTK and fake GNOME commands. The
+current CSS, icons and controls have **not** been visually verified in a real GTK/GNOME
+session; the older Broadway run below predates this follow-up.
 
 | Area | Checks performed |
 |---|---|

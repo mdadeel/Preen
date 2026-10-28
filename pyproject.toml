@@ -27,7 +27,7 @@ include = ["preen_tool*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-preen_tool = ["config/*.json"]
+preen_tool = ["config/*.json", "assets/*.png", "assets/*.svg", "assets/brand/*.png", "assets/brand/*.md", "assets/controls/*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

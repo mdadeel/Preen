@@ -8,6 +8,7 @@ import-only test cannot.
 from __future__ import annotations
 
 import importlib
+import re
 import sys
 import tempfile
 import types
@@ -55,14 +56,25 @@ class FakeTextBuffer:
 
 
 class FakeStyleContext:
-    def add_class(self, _name):
-        return None
+    def __init__(self):
+        self.classes = set()
 
-    def remove_class(self, _name):
-        return None
+    def add_class(self, name):
+        self.classes.add(name)
+
+    def remove_class(self, name):
+        self.classes.discard(name)
 
     def add_provider(self, *_args):
         return None
+
+
+class FakeAccessible:
+    def __init__(self):
+        self.name = None
+
+    def set_name(self, name):
+        self.name = name
 
 
 class Widget:
@@ -78,6 +90,8 @@ class Widget:
         self._visible = False
         self._no_show_all = False
         self._buffer = FakeTextBuffer()
+        self._style = FakeStyleContext()
+        self._accessible = FakeAccessible()
         self.chk = None
         self.entry = None
         self.search_text = ""
@@ -146,7 +160,13 @@ class Widget:
         return self._buffer
 
     def get_style_context(self):
-        return FakeStyleContext()
+        return self._style
+
+    def get_accessible(self):
+        return self._accessible
+
+    def set_icon_from_file(self, path):
+        self.icon_file = path
 
     # values
     def connect(self, signal, handler, *_args):
@@ -200,8 +220,28 @@ class FakeImage(Widget):
     """Gtk.Image needs a class-level constructor the plain Widget lacks."""
 
     @classmethod
-    def new_from_icon_name(cls, *_args):
-        return cls()
+    def new_from_icon_name(cls, name, *_args):
+        image = cls()
+        image.icon_name = name
+        return image
+
+    @classmethod
+    def new_from_pixbuf(cls, pixbuf):
+        image = cls()
+        image.pixbuf = pixbuf
+        return image
+
+
+class FakeIconTheme:
+    @staticmethod
+    def get_default():
+        return SimpleNamespace(has_icon=lambda _name: False)
+
+
+class FakePixbuf:
+    @staticmethod
+    def new_from_file_at_scale(path, width, height, preserve_aspect):
+        return (path, width, height, preserve_aspect)
 
 
 class FakeToggleButton(Widget):
@@ -236,6 +276,7 @@ class FakeGtk:
     Grid = Widget
     HeaderBar = Widget
     Image = FakeImage
+    IconTheme = FakeIconTheme
     Label = Widget
     ListBox = Widget
     ListBoxRow = Widget
@@ -311,6 +352,7 @@ class GuiRuntimeTest(unittest.TestCase):
         repo.Gtk = FakeGtk()
         repo.GLib = FakeGLib()
         repo.Gio = SimpleNamespace(SettingsSchemaSource=SimpleNamespace(get_default=lambda: None))
+        repo.GdkPixbuf = SimpleNamespace(Pixbuf=FakePixbuf)
         repo.Gdk = SimpleNamespace(
             Screen=SimpleNamespace(get_default=lambda: object()))
         repo.Pango = SimpleNamespace(
@@ -352,16 +394,132 @@ class GuiRuntimeTest(unittest.TestCase):
         self.assertTrue(hasattr(window, "chk_running_only"))
         self.assertTrue(hasattr(window, "cmb_swap_size"))
         self.assertTrue(hasattr(window, "cmb_scaling"))
+        self.assertTrue(window.icon_file.endswith("assets/preen.png"))
+        self.assertTrue((self.gui.ASSETS_DIR / "preen.png").is_file())
+        self.assertEqual(window.sim_switch.get_accessible().name, "Simulate")
+        self.assertEqual(window.cmb_theme.get_accessible().name, "Preen appearance")
+        self.assertEqual(window.app_rows["org.mozilla.firefox"].chk.get_accessible().name, "Select Firefox")
         # Four non-selectable section headers plus nine page rows.
         section_rows = [r for r in window.sidebar_list.get_children()
                         if getattr(r, "page_name", False) is None]
         self.assertEqual(len(section_rows), 4)
+
+    def test_desktop_launcher_matches_application_id_and_retains_hidden_legacy_alias(self):
+        root = Path(__file__).resolve().parents[1] / "data"
+        canonical = (root / (self.gui.APP_ID + ".desktop")).read_text(encoding="utf-8")
+        legacy = (root / "preen.desktop").read_text(encoding="utf-8")
+        self.assertIn("Icon=preen\n", canonical)
+        self.assertNotIn("NoDisplay=true", canonical)
+        self.assertIn("Icon=preen\n", legacy)
+        self.assertIn("NoDisplay=true", legacy)
 
     def test_startup_prioritizes_reading_appearance_before_package_scans(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
         with mock.patch.object(window, "submit") as submit:
             window._start_initial_tasks()
         self.assertEqual(submit.call_args_list[0].args[0], window._read_settings)
+
+    def test_dark_and_light_palettes_keep_required_tokens_and_readable_contrast(self):
+        def colors(css):
+            return dict(re.findall(r"@define-color (preen_\w+) (#[0-9a-f]{6});", css.decode()))
+
+        def contrast(first, second):
+            def luminance(value):
+                rgb = [int(value[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+                linear = [x / 12.92 if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4
+                          for x in rgb]
+                return sum(x * weight for x, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
+            low, high = sorted((luminance(first), luminance(second)))
+            return (high + 0.05) / (low + 0.05)
+
+        dark = colors(self.gui._CSS)
+        light = colors(self.gui._LIGHT_CSS)
+        expected = {
+            "preen_bg": "#202124", "preen_sidebar": "#1b1c1e", "preen_surface": "#282a2d",
+            "preen_elevated": "#303236", "preen_text": "#f1f3f4", "preen_muted": "#a5a9b0",
+            "preen_border": "#3b3e42", "preen_accent": "#3584e4", "preen_success": "#57a773",
+            "preen_warning": "#e5a84b", "preen_error": "#e45b5b",
+        }
+        for token, value in expected.items():
+            self.assertEqual(dark[token], value)
+        for palette in (dark, light):
+            for background in ("preen_bg", "preen_sidebar", "preen_surface", "preen_elevated"):
+                for foreground in ("preen_text", "preen_muted"):
+                    self.assertGreaterEqual(contrast(palette[foreground], palette[background]), 4.5)
+            self.assertGreaterEqual(contrast("#ffffff", palette["preen_action"]), 4.5)
+            self.assertGreaterEqual(contrast(palette["preen_warning"], palette["preen_elevated"]), 4.5)
+            # Switch tracks and their white thumb remain distinguishable on
+            # both cards; accent borders distinguish checked controls.
+            self.assertGreaterEqual(contrast("#7a8088", palette["preen_elevated"]), 3.0)
+            self.assertGreaterEqual(contrast("#ffffff", "#7a8088"), 3.0)
+            self.assertGreaterEqual(contrast(palette["preen_accent"], palette["preen_elevated"]), 3.0)
+            self.assertGreaterEqual(contrast("#ffffff", palette["preen_accent"]), 3.0)
+        self.assertGreaterEqual(contrast("#f08080", dark["preen_elevated"]), 4.5)
+        self.assertGreaterEqual(contrast("#a52323", light["preen_elevated"]), 4.5)
+        self.assertGreaterEqual(contrast("#70c28a", dark["preen_elevated"]), 4.5)
+        self.assertGreaterEqual(contrast("#1d713f", light["preen_elevated"]), 4.5)
+
+    def test_control_indicators_and_missing_symbolic_icons_have_fallbacks(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        for name in ("check", "mixed", "radio"):
+            path = self.gui.ASSETS_DIR / "controls" / (name + ".png")
+            self.assertTrue(path.is_file())
+            self.assertIn(path.as_uri().encode(), self.gui._CSS)
+            self.assertIn(path.as_uri().encode(), self.gui._LIGHT_CSS)
+        for name, fallback in (("document-save-symbolic", "↓"),
+                               ("edit-select-all-symbolic", "✓"),
+                               ("object-select-symbolic", "✓")):
+            icon = window._icon(name)
+            self.assertEqual(icon.get_text(), fallback)
+            self.assertIn("control-fallback-icon", icon.get_style_context().classes)
+        with mock.patch.object(self.gui.Gtk.IconTheme, "get_default",
+                               return_value=SimpleNamespace(has_icon=lambda name: name == "document-save-symbolic")):
+            self.assertEqual(window._icon("document-save-symbolic").icon_name, "document-save-symbolic")
+
+    def test_application_icons_prefer_installed_then_offline_then_generic(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        theme = SimpleNamespace(has_icon=lambda name: name == "actual-desktop-icon")
+        desktop_icon = SimpleNamespace(get_names=lambda: ["actual-desktop-icon"])
+        app_info = SimpleNamespace(get_icon=lambda: desktop_icon)
+        desktop_type = SimpleNamespace(new=lambda _id: app_info)
+        with mock.patch.object(self.gui.Gtk.IconTheme, "get_default", return_value=theme), \
+                mock.patch.object(self.gui.Gio, "DesktopAppInfo", desktop_type, create=True):
+            tile = window._app_icon({"id": "demo", "name": "Demo", "icon_asset": "firefox"})
+            self.assertEqual(tile.get_children()[0].icon_name, "actual-desktop-icon")
+            self.assertNotIn("app-icon-brand", tile.get_style_context().classes)
+        item = self.gui.apps_backend.all_apps()["org.mozilla.firefox"]
+        tile = window._app_icon(item)
+        self.assertIn("app-icon-brand", tile.get_style_context().classes)
+        self.assertTrue(tile.get_children()[0].pixbuf[0].endswith("firefox.png"))
+        # Absolute Icon= paths from APT desktop files are preferred too.
+        installed_path = str(self.gui.ASSETS_DIR / "controls" / "check.png")
+        tile = window._app_icon({"id": "demo", "name": "Demo", "icon": installed_path,
+                                 "icon_asset": "firefox"})
+        self.assertEqual(tile.get_children()[0].pixbuf[0], installed_path)
+        self.assertNotIn("app-icon-brand", tile.get_style_context().classes)
+        tile = window._app_icon({"id": "unknown", "name": "Unknown App", "icon_asset": "../unsafe"})
+        self.assertIn("app-icon-generic", tile.get_style_context().classes)
+        self.assertEqual(tile.get_children()[0].get_text(), "UA")
+        # Every catalogue row gets a visible child even without a system icon theme.
+        for item in self.gui.apps_backend.all_apps().values():
+            self.assertEqual(len(window._app_icon(item).get_children()), 1)
+
+    def test_invalid_image_file_falls_back_to_initials(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        with mock.patch.object(self.gui.GdkPixbuf.Pixbuf, "new_from_file_at_scale", side_effect=ValueError("bad image")):
+            tile = window._app_icon(self.gui.apps_backend.all_apps()["org.mozilla.firefox"])
+        self.assertIn("app-icon-generic", tile.get_style_context().classes)
+        self.assertTrue(tile.get_children()[0].get_text())
+
+    def test_manage_scan_matches_catalogue_marks_by_actual_package_reference(self):
+        entries = [{"source": "flatpak", "id": "org.mozilla.firefox", "name": "Firefox"},
+                   {"source": "apt", "id": "vlc", "name": "VLC"},
+                   {"source": "apt", "id": "unknown", "name": "Unknown"}]
+        with mock.patch.object(self.gui.apps_backend, "list_installed_flatpak", return_value=entries[:1]), \
+                mock.patch.object(self.gui.apps_backend, "list_installed_apt", return_value=entries[1:]):
+            scanned, warnings = self.gui.MainWindow._scan_installed_worker()
+        self.assertEqual(warnings, [])
+        self.assertEqual([item.get("icon_asset") for item in scanned], ["firefox", "vlcmediaplayer", None])
 
     def test_snapshot_refresh_keeps_export_and_import_controls(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
@@ -517,6 +675,7 @@ class GuiRuntimeTest(unittest.TestCase):
             self.assertIs(submit.call_args.args[0], self.gui.backup_backend.import_configs)
 
     def test_theme_changes_palette_without_discarding_other_staged_settings(self):
+        settings_backend.set_value("appearance_mode", "light")
         window = self.gui.MainWindow(self.gui.PreenApp())
         window._apply_settings({"animations_off": False, "swap": False, "zram": False,
                                 "power": "balanced", "theme": "light", "round": False,
@@ -526,13 +685,11 @@ class GuiRuntimeTest(unittest.TestCase):
         window.chk_animations.set_active(True)
         window.chk_round.set_active(True)
         window.cmb_scaling.set_active(2)
-        window.cmb_theme.set_active(1)
+        window.cmb_theme.set_active(2)
         with mock.patch.object(utils, "_simulate", False), \
-                mock.patch.object(self.gui.ui_backend, "apply_theme_mode",
-                                  return_value=utils.ok("Applied")) as apply, \
-                mock.patch.object(self.gui.ui_backend, "get_theme_mode", return_value="dark"):
+                mock.patch.object(self.gui.ui_backend, "get_theme_mode", return_value="light"):
             window.on_apply_theme(None)
-        apply.assert_called_once()
+        self.assertEqual(settings_backend.get("appearance_mode"), "dark")
         self.assertEqual(window._app_theme, "dark")
         self.assertEqual(window._css_provider.css, self.gui._CSS)
         self.assertTrue(window.chk_animations.get_active())
@@ -569,32 +726,69 @@ class GuiRuntimeTest(unittest.TestCase):
             window._watch_desktop_appearance()
         settings.connect.assert_called_once_with("changed::gtk-theme", window._on_desktop_appearance_changed)
 
-    def test_external_theme_change_updates_palette_without_losing_staged_choice(self):
+    def test_stylesheet_failure_is_reported_without_claiming_a_palette_change(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
-        window._apply_theme_setting("light")
-        window.cmb_theme.set_active(1)  # user has staged Dark
-        with mock.patch.object(self.gui.ui_backend, "get_theme_mode", return_value="light"):
-            window._on_desktop_appearance_changed()
+        previous = window._app_theme
+        requested = "light" if previous == "dark" else "dark"
+        with mock.patch.object(window._css_provider, "load_from_data", side_effect=ValueError("bad CSS")):
+            window._set_app_theme(requested)
+        self.assertEqual(window._app_theme, previous)
+        self.assertEqual(window._banner_level, "error")
+        self.assertIn("bad CSS", "".join(window.log_buf.lines))
+        with mock.patch.object(window._css_provider, "load_from_data", return_value=False):
+            window._set_app_theme(requested)
+        self.assertEqual(window._app_theme, previous)
+        self.assertIn("GTK rejected the stylesheet", "".join(window.log_buf.lines))
+
+    def test_saved_appearance_applies_at_start_and_survives_preferences_save(self):
+        settings_backend.set_value("appearance_mode", "light")
+        with mock.patch.object(self.gui.ui_backend, "get_theme_mode", return_value="dark"), \
+                mock.patch.object(self.gui.LogBuffer, "set_theme") as set_log_theme:
+            window = self.gui.MainWindow(self.gui.PreenApp())
+        set_log_theme.assert_any_call("light")
         self.assertEqual(window._app_theme, "light")
-        self.assertEqual(window.cmb_theme.get_active_text(), "Dark")
+        self.assertEqual(window.cmb_theme.get_active_text(), "Light")
+
+        class AcceptDialog(Widget):
+            def run(self):
+                return self_gui.Gtk.ResponseType.OK
+
+        self_gui = self.gui
+        with mock.patch.object(self.gui.Gtk, "Dialog", AcceptDialog):
+            window.on_preferences(None)
+        self.assertEqual(settings_backend.get("appearance_mode"), "light")
+        self.assertEqual(window.settings["appearance_mode"], "light")
+
+    def test_external_theme_changes_follow_system_but_never_override_explicit_or_staged_choice(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._desktop_theme = "light"
+        window._apply_theme_setting("system")
+        window.cmb_theme.set_active(2)  # staged, not yet applied
         with mock.patch.object(self.gui.ui_backend, "get_theme_mode", return_value="dark"):
             window._on_desktop_appearance_changed()
         self.assertEqual(window._app_theme, "dark")
-        self.assertEqual(window.baseline["theme"], "dark")
+        self.assertEqual(window.baseline["theme"], "system")
         self.assertEqual(window.cmb_theme.get_active_text(), "Dark")
+        # Once an explicit mode is saved, desktop signals are ignored.
+        window._apply_theme_setting("light")
+        with mock.patch.object(self.gui.ui_backend, "get_theme_mode", return_value="dark"):
+            window._on_desktop_appearance_changed()
+        self.assertEqual(window._app_theme, "light")
+        self.assertEqual(window.baseline["theme"], "light")
+        self.assertEqual(window.cmb_theme.get_active_text(), "Light")
 
     def test_simulated_theme_keeps_actual_palette_and_can_be_retried(self):
+        settings_backend.set_value("appearance_mode", "light")
         window = self.gui.MainWindow(self.gui.PreenApp())
         window._apply_theme_setting("light")
-        window.cmb_theme.set_active(1)
-        with mock.patch.object(self.gui.ui_backend, "apply_theme_mode",
-                               return_value=utils.ok("Simulation complete")), \
-                mock.patch.object(self.gui.ui_backend, "get_theme_mode", return_value="light"):
+        window.cmb_theme.set_active(2)
+        with mock.patch.object(self.gui.ui_backend, "get_theme_mode", return_value="dark"):
             window.on_apply_theme(None)
+        self.assertEqual(settings_backend.get("appearance_mode"), "light")
         self.assertEqual(window._app_theme, "light")
         self.assertEqual(window.cmb_theme.get_active_text(), "Light")
         self.assertEqual(window.baseline["theme"], "light")
-        window.cmb_theme.set_active(1)
+        window.cmb_theme.set_active(2)
         with mock.patch.object(window, "submit") as submit:
             window.on_apply_look(None)
             self.assertEqual(submit.call_args.args[1][0][0], "Theme")
@@ -604,18 +798,19 @@ class GuiRuntimeTest(unittest.TestCase):
         info = {"theme": "light", "round": False, "scaling": 1.23}
         window._apply_look_settings(info)
         self.assertEqual(window.cmb_scaling.get_active_text(), "Custom (123%)")
-        window.cmb_theme.set_active(1)
+        window.cmb_theme.set_active(2)
         with mock.patch.object(window, "submit") as submit:
             window.on_apply_look(None)
             self.assertEqual([action[0] for action in submit.call_args.args[1]], ["Theme"])
         window.cmb_scaling.set_active(0)
-        with mock.patch.object(window, "submit") as submit:
+        with mock.patch.object(window, "submit") as submit, \
+                mock.patch.object(window, "_confirm", return_value=True):
             window.on_apply_look(None)
             self.assertEqual([action[0] for action in submit.call_args.args[1]], ["Theme", "Text size"])
         window._apply_look_settings(dict(info, scaling=None))
         self.assertEqual(window.cmb_scaling.get_active_text(), "Unavailable")
         self.assertFalse(window.cmb_scaling.get_sensitive())
-        window.cmb_theme.set_active(1)
+        window.cmb_theme.set_active(2)
         with mock.patch.object(window, "submit") as submit:
             window.on_apply_look(None)
             self.assertEqual([action[0] for action in submit.call_args.args[1]], ["Theme"])
@@ -664,19 +859,64 @@ class GuiRuntimeTest(unittest.TestCase):
         window._apply_look_settings({"theme": "light", "round": False, "scaling": 1.0})
         window.chk_round.set_active(True)
         window.cmb_scaling.set_active(3)
-        with mock.patch.object(window, "submit") as submit:
+        with mock.patch.object(window, "submit") as submit, \
+                mock.patch.object(window, "_confirm", return_value=True) as confirm:
             window.on_apply_look(None)
+            self.assertIn("other applications", confirm.call_args.args[1])
         actions = submit.call_args.args[1]
         self.assertEqual([item[0] for item in actions], ["Rounded corners", "Text size"])
         self.assertEqual(actions[0][2], (True,))
         self.assertEqual(actions[1][2], (0.85,))
+
+    def test_app_only_look_apply_never_dispatches_desktop_actions(self):
+        settings_backend.set_value("appearance_mode", "light")
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_look_settings({"theme": "light", "round": False, "scaling": 1.0})
+        window.cmb_theme.set_active(2)
+        with mock.patch.object(utils, "_simulate", False), \
+                mock.patch.object(window, "_confirm") as confirm, \
+                mock.patch.object(self.gui.ui_backend, "get_theme_mode", return_value="light"), \
+                mock.patch.object(self.gui.ui_backend, "get_text_scaling", return_value=1.0), \
+                mock.patch.object(self.gui.ui_backend, "are_rounded_corners_enabled", return_value=False), \
+                mock.patch.object(self.gui.ui_backend, "set_text_scaling") as scaling, \
+                mock.patch.object(self.gui.ui_backend, "set_rounded_corners") as corners:
+            window.on_apply_look(None)
+        self.assertEqual(settings_backend.get("appearance_mode"), "dark")
+        self.assertEqual(window._app_theme, "dark")
+        confirm.assert_not_called()
+        scaling.assert_not_called()
+        corners.assert_not_called()
+
+    def test_desktop_wide_look_changes_require_explicit_confirmation(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_look_settings({"theme": "light", "round": False, "scaling": 1.0})
+        window.chk_round.set_active(True)
+        with mock.patch.object(window, "submit") as submit, \
+                mock.patch.object(window, "_confirm", return_value=False) as confirm:
+            window.on_apply_look(None)
+            confirm.assert_called_once()
+            submit.assert_not_called()
+        dialog = mock.Mock()
+        dialog.run.return_value = self.gui.Gtk.ResponseType.OK
+        dialog.get_filename.return_value = "/tmp/icons.tar"
+        with mock.patch.object(self.gui.Gtk, "FileChooserDialog", return_value=dialog), \
+                mock.patch.object(window, "_confirm", return_value=False) as confirm, \
+                mock.patch.object(window, "submit") as submit:
+            window.on_install_icon(None)
+            self.assertIn("other applications", confirm.call_args.args[1])
+            submit.assert_not_called()
+        with mock.patch.object(self.gui.Gtk, "FileChooserDialog", return_value=dialog), \
+                mock.patch.object(window, "_confirm", return_value=True), \
+                mock.patch.object(window, "submit") as submit:
+            window.on_install_icon(None)
+            self.assertIs(submit.call_args.args[0], self.gui.ui_backend.install_icon_pack)
 
     def test_optimize_and_look_refreshes_do_not_reset_other_page(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
         window._apply_settings({"animations_off": False, "swap": False, "zram": False,
                                 "power": "balanced", "theme": "light", "round": False,
                                 "scaling": 1.0, "warnings": []})
-        window.cmb_theme.set_active(1)
+        window.cmb_theme.set_active(2)
         window.chk_round.set_active(True)
         window._apply_optimize_settings({"animations_off": None, "swap": False,
                                          "zram": False, "power": "balanced"})

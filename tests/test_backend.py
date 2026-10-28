@@ -74,8 +74,6 @@ class BackendTestCase(unittest.TestCase):
                               str(self.swapfile) + " none swap sw 0 0"),
             mock.patch.object(performance, "ZRAM_CFG", str(self.zram_cfg)),
             mock.patch.object(performance, "_has_zram_generator", return_value=True),
-            mock.patch.object(ui_customization, "_installed_themes",
-                              return_value={"Adwaita", "Adwaita-dark"}),
         ]
         for patch in patches:
             patch.start()
@@ -123,8 +121,33 @@ class BackendTestCase(unittest.TestCase):
             "preen_tool/backend/ui_customization.py",
             "preen_tool/config/apps.json",
             "preen_tool/config/presets.json",
+            "preen_tool/assets/preen.png",
+            "preen_tool/assets/preen.svg",
+            "preen_tool/assets/controls/check.png",
+            "preen_tool/assets/controls/mixed.png",
+            "preen_tool/assets/controls/radio.png",
+            "preen_tool/assets/brand/firefox.png",
+            "preen_tool/assets/brand/LICENSE.simple-icons.md",
         ):
             self.assertIn(required, names, "wheel is missing " + required)
+
+    def test_catalogue_rejects_unsafe_or_missing_icon_assets(self):
+        entry = {"id": "demo", "name": "Demo", "apt": "demo", "icon_asset": "../outside"}
+        with mock.patch.object(apps, "load_apps", return_value={"Demo": [entry]}), \
+                mock.patch.object(apps, "load_presets", return_value={}):
+            self.assertTrue(any("invalid icon asset" in p for p in apps.validate_catalog()))
+            entry["icon_asset"] = "nonexistent"
+            self.assertTrue(any("missing icon asset" in p for p in apps.validate_catalog()))
+
+    def test_apt_scanner_keeps_desktop_entry_icon(self):
+        launcher = self.root / "demo.desktop"
+        launcher.write_text("[Desktop Entry]\nType=Application\nName=Demo\n"
+                            "Icon=demo-icon\n[Other Group]\nIcon=wrong\n", encoding="utf-8")
+        self.fake.update(owners={str(launcher): "demo"})
+        with mock.patch.object(apps.glob, "glob", return_value=[str(launcher)]):
+            entries = apps.list_installed_apt()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["icon"], "demo-icon")
 
     # ------------------------------------------------------------------
     # Command runner

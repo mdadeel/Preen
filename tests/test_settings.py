@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,6 +31,7 @@ class SettingsTest(unittest.TestCase):
         values = settings.load()
         self.assertFalse(values["simulate_on_startup"])
         self.assertEqual(values["default_source"], "flatpak")
+        self.assertEqual(values["appearance_mode"], "system")
         self.assertTrue(values["confirm_destructive"])
         self.assertEqual(values["auto_refresh_seconds"], 15)
         self.assertEqual(values["page_on_startup"], "dashboard")
@@ -54,6 +56,7 @@ class SettingsTest(unittest.TestCase):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps({
             "default_source": "snap",
+            "appearance_mode": "neon",
             "auto_refresh_seconds": 999999,
             "page_on_startup": "../../etc",
             "confirm_destructive": "yes",
@@ -61,6 +64,7 @@ class SettingsTest(unittest.TestCase):
         }), encoding="utf-8")
         values = settings.load()
         self.assertEqual(values["default_source"], "flatpak")
+        self.assertEqual(values["appearance_mode"], "system")
         self.assertEqual(values["auto_refresh_seconds"], 15)
         self.assertEqual(values["page_on_startup"], "dashboard")
         self.assertIs(values["confirm_destructive"], True)
@@ -77,6 +81,34 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.get("default_source"), "apt")
         self.assertTrue(settings.reset())
         self.assertEqual(settings.get("default_source"), "flatpak")
+
+    def test_preference_updates_preserve_appearance(self):
+        self.assertTrue(settings.set_value("appearance_mode", "dark"))
+        self.assertTrue(settings.update({"default_source": "apt", "auto_refresh_seconds": 30}))
+        self.assertEqual(settings.load()["appearance_mode"], "dark")
+        self.assertEqual(settings.load()["default_source"], "apt")
+        self.assertTrue(settings.reset())
+        self.assertEqual(settings.get("appearance_mode"), "system")
+
+    def test_concurrent_preference_updates_do_not_lose_unrelated_fields(self):
+        barrier = threading.Barrier(3)
+        results = []
+
+        def update(key, value):
+            barrier.wait()
+            results.append(settings.set_value(key, value))
+
+        threads = [threading.Thread(target=update, args=("appearance_mode", "dark")),
+                   threading.Thread(target=update, args=("default_source", "apt"))]
+        for thread in threads:
+            thread.start()
+        barrier.wait()
+        for thread in threads:
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(results, [True, True])
+        self.assertEqual(settings.load()["appearance_mode"], "dark")
+        self.assertEqual(settings.load()["default_source"], "apt")
 
 
 if __name__ == "__main__":
