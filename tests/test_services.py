@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -48,6 +49,31 @@ class ParseUnitFilesTest(unittest.TestCase):
         states = services.parse_unit_files(UNIT_FILES_FIXTURE)
         self.assertEqual(states["NetworkManager.service"], "enabled")
         self.assertEqual(states["udisks2.service"], "disabled")
+
+
+class ListServicesTest(unittest.TestCase):
+    def test_failed_live_query_is_unavailable_with_exit_and_error(self):
+        from preen_tool.backend import utils
+        log = mock.Mock()
+        with mock.patch.object(services.utils, "run_cmd",
+                               return_value=utils.CommandResult(1, "", "systemd offline")) as run:
+            result = services.list_services(log=log)
+        self.assertIsNone(result)
+        self.assertEqual(run.call_count, 1)
+        message = log.append.call_args.args[0]
+        self.assertIn("exit 1", message)
+        self.assertIn("systemd offline", message)
+
+    def test_missing_unit_file_states_do_not_hide_live_services(self):
+        from preen_tool.backend import utils
+        log = mock.Mock()
+        results = [utils.CommandResult(0, LIST_UNITS_FIXTURE, ""),
+                   utils.CommandResult(5, "", "no unit files")]
+        with mock.patch.object(services.utils, "run_cmd", side_effect=results):
+            result = services.list_services(log=log)
+        self.assertEqual(len(result), 5)
+        self.assertTrue(all(entry["unit_state"] == "" for entry in result))
+        self.assertIn("exit 5", log.append.call_args.args[0])
 
 
 class SetServiceStateTest(unittest.TestCase):

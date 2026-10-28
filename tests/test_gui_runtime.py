@@ -72,6 +72,8 @@ class Widget:
         self._active = 0
         self._text = kwargs.get("label", kwargs.get("title", "")) or ""
         self._sensitive = True
+        self._visible = False
+        self._no_show_all = False
         self._buffer = FakeTextBuffer()
         self.chk = None
         self.entry = None
@@ -105,6 +107,28 @@ class Widget:
 
     def get_children(self):
         return list(self._children)
+
+    def set_no_show_all(self, value):
+        self._no_show_all = bool(value)
+
+    def show(self):
+        self._visible = True
+
+    def hide(self):
+        self._visible = False
+
+    def set_visible(self, value):
+        self._visible = bool(value)
+
+    def get_visible(self):
+        return self._visible
+
+    def show_all(self):
+        if self._no_show_all:
+            return
+        self.show()
+        for child in self._children:
+            child.show_all()
 
     def remove(self, child):
         if child in self._children:
@@ -221,7 +245,7 @@ class FakeGtk:
     ResponseType = SimpleNamespace(OK=-5, CANCEL=-6, CLOSE=-7, APPLY=-10)
     FileChooserAction = SimpleNamespace(OPEN=0, SAVE=1)
     Justification = SimpleNamespace(LEFT=0)
-    WrapMode = SimpleNamespace(WORD_CHAR=2)
+    WrapMode = SimpleNamespace(NONE=0, WORD_CHAR=2)
     STOCK_CANCEL = "gtk-cancel"
     STOCK_OPEN = "gtk-open"
     STOCK_SAVE = "gtk-save"
@@ -307,6 +331,150 @@ class GuiRuntimeTest(unittest.TestCase):
                         if getattr(r, "page_name", False) is None]
         self.assertEqual(len(section_rows), 4)
 
+    def test_snapshot_refresh_keeps_export_and_import_controls(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        callbacks = [handler.__name__ for button in window.action_widgets
+                     for handler in button._handlers.get("clicked", [])]
+        self.assertIn("on_export_config", callbacks)
+        self.assertIn("on_import_config", callbacks)
+        window._apply_snapshots([])
+        self.assertTrue(window.snapshot_empty.get_visible())
+        window._apply_snapshots([{"name": "snapshot-1", "date": "today", "tags": "D"}])
+        self.assertFalse(window.snapshot_empty.get_visible())
+        self.assertEqual(len(window.snapshot_listbox.get_children()), 1)
+        window.submit(lambda: [], done=window._apply_snapshots)
+        self.assertEqual(len(window.snapshot_listbox.get_children()), 0)
+        self.assertNotIn("UI update failed", "".join(window.log_buf.lines))
+
+    def test_busy_queue_is_serial_and_locks_simulation_until_callbacks_finish(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        events = []
+
+        def first():
+            events.append("first")
+            return "read"
+
+        def finished(_result):
+            events.append(("callback", window._busy, window.sim_switch.get_sensitive()))
+            window.submit(lambda: events.append("second"))
+            events.append("callback end")
+
+        window.submit(first, done=finished)
+        self.assertEqual(events, ["first", ("callback", True, False), "callback end", "second"])
+        self.assertFalse(window._busy)
+        self.assertTrue(window.sim_switch.get_sensitive())
+        self.assertFalse(window.busy_box.get_visible())
+
+    def test_destructive_confirmation_remains_required_when_preference_is_off(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window.settings["confirm_destructive"] = False
+        # Fake dialogs cancel; only the optional full-update prompt can be skipped.
+        self.assertFalse(window._confirm("Remove?", "Permanent", required=True))
+        self.assertTrue(window._confirm("Update all?", "Optional", required=False))
+
+    def test_unavailable_dashboard_metric_hides_its_progress_bar(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_stats({"cpu_percent": "Unavailable", "cpu_cores": "Unavailable"})
+        self.assertEqual(window.stat_bars["cpu"][0].get_text(), "—")
+        self.assertFalse(window.stat_bars["cpu"][1].get_visible())
+        window._apply_stats({"cpu_percent": "12.5", "cpu_cores": "2"})
+        self.assertTrue(window.stat_bars["cpu"][1].get_visible())
+
+    def test_environment_forced_simulation_stays_visible_and_locked(self):
+        with mock.patch.dict("os.environ", {utils.SIMULATE_ENV: "1"}):
+            window = self.gui.MainWindow(self.gui.PreenApp())
+            self.assertTrue(window.sim_switch.get_active())
+            self.assertTrue(window.sim_banner.get_visible())
+            self.assertFalse(window.sim_switch.get_sensitive())
+            window.sim_switch.set_active(False)
+            window.on_toggle_simulate(window.sim_switch, None)
+            self.assertTrue(window.sim_switch.get_active())
+            self.assertTrue(utils.is_simulate())
+
+    def test_callback_failure_keeps_traceback_and_error_banner(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+
+        def broken(_value):
+            raise NameError("specific callback bug")
+
+        window.submit(lambda: "read", done=broken)
+        log = "".join(window.log_buf.lines)
+        self.assertIn("UI update failed", log)
+        self.assertIn("Traceback", log)
+        self.assertIn("specific callback bug", log)
+        self.assertEqual(window._banner_level, "error")
+        window._notify("Later success", "info")
+        self.assertNotEqual(window.banner_label.get_text(), "Later success")
+        self.assertTrue(window.banner.get_visible())
+        self.assertTrue(window.banner_label.get_visible())
+        window._dismiss_banner()
+        window._notify("Later success", "info")
+        self.assertEqual(window.banner_label.get_text(), "Later success")
+
+    def test_health_warning_and_power_profile_reflect_real_availability(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        settings = {"animations_off": False, "swap": False, "zram": False,
+                    "power": "", "theme": "light", "round": False,
+                    "scaling": 1.0, "warnings": ["Tool missing"]}
+        window._apply_settings(settings)
+        self.assertTrue(window.health_box.get_visible())
+        self.assertIn("Tool missing", window.lbl_health.get_text())
+        self.assertEqual(window.cmb_power.get_active_text(), "Unavailable")
+        self.assertFalse(window.cmb_power.get_sensitive())
+        with mock.patch.object(window, "submit") as submit:
+            window.on_run_optimize(None)
+            submit.assert_not_called()
+        settings = dict(settings, power="balanced", warnings=[])
+        window._apply_settings(settings)
+        self.assertFalse(window.health_box.get_visible())
+        self.assertTrue(window.cmb_power.get_sensitive())
+        window.cmb_power.set_active(self.gui.perf_backend.POWER_PROFILES.index("performance"))
+        with mock.patch.object(window, "submit") as submit:
+            window.on_run_optimize(None)
+            actions = submit.call_args.args[1]
+            self.assertEqual([action[0] for action in actions], ["Power profile"])
+
+    def test_partial_scans_and_unknown_cleanup_sizes_are_not_reported_as_zero(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._fill_manage_rows(([], ["Flatpak scan failed"]))
+        self.assertTrue(window.manage_scan_notice.get_visible())
+        self.assertIn("incomplete", window.manage_empty.get_text().lower())
+        window._apply_services(None)
+        self.assertIn("unavailable", window.services_count.get_text().lower())
+        window._on_services_filter_changed()
+        self.assertIn("unavailable", window.services_count.get_text().lower())
+        window._apply_clean_scan([
+            {"key": "journal", "label": "Journal", "detail": "", "size": None, "root": True},
+            {"key": "thumbnails", "label": "Thumbnails", "detail": "", "size": 1024, "root": False},
+        ])
+        self.assertIn("unknown", window.clean_total.get_text())
+        self.assertIn("1 size(s) unavailable", window.clean_summary.get_text())
+        window.on_clean_select_all()
+        self.assertFalse(window.clean_checkbuttons["journal"][0].get_active())
+        window.clean_checkbuttons["journal"][0].set_active(True)
+        window._update_clean_counter()
+        self.assertIn("+ unknown", window.clean_counter.get_text())
+        window._after_clean_scan([
+            {"key": "journal", "label": "Journal", "detail": "", "size": None, "root": True},
+        ], {"journal": None})
+        self.assertIn("comparison is unavailable", window.banner_label.get_text())
+
+    def test_simulated_clean_keeps_files_and_reports_preview(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(self.gui.deepclean_backend.USER_CLEAN_PATHS, {"trash": tmp}), \
+                mock.patch.object(window, "_confirm", return_value=True):
+            target = Path(tmp) / "important.txt"
+            target.write_text("keep", encoding="utf-8")
+            window._apply_clean_scan([
+                {"key": "trash", "label": "Trash", "detail": "", "size": 4, "root": False},
+            ])
+            window.clean_checkbuttons["trash"][0].set_active(True)
+            window.on_clean_selected(None)
+            self.assertEqual(target.read_text(encoding="utf-8"), "keep")
+            self.assertIn("No files were removed", window.banner_label.get_text())
+            self.assertIn("[simulate] would clean", "".join(window.log_buf.lines))
+
     def test_log_filter_rebuilds_the_view(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
         window.log_buf.append("[ok] first line\n")
@@ -314,9 +482,19 @@ class GuiRuntimeTest(unittest.TestCase):
         entry = SimpleNamespace(get_text=lambda: "failed")
         window.on_log_filter_changed(entry)
         self.assertEqual(window.log_buf.filter_text, "failed")
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "preen.log"
+            self.assertTrue(window.log_buf.save(str(destination)))
+            saved = destination.read_text(encoding="utf-8")
+            self.assertIn("first line", saved)  # filtering affects only the view
+            self.assertIn("second line", saved)
+        self.assertEqual(window.log_buf._severity("[failed] exit 7"), "error")
+        self.assertEqual(window.log_buf._severity("[warning] caution"), "warning")
         entry = SimpleNamespace(get_text=lambda: "")
         window.on_log_filter_changed(entry)
         self.assertEqual(window.log_buf.filter_text, "")
+        window.log_buf.clear()
+        self.assertEqual(window.log_buf.lines, [])
 
     def test_handlers_run_without_exceptions(self):
         window = self.gui.MainWindow(self.gui.PreenApp())

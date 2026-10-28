@@ -7,7 +7,7 @@ polkit authorises it like every other mutating action.
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from . import utils
 
@@ -61,22 +61,27 @@ def parse_unit_files(text: str) -> Dict[str, str]:
     return states
 
 
-def list_services() -> List[dict]:
-    """Merge live units with unit-file states into one sortable listing."""
-    live = parse_list_units(_run_readonly(
+def list_services(log=None) -> Optional[List[dict]]:
+    """Merge live units and unit-file states; None means the scan failed."""
+    live_result = utils.run_cmd(
         ["systemctl", "list-units", "--type=service", "--all",
-         "--no-legend", "--no-pager"]))
-    files = parse_unit_files(_run_readonly(
+         "--no-legend", "--no-pager"], quiet=True)
+    if not live_result.ok:
+        if log:
+            log.append("[warning] Service listing failed (exit {}): {}\n".format(
+                live_result.code, live_result.err or live_result.out or "no output"))
+        return None
+    live = parse_list_units(live_result.out)
+    files_result = utils.run_cmd(
         ["systemctl", "list-unit-files", "--type=service",
-         "--no-legend", "--no-pager"]))
+         "--no-legend", "--no-pager"], quiet=True)
+    files = parse_unit_files(files_result.out) if files_result.ok else {}
+    if not files_result.ok and log:
+        log.append("[warning] Service startup states unavailable (exit {}): {}\n".format(
+            files_result.code, files_result.err or files_result.out or "no output"))
     for entry in live:
         entry["unit_state"] = files.get(entry["unit"], "")
     return live
-
-
-def _run_readonly(args: List[str]) -> str:
-    result = utils.run_cmd(args, quiet=True)
-    return result.out if result.ok else ""
 
 
 def set_service_state(unit: str, action: str, log=None) -> utils.Outcome:
@@ -118,16 +123,24 @@ def parse_blame(text: str, limit: int = 8) -> List[Tuple[str, str]]:
     return rows
 
 
-def boot_info() -> Dict[str, object]:
-    """Boot summary + slowest units; ``{}`` when systemd-analyze is absent."""
+def boot_info(log=None) -> Dict[str, object]:
+    """Boot summary + slowest units; empty if the data cannot be read."""
     if not utils.has_command("systemd-analyze"):
+        if log:
+            log.append("[warning] systemd-analyze is not installed.\n")
         return {}
     info: Dict[str, object] = {}
     summary = utils.run_cmd(["systemd-analyze"], quiet=True)
     if summary.ok:
         info.update(parse_analyze(summary.out))
+    elif log:
+        log.append("[warning] Boot analysis failed (exit {}): {}\n".format(
+            summary.code, summary.err or summary.out or "no output"))
     blame = utils.run_cmd(
         ["systemd-analyze", "blame", "--no-pager"], quiet=True)
     if blame.ok:
         info["blame"] = parse_blame(blame.out)
+    elif log:
+        log.append("[warning] Slow-service analysis failed (exit {}): {}\n".format(
+            blame.code, blame.err or blame.out or "no output"))
     return info
