@@ -1,3 +1,12 @@
+preen (0.5.0) stable; urgency=medium
+
+  * Refresh all nine GTK pages, Preen-only appearance and bundled icons.
+  * Improve cleanup, package, service, backup and diagnostic safeguards.
+  * Include privacy, security, licence notices and screenshot documentation.
+  * Prepare version-matched source and binary release artifacts.
+
+ -- Preen contributors <64582744+mdadeel@users.noreply.github.com>  Wed, 28 Oct 2026 20:47:48 +0600
+
 preen (0.4.0) stable; urgency=medium
 
   * macOS-inspired design pass: grouped sidebar sections, segmented source

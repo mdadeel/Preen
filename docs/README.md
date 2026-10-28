@@ -6,6 +6,7 @@ Choose the guide that fits your task:
 |---|---|
 | [User guide](USER_GUIDE.md) | Installation, first run, pages, troubleshooting and FAQ. |
 | [Architecture](ARCHITECTURE.md) | Module map, threading, task queue, testing and safety contracts. |
+| [Release building](RELEASES.md) | Build and verify version-matched source, Debian, wheel and optional AppImage artifacts. |
 | [Functional review](FEATURE_AUDIT.md) | Checks performed and live-desktop testing limitations. |
 | [Product roadmap](PRODUCT_ROADMAP.md) | Proposed app refinements, folder organizer and future Linux utilities; not promises of current features. |
 | [Website plan](WEBSITE_PLAN.md) | Proposed minimal, macOS-inspired, no-gradient website; no website is implemented by this plan. |

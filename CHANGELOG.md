@@ -6,6 +6,8 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-28
+
 A GNOME-native dark GTK 3 refresh of all nine pages, retaining the existing
 backend, package catalogue and serial task queue.
 
@@ -37,6 +39,9 @@ backend, package catalogue and serial task queue.
 - Source archives and native package staging include the policy, license,
   third-party notices and screenshot documentation; Python metadata links to
   the project documentation and policies.
+- A release builder creates version-matched source and package artifacts with
+  checksums. The AppImage builder checks its output and CLI version rather than
+  reporting success when the tool produces no runnable artifact.
 
 ### Fixed
 

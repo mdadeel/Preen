@@ -90,23 +90,26 @@ system Python, for example `/usr/bin/python3`, with the same commands.
 ### Releases and local packages
 
 Check [GitHub Releases](https://github.com/mdadeel/Preen/releases) for the
-assets attached to a particular release. The `v0.4.0` release had source
-archives but **no attached Debian or AppImage binaries** when this document was
-updated on 2026-10-28. The current source may contain changes not in that tag.
+files attached to a particular release. GitHub also provides source ZIP and
+`.tar.gz` archives for each tag. Debian packages, Python wheels and AppImages
+are available only when listed among that release's assets; the current source
+may contain changes not present in an older tag.
 
 To build a Debian package from a checkout with `dpkg-deb` installed:
 
 ```bash
 ./packaging/build_deb.sh
 # Install the versioned file reported by the builder, for example:
-sudo apt install ./dist/preen_0.4.0_all.deb
+sudo apt install ./dist/preen_0.5.0_all.deb
 ```
 
 To build the x86-64 AppImage, run `./packaging/build_appimage.sh`; the builder
-may download `appimagetool` without checksum verification. Prefer a trusted,
-pre-verified tool supplied through `APPIMAGETOOL`. The AppImage uses the
-host's Python, GTK and PyGObject rather than bundling them. A Python virtual environment with
-`--system-site-packages` can also be used for an editable install; see the
+may download `appimagetool` without checksum verification, and that tool may
+fetch an unverified runtime. Prefer a trusted, pre-verified appimagetool
+AppImage supplied through `APPIMAGETOOL` and verify its runtime. Preen's
+AppImage uses the host's Python, GTK and PyGObject rather than bundling them.
+A Python virtual environment with `--system-site-packages` can also be used for
+an editable install; see the
 [contributor guide](CONTRIBUTING.md#get-set-up).
 
 ## Command-line checks
@@ -174,7 +177,8 @@ Not yet. A selectable-folder organizer is a proposal in the
 ## Documentation and community
 
 - [User guide](docs/USER_GUIDE.md) · [Documentation index](docs/README.md) ·
-  [Architecture](docs/ARCHITECTURE.md) · [Changelog](CHANGELOG.md)
+  [Architecture](docs/ARCHITECTURE.md) · [Changelog](CHANGELOG.md) ·
+  [Release building](docs/RELEASES.md)
 - [Contributing](CONTRIBUTING.md) · [Code of conduct](CODE_OF_CONDUCT.md) ·
   [Report a bug](https://github.com/mdadeel/Preen/issues)
 - [Privacy policy](PRIVACY.md) · [Security policy](SECURITY.md) ·
