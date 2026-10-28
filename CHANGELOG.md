@@ -17,6 +17,9 @@ backend, package catalogue and serial task queue.
   severity-coloured selectable logs, and explicit unavailable metrics.
 - Regression coverage for snapshot refresh, simulation, queue callbacks,
   diagnostics, cleanup measurements and package/service scan failures.
+- Bundled Preen launcher artwork, checkbox/radio indicators and offline
+  catalogue marks with generic fallbacks, plus a proposed roadmap for the
+  visual refresh, folder organizer and future Linux utilities.
 
 ### Changed
 
@@ -29,10 +32,16 @@ backend, package catalogue and serial task queue.
 
 ### Fixed
 
-- Light and dark appearance now update both Preen and supported GNOME
-  settings, including older GTK-theme-only desktops, external theme changes,
-  repeated toggles and simulation. Custom text scaling and settings staged on
-  other pages are preserved.
+- Light, dark and Follow system appearance now affect Preen only and persist
+  across restarts, without writing the GNOME colour scheme or GTK theme.
+  Explicit choices are not overwritten by desktop changes; simulation previews
+  without saving. Desktop-wide scaling, icon packs and GTK corner settings are
+  separated and confirmed before applying.
+- Primary actions, status text, selected segments and control icons have more
+  legible dark/light contrast. Installed desktop icons are resolved before
+  offline marks and generic fallbacks; preferences saves preserve appearance.
+- The packaged launcher ID matches the GTK application ID for desktop shell
+  icon association; the old desktop ID remains as a hidden compatibility alias.
 - The package-source selector no longer recursively emits GTK toggle signals
   and crash when switching Flatpak / APT. A failed Flathub setup no longer
   silently skips an unrelated APT batch.

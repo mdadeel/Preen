@@ -16,6 +16,7 @@ LEGACY_CONFIG_DIR = os.path.expanduser("~/.config/zorin-optimizer")
 SETTINGS_PATH = os.path.join(CONFIG_DIR, "settings.json")
 
 VALID_SOURCES = ("flatpak", "apt")
+VALID_APPEARANCE = ("system", "light", "dark")
 VALID_REFRESH = (0, 10, 15, 30, 60)
 VALID_PAGES = ("dashboard", "install", "manage", "optimize", "customize",
                "backup", "logs", "deepclean", "services")
@@ -23,13 +24,16 @@ VALID_PAGES = ("dashboard", "install", "manage", "optimize", "customize",
 DEFAULTS: Dict[str, Any] = {
     "simulate_on_startup": False,
     "default_source": "flatpak",
+    "appearance_mode": "system",
     "confirm_destructive": True,
     "show_dependency_warnings": True,
     "auto_refresh_seconds": 15,
     "page_on_startup": "dashboard",
 }
 
-_lock = threading.Lock()
+# A preference update may be requested by the worker while the Preferences
+# dialog is open. Protect read/modify/write and the shared temporary file.
+_lock = threading.RLock()
 
 
 def defaults() -> Dict[str, Any]:
@@ -48,6 +52,9 @@ def validate(values: Dict[str, Any]) -> Dict[str, Any]:
     source = values.get("default_source")
     if source in VALID_SOURCES:
         clean["default_source"] = source
+    appearance = values.get("appearance_mode")
+    if appearance in VALID_APPEARANCE:
+        clean["appearance_mode"] = appearance
     page = values.get("page_on_startup")
     if page in VALID_PAGES:
         clean["page_on_startup"] = page
@@ -83,30 +90,37 @@ def load() -> Dict[str, Any]:
 
 def save(values: Dict[str, Any]) -> bool:
     clean = validate(values)
-    tmp = SETTINGS_PATH + ".tmp"
-    try:
-        os.makedirs(os.path.dirname(SETTINGS_PATH), exist_ok=True)
-        with open(tmp, "w", encoding="utf-8") as handle:
-            json.dump(clean, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-        os.replace(tmp, SETTINGS_PATH)
-        return True
-    except OSError:
+    with _lock:
+        tmp = SETTINGS_PATH + ".tmp"
         try:
-            os.unlink(tmp)
+            os.makedirs(os.path.dirname(SETTINGS_PATH), exist_ok=True)
+            with open(tmp, "w", encoding="utf-8") as handle:
+                json.dump(clean, handle, indent=2, sort_keys=True)
+                handle.write("\n")
+            os.replace(tmp, SETTINGS_PATH)
+            return True
         except OSError:
-            pass
-        return False
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            return False
 
 
 def get(key: str) -> Any:
     return load().get(key, DEFAULTS.get(key))
 
 
+def update(changes: Dict[str, Any]) -> bool:
+    """Atomically merge preferences without resetting unrelated values."""
+    with _lock:
+        values = load()
+        values.update(changes)
+        return save(values)
+
+
 def set_value(key: str, value: Any) -> bool:
-    values = load()
-    values[key] = value
-    return save(values)
+    return update({key: value})
 
 
 def reset() -> bool:

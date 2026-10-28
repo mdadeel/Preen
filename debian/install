@@ -1,1 +1,3 @@
 data/preen.desktop usr/share/applications/
+data/io.github.mdadeel.Preen.desktop usr/share/applications/
+preen_tool/assets/preen.png usr/share/icons/hicolor/256x256/apps/

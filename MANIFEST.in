@@ -1,4 +1,6 @@
 include README.md LICENSE CHANGELOG.md CONTRIBUTING.md requirements.txt Makefile .editorconfig
+recursive-include data *.desktop
 recursive-include preen_tool/config *.json
+recursive-include preen_tool/assets *.png *.svg *.md
 recursive-include docs *.md *.example
 recursive-include tests *.py

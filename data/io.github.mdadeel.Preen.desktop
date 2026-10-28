@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Preen
+Comment=System setup and optimization for Linux
+Exec=preen
+Icon=preen
+Terminal=false
+Categories=System;Settings;Utility;
+Keywords=optimize;apps;flatpak;apt;cleanup;services;preen;
+StartupNotify=true
+StartupWMClass=preen

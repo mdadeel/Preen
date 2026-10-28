@@ -151,21 +151,28 @@ permanent; thumbnails are regenerated automatically.
 
 ### Customize Look
 
-- Switch between **Light** and **Dark**, or use **Apply Theme Now**. Preen's
-  own palette follows the detected desktop appearance and updates when GNOME
-  changes it. Modern GNOME uses the colour-scheme preference; older versions
-  use the installed GTK 3 theme. Some applications may require a restart or
-  follow a different theme mechanism.
-- Choose a **Text size** preset (85% to 125%) for desktop-wide scaling. A
-  custom existing factor is displayed and preserved until you choose a preset.
-  Unreadable settings are marked unavailable rather than reset to a default.
-- Applying only the theme preserves staged text-size, rounded-corner and
-  optimization changes. Reloading the look does not reset Optimize System.
-- Install an icon pack from a `.tar.xz` or `.tar.gz` archive. Unsafe archive
-  entries are refused. If an icon theme of the same name exists, its old
-  contents are kept under `~/.icons/.preen-backups/`.
-- Add reversible rounded corners through a guarded block in
+- Under **Preen appearance**, choose **Follow system**, **Light** or **Dark**
+  and select **Apply Preen Appearance**. This changes Preen only; it does not
+  change GNOME's colour scheme or GTK theme. Your choice is saved in Preen's
+  preferences. Follow system reads GNOME appearance where available and uses
+  dark if no desktop appearance has been detected. Explicit Light/Dark choices stay fixed when
+  the desktop changes. In Simulate mode the change is previewed, not saved.
+  If an older Preen version changed your desktop theme, restore it in your
+  desktop's Appearance settings; Preen cannot know your previous choice.
+- **Desktop-wide options** are separate and affect other applications. Choose
+  a **Desktop text size** preset (85% to 125%), or use reversible GTK 3
+  rounded corners. Existing custom scaling is preserved until explicitly
+  changed; unreadable scaling is unavailable. Applying these options asks for
+  confirmation and rounded corners write a guarded block in
   `~/.config/gtk-3.0/gtk.css`.
+- **Install Desktop Icon Pack** installs an archive and activates its icon
+  theme across GNOME after confirmation. Unsafe entries are refused. If a
+  theme of the same name exists, the previous contents are kept under
+  `~/.icons/.preen-backups/`.
+- Applying only Preen appearance preserves staged text-size, rounded-corner and
+  optimization changes. Reloading the look does not reset Optimize System.
+  App lists use installed icons where available, bundled marks for some
+  catalogue entries, and generic initials when no matching icon is available.
 
 ### Backup & Restore
 
@@ -239,10 +246,11 @@ reported as warnings.
 | APT package not found | Your repositories may not carry it. The Logs page shows the exact `apt-get` error. |
 | Power profile does nothing | Install `power-profiles-daemon` and reboot. |
 | Swapfile or ZRAM change failed | Check Logs and install `systemd-zram-generator` if needed. Preen refuses to overwrite an existing inactive swapfile or a custom ZRAM configuration. |
-| Theme did not change | Check that GNOME settings and the desired GTK theme are available. Some applications need a restart or use their own theme mechanism. |
+| Preen appearance did not change | Turn off Simulate and apply the desired Preen appearance. Follow system needs readable GNOME appearance settings; otherwise it falls back to dark. Other apps are intentionally unchanged. |
+| Preen's AppImage has a generic dock icon on Wayland | Integrate the AppImage with your desktop's AppImage integration tool so the shell can find its launcher. The Debian package installs the launcher and icon. |
 | Snapshot list is unavailable | Install Timeshift and choose **Refresh List** to authorize the read, or open Timeshift directly. Simulate mode does not refresh it. |
 | An action failed | Read the banner and open Logs for the full stderr, then use **Save Log**. |
-| I want to undo a look change | Switch off rounded corners and apply, then re-select the Light or Dark theme. |
+| I want to undo a look change | Select Follow system for Preen. For desktop-wide changes, set the previous text size/icon theme and switch off rounded corners; confirm the changes. |
 
 ---
 

@@ -27,7 +27,9 @@ from .utils import (
     run_cmd,
 )
 
-CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+PACKAGE_DIR = os.path.dirname(os.path.dirname(__file__))
+CONFIG_DIR = os.path.join(PACKAGE_DIR, "config")
+BRAND_ICONS_DIR = os.path.join(PACKAGE_DIR, "assets", "brand")
 APPS_JSON = os.path.join(CONFIG_DIR, "apps.json")
 PRESETS_JSON = os.path.join(CONFIG_DIR, "presets.json")
 
@@ -111,6 +113,12 @@ def validate_catalog() -> List[str]:
             seen.add(app_id)
             if not item.get("apt") and not item.get("flatpak"):
                 problems.append("{}: no apt or flatpak package".format(app_id))
+            asset = item.get("icon_asset")
+            if asset is not None:
+                if not isinstance(asset, str) or not re.fullmatch(r"[a-z0-9]+", asset):
+                    problems.append("{}: invalid icon asset {!r}".format(app_id, asset))
+                elif not os.path.isfile(os.path.join(BRAND_ICONS_DIR, asset + ".png")):
+                    problems.append("{}: missing icon asset {!r}".format(app_id, asset))
             for ref in as_list(item.get("flatpak")):
                 if not FLATPAK_ID_RE.match(ref):
                     problems.append("{}: invalid flatpak id {!r}".format(app_id, ref))
@@ -333,6 +341,7 @@ def list_installed_apt(warnings=None, log=None) -> List[Dict]:
             "source": "apt",
             "id": pkg,
             "name": str(info["name"]),
+            "icon": str(info["icon"]),
             "protected": is_protected(pkg),
         })
     items.sort(key=lambda x: x["name"].lower())

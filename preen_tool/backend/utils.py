@@ -303,6 +303,7 @@ def parse_desktop_file(path: str) -> Dict[str, object]:
         "no_display": False,
         "autostart_enabled": None,
         "exec": "",
+        "icon": "",
     }
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as handle:
@@ -323,6 +324,8 @@ def parse_desktop_file(path: str) -> Dict[str, object]:
                     info["type"] = value
                 elif key == "Exec":
                     info["exec"] = value
+                elif key == "Icon":
+                    info["icon"] = value
                 elif key == "Hidden":
                     info["hidden"] = value.lower() == "true"
                 elif key == "NoDisplay":

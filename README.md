@@ -69,7 +69,7 @@ around 1 MB.
 | **Deep Clean** | Sized scan of the APT cache, systemd journal, thumbnails, pip cache and trash, with select-all and a running total of reclaimable space |
 | **Optimize System** | Package cleanup, GNOME animations, startup apps, power profile, swapfile size (1 to 8 GB) and ZRAM, applied only where settings actually changed |
 | **Services** | Boot-time breakdown, slowest units, and start, stop, restart, enable and disable for systemd services, with a running-only filter |
-| **Customize Look** | Light and dark theme, desktop text scaling, icon packs from validated archives, and reversible rounded-corner CSS |
+| **Customize Look** | Preen-only Follow system/Light/Dark appearance, plus clearly separated and confirmed desktop-wide text scaling, icon packs and reversible GTK corner CSS |
 | **Backup & Restore** | Timeshift snapshots with a saved-snapshot list, plus safe export and import of `~/.config` |
 | **Logs** | Every command, exit code and error, with a text filter, auto-scroll toggle and one-click save |
 
@@ -211,8 +211,8 @@ make clean        # remove generated artefacts
 The test suite runs entirely on fakes. `tests/fakes.py` provides a fake
 Linux userspace with stand-ins for `flatpak`, `dpkg`, `gsettings`,
 `pkexec`, `swapon`, `powerprofilesctl` and `timeshift`, while a fake GTK
-walks every screen and handler. The suite currently contains 68 tests and
-runs in about a second.
+walks every screen and handler. The suite is intended to run without root,
+a display server or network access.
 
 ```bash
 python3 -m unittest discover -s tests -v
@@ -266,9 +266,10 @@ preen_tool/
   config/
     apps.json             curated application catalogue (data, not code)
     presets.json          quick-pick bundles
+  assets/                 bundled control indicators and offline catalogue marks
 packaging/                reproducible .deb and AppImage builders
-tests/                    fake userspace, fake GTK and 68 regression tests
-docs/                     user guide and architecture notes
+tests/                    fake userspace, fake GTK and regression tests
+docs/                     user guide, architecture and product roadmap
 ```
 
 ---
@@ -278,8 +279,11 @@ docs/                     user guide and architecture notes
 Pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the
 workflow and coding rules, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 for the module map and threading contracts. The
-[user guide](docs/USER_GUIDE.md) covers every page in plain language, and
-[the changelog](CHANGELOG.md) records the history of each release.
+[user guide](docs/USER_GUIDE.md) covers every page in plain language, the
+[product roadmap](docs/PRODUCT_ROADMAP.md) proposes the interface refresh,
+folder organizer and additional utilities, and [the changelog](CHANGELOG.md)
+records the history of each release.
 
 Preen is released under the MIT licence. See [LICENSE](LICENSE) for the full
-text.
+text. Bundled catalogue marks are derived from CC0-licensed Simple Icons;
+see [their attribution and licence](preen_tool/assets/brand/README.md).

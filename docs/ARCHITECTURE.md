@@ -79,9 +79,30 @@ UI thread ◄──────── GLib.idle_add(_finish) ─────┘
   `TypeError`, so a function is never executed twice. Archive inspection and
   startup-app scans also use the queue.
 - Look and optimization settings have separate refresh paths. A Gio settings
-  monitor queues appearance reads after external GNOME changes without
-  discarding a staged theme choice. Log rendering coalesces pending updates
-  and uses sequence numbers so filter/clear races do not duplicate lines.
+  monitor queues read-only desktop appearance checks without discarding a
+  staged choice; it changes Preen's palette only in Follow system mode. Log
+  rendering coalesces pending updates and uses sequence numbers so filter/clear
+  races do not duplicate lines.
+
+## Appearance and icon scope
+
+- `appearance_mode` is validated and saved in Preen preferences as `system`,
+  `light` or `dark`. GTK CSS and `gtk-application-prefer-dark-theme` apply to
+  this process only; applying the preference never writes GNOME's colour
+  scheme or GTK theme. Follow system reads GNOME without writing it and uses
+  dark until an appearance is detected. Simulation previews without saving.
+- Text scaling and icon pack activation are intentionally desktop-wide, and
+  rounded-corner CSS affects GTK 3 apps. Their controls are separated and the
+  GUI requires confirmation before applying them.
+- Installed app icon names/files are resolved before bundled offline marks;
+  missing marks become generic initials. Control indicators are bundled PNGs,
+  with text fallbacks for absent symbolic action icons. Assets and the Simple
+  Icons licence are included in wheels, source archives and package builders.
+  The visible desktop launcher's filename matches `APP_ID`; the old desktop ID
+  is a hidden compatibility alias. AppImages still require desktop integration
+  for a Wayland shell to associate the running window with that launcher.
+- Preference updates use a process lock and merge fields so an appearance
+  update cannot reset an unrelated Preferences setting.
 
 ## Simulate contract
 
@@ -129,8 +150,8 @@ older schemas and failures. A second fake GTK walks every screen and
 exercises handlers without a display server.
 
 - `test_backend.py` covers backend behaviour, packaging, tar safety,
-  Simulate mode and the CLI; `test_theme.py` covers stateful modern and legacy
-  GNOME appearance changes, failures and simulation.
+  Simulate mode and the CLI; `test_theme.py` covers app-only appearance
+  persistence, failures, simulation and read-only modern/legacy detection.
 - `test_deepclean.py`, `test_services.py`, `test_settings.py` cover the
   matching modules.
 - `test_gui_smoke.py` checks the import surface and the GTK-missing error
@@ -147,8 +168,9 @@ network is required.
 
 ## Packaging
 
-- `pyproject.toml` uses automatic package discovery so `backend/` and
-  `config/*.json` always ship. `MANIFEST.in` covers the source archive.
+- `pyproject.toml` uses automatic package discovery so `backend/`,
+  `config/*.json` and the appearance assets ship. `MANIFEST.in` covers the
+  source archive.
 - `packaging/build_deb.sh` stages a Debian package without debhelper.
 - `packaging/build_appimage.sh` builds a small AppImage that reuses the
   system Python and GTK.

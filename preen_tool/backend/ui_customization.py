@@ -1,20 +1,18 @@
-"""Light/dark theme, icon packs and rounded-corner CSS.
+"""Preen-only appearance and explicitly desktop-wide customization.
 
-Everything here used to bypass Simulate mode and write files even during a
-"dry run". Icon pack extraction also used a bare ``tar.extractall`` (path
-traversal) and guessed the theme name from directory mtimes.
+System text scaling, icon pack activation and GTK corner CSS affect other apps;
+Preen's light/dark preference never changes GNOME appearance settings.
 """
 from __future__ import annotations
 
 import math
 import os
-import re
 import shutil
 import tarfile
 import tempfile
-from typing import List, Optional, Set
+from typing import Optional
 
-from . import utils
+from . import settings, utils
 from .utils import Outcome, fail, has_command, is_simulate, ok, run_cmd
 
 CSS_DIR = os.path.expanduser("~/.config/gtk-3.0")
@@ -22,29 +20,6 @@ CSS_PATH = os.path.join(CSS_DIR, "gtk.css")
 START_GUARD = "/* BEGIN ZORIN_OPTIMIZER_ROUNDED_CORNERS */\n"
 END_GUARD = "/* END ZORIN_OPTIMIZER_ROUNDED_CORNERS */\n"
 CSS_RULE = "window, dialog, .background { border-radius: 10px; }\n"
-
-
-def _theme_roots() -> List[str]:
-    return [
-        "/usr/share/themes",
-        os.path.expanduser("~/.themes"),
-        os.path.expanduser("~/.local/share/themes"),
-    ]
-
-
-def _installed_themes() -> Set[str]:
-    # GTK 3 bundles these themes as resources, even when /usr/share/themes
-    # has no corresponding directories (common on minimal GNOME installs).
-    themes: Set[str] = {"Adwaita", "Adwaita-dark"}
-    for root in _theme_roots():
-        try:
-            themes.update(
-                name for name in os.listdir(root)
-                if os.path.isdir(os.path.join(root, name, "gtk-3.0"))
-            )
-        except OSError:
-            continue
-    return themes
 
 
 def _current_gtk_theme() -> str:
@@ -70,64 +45,20 @@ def get_theme_mode() -> Optional[str]:
     return "light" if value == "default" else None
 
 
-def _pick_theme(mode: str, current: Optional[str] = None) -> Optional[str]:
-    """Prefer the current theme's installed light/dark partner, then Adwaita."""
-    installed = _installed_themes()
-    current = _current_gtk_theme() if current is None else current
-    suffix = re.search(r"(?:[-_]?dark|[-_]?light)$", current, flags=re.IGNORECASE)
-    stem = current[:suffix.start()] if suffix else current
-    is_dark = current.lower().endswith("dark")
-    if mode == "dark":
-        candidates = ([current] if is_dark else []) + [
-            stem + "-dark", stem + "-Dark", stem + "_dark", stem + "Dark",
-            "Adwaita-dark", "Yaru-dark", "ZorinBlue-Dark"]
-    else:
-        candidates = ([current] if current and not is_dark else []) + [
-            stem, stem + "-Light", stem + "-light", stem + "_light", stem + "Light",
-            "Adwaita", "Yaru", "ZorinBlue-Light"]
-    return next((name for name in candidates if name and name in installed), None)
-
-
 def apply_theme_mode(mode: str, log=None) -> Outcome:
-    mode = (mode or "").lower()
-    if mode not in ("light", "dark"):
-        return fail("Unknown theme mode {!r}.".format(mode))
-    if not has_command("gsettings"):
-        return fail("gsettings is not available.")
-
-    schema = "org.gnome.desktop.interface"
-    available = run_cmd(["gsettings", "list-keys", schema], quiet=True)
-    if not available.ok:
-        return fail("Could not inspect GNOME appearance settings: {}".format(available.detail()))
-    keys = set(available.out.splitlines())
-    has_scheme, has_theme = "color-scheme" in keys, "gtk-theme" in keys
-    if not (has_scheme or has_theme):
-        return fail("This desktop exposes neither color-scheme nor gtk-theme settings.")
-
-    current = _current_gtk_theme() if has_theme else ""
-    if has_theme and not current:
-        return fail("Could not read the current GTK theme; no appearance changes were made.")
-    theme = _pick_theme(mode, current) if has_theme else None
-    if has_theme and not theme:
-        return fail("No installed GTK theme matches the {} appearance.".format(mode))
-
-    # On older GNOME, color-scheme does not exist. GTK 3's theme setting is
-    # then the sole supported path; modern desktops use both where available.
-    if has_scheme:
-        value = "prefer-dark" if mode == "dark" else "default"
-        result = run_cmd(["gsettings", "set", schema, "color-scheme", value],
-                         mutate=True, log=log)
-        if not result.ok:
-            return fail("Could not set color-scheme: {}".format(result.detail()))
-    if theme and theme != current:
-        result = run_cmd(["gsettings", "set", schema, "gtk-theme", theme],
-                         mutate=True, log=log)
-        if not result.ok:
-            prefix = "Color scheme changed, but " if has_scheme and not is_simulate() else ""
-            return fail("{}gtk-theme failed: {}".format(prefix, result.detail()))
+    """Save Preen's appearance only; never write GNOME theme settings."""
+    mode = mode.lower() if isinstance(mode, str) else ""
+    if mode not in settings.VALID_APPEARANCE:
+        return fail("Unknown Preen appearance {!r}.".format(mode))
     if is_simulate():
+        if log:
+            log.append("[simulate] would set Preen appearance to {} (desktop unchanged)\n".format(mode))
         return ok("Simulation complete. No changes were made.")
-    return ok("Applied the {} appearance.".format(mode))
+    if not settings.set_value("appearance_mode", mode):
+        return fail("Could not save Preen appearance; check permissions on ~/.config/preen.")
+    if log:
+        log.append("[appearance] Preen appearance set to {}; desktop unchanged\n".format(mode))
+    return ok("Preen appearance set to {}. Desktop theme unchanged.".format(mode))
 
 
 # ---------------------------------------------------------------------------

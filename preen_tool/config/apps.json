@@ -5,17 +5,20 @@
       "name": "Firefox",
       "flatpak": "org.mozilla.firefox",
       "apt": "firefox",
-      "note": "Published by Mozilla on Flathub. On Ubuntu/Zorin the APT package is a Snap shim - prefer Flatpak for a native package."
+      "note": "Published by Mozilla on Flathub. On Ubuntu/Zorin the APT package is a Snap shim - prefer Flatpak for a native package.",
+      "icon_asset": "firefox"
     },
     {
       "id": "com.google.Chrome",
       "name": "Google Chrome",
-      "flatpak": "com.google.Chrome"
+      "flatpak": "com.google.Chrome",
+      "icon_asset": "googlechrome"
     },
     {
       "id": "com.brave.Browser",
       "name": "Brave",
-      "flatpak": "com.brave.Browser"
+      "flatpak": "com.brave.Browser",
+      "icon_asset": "brave"
     }
   ],
   "Dev Tools": [
@@ -27,7 +30,8 @@
     {
       "id": "git",
       "name": "Git",
-      "apt": "git"
+      "apt": "git",
+      "icon_asset": "git"
     },
     {
       "id": "node",
@@ -36,28 +40,33 @@
         "nodejs",
         "npm"
       ],
-      "note": "APT only. Node.js is a runtime/SDK extension on Flatpak, not an installable app."
+      "note": "APT only. Node.js is a runtime/SDK extension on Flatpak, not an installable app.",
+      "icon_asset": "nodedotjs"
     },
     {
       "id": "python3",
       "name": "Python 3",
-      "apt": "python3"
+      "apt": "python3",
+      "icon_asset": "python"
     },
     {
       "id": "postman",
       "name": "Postman",
-      "flatpak": "com.getpostman.Postman"
+      "flatpak": "com.getpostman.Postman",
+      "icon_asset": "postman"
     },
     {
       "id": "dbeaver",
       "name": "DBeaver Community",
-      "flatpak": "io.dbeaver.DBeaverCommunity"
+      "flatpak": "io.dbeaver.DBeaverCommunity",
+      "icon_asset": "dbeaver"
     },
     {
       "id": "jetbrains-idea",
       "name": "IntelliJ IDEA Community",
       "flatpak": "com.jetbrains.IntelliJ-IDEA-Community",
-      "note": "Replaces the old JetBrains Toolbox entry, which does not exist on Flathub."
+      "note": "Replaces the old JetBrains Toolbox entry, which does not exist on Flathub.",
+      "icon_asset": "intellijidea"
     }
   ],
   "Media": [
@@ -65,31 +74,36 @@
       "id": "vlc",
       "name": "VLC",
       "flatpak": "org.videolan.VLC",
-      "apt": "vlc"
+      "apt": "vlc",
+      "icon_asset": "vlcmediaplayer"
     },
     {
       "id": "gimp",
       "name": "GIMP",
       "flatpak": "org.gimp.GIMP",
-      "apt": "gimp"
+      "apt": "gimp",
+      "icon_asset": "gimp"
     },
     {
       "id": "obs",
       "name": "OBS Studio",
       "flatpak": "com.obsproject.Studio",
-      "apt": "obs-studio"
+      "apt": "obs-studio",
+      "icon_asset": "obsstudio"
     },
     {
       "id": "inkscape",
       "name": "Inkscape",
       "flatpak": "org.inkscape.Inkscape",
-      "apt": "inkscape"
+      "apt": "inkscape",
+      "icon_asset": "inkscape"
     },
     {
       "id": "krita",
       "name": "Krita",
       "flatpak": "org.kde.krita",
-      "apt": "krita"
+      "apt": "krita",
+      "icon_asset": "krita"
     },
     {
       "id": "org.gnome.Loupe",
@@ -103,13 +117,15 @@
     {
       "id": "steam",
       "name": "Steam",
-      "flatpak": "com.valvesoftware.Steam"
+      "flatpak": "com.valvesoftware.Steam",
+      "icon_asset": "steam"
     },
     {
       "id": "lutris",
       "name": "Lutris",
       "flatpak": "net.lutris.Lutris",
-      "apt": "lutris"
+      "apt": "lutris",
+      "icon_asset": "lutris"
     },
     {
       "id": "mangohud",
@@ -122,13 +138,15 @@
     {
       "id": "discord",
       "name": "Discord",
-      "flatpak": "com.discordapp.Discord"
+      "flatpak": "com.discordapp.Discord",
+      "icon_asset": "discord"
     },
     {
       "id": "telegram",
       "name": "Telegram",
       "flatpak": "org.telegram.desktop",
-      "apt": "telegram-desktop"
+      "apt": "telegram-desktop",
+      "icon_asset": "telegram"
     },
     {
       "id": "slack",
@@ -138,7 +156,8 @@
     {
       "id": "zoom",
       "name": "Zoom",
-      "flatpak": "us.zoom.Zoom"
+      "flatpak": "us.zoom.Zoom",
+      "icon_asset": "zoom"
     }
   ],
   "Productivity": [
@@ -146,26 +165,30 @@
       "id": "md.obsidian.Obsidian",
       "name": "Obsidian",
       "flatpak": "md.obsidian.Obsidian",
-      "note": "Private markdown notes and knowledge base."
+      "note": "Private markdown notes and knowledge base.",
+      "icon_asset": "obsidian"
     },
     {
       "id": "org.libreoffice.LibreOffice",
       "name": "LibreOffice",
       "flatpak": "org.libreoffice.LibreOffice",
-      "apt": "libreoffice"
+      "apt": "libreoffice",
+      "icon_asset": "libreoffice"
     },
     {
       "id": "com.bitwarden.desktop",
       "name": "Bitwarden",
       "flatpak": "com.bitwarden.desktop",
-      "note": "Open source password manager."
+      "note": "Open source password manager.",
+      "icon_asset": "bitwarden"
     }
   ],
   "Music & Video": [
     {
       "id": "spotify",
       "name": "Spotify",
-      "flatpak": "com.spotify.Client"
+      "flatpak": "com.spotify.Client",
+      "icon_asset": "spotify"
     }
   ],
   "System Tools": [
@@ -184,7 +207,8 @@
     {
       "id": "docker",
       "name": "Docker Engine",
-      "apt": "docker.io"
+      "apt": "docker.io",
+      "icon_asset": "docker"
     },
     {
       "id": "ubuntu-restricted-extras",
@@ -210,7 +234,8 @@
     {
       "id": "htop",
       "name": "htop",
-      "apt": "htop"
+      "apt": "htop",
+      "icon_asset": "htop"
     },
     {
       "id": "com.github.tchx84.Flatseal",
@@ -246,7 +271,8 @@
       "id": "com.rustdesk.RustDesk",
       "name": "RustDesk",
       "flatpak": "com.rustdesk.RustDesk",
-      "note": "Open source remote desktop and remote support."
+      "note": "Open source remote desktop and remote support.",
+      "icon_asset": "rustdesk"
     }
   ],
   "Open Source Essentials": [
@@ -254,13 +280,15 @@
       "id": "org.kde.kdenlive",
       "name": "Kdenlive",
       "flatpak": "org.kde.kdenlive",
-      "apt": "kdenlive"
+      "apt": "kdenlive",
+      "icon_asset": "kdenlive"
     },
     {
       "id": "org.audacityteam.Audacity",
       "name": "Audacity",
       "flatpak": "org.audacityteam.Audacity",
-      "apt": "audacity"
+      "apt": "audacity",
+      "icon_asset": "audacity"
     },
     {
       "id": "fr.handbrake.ghb",
@@ -272,13 +300,15 @@
       "id": "org.qbittorrent.qBittorrent",
       "name": "qBittorrent",
       "flatpak": "org.qbittorrent.qBittorrent",
-      "apt": "qbittorrent"
+      "apt": "qbittorrent",
+      "icon_asset": "qbittorrent"
     },
     {
       "id": "com.transmissionbt.Transmission",
       "name": "Transmission",
       "flatpak": "com.transmissionbt.Transmission",
-      "apt": "transmission-gtk"
+      "apt": "transmission-gtk",
+      "icon_asset": "transmission"
     },
     {
       "id": "org.flameshot.Flameshot",
@@ -290,13 +320,15 @@
       "id": "org.keepassxc.KeePassXC",
       "name": "KeePassXC",
       "flatpak": "org.keepassxc.KeePassXC",
-      "apt": "keepassxc"
+      "apt": "keepassxc",
+      "icon_asset": "keepassxc"
     },
     {
       "id": "org.mozilla.Thunderbird",
       "name": "Thunderbird",
       "flatpak": "org.mozilla.Thunderbird",
-      "apt": "thunderbird"
+      "apt": "thunderbird",
+      "icon_asset": "thunderbird"
     },
     {
       "id": "org.gnome.Boxes",
@@ -306,7 +338,7 @@
     },
     {
       "id": "org.gnome.DejaDup",
-      "name": "D\u00e9j\u00e0 Dup Backups",
+      "name": "Déjà Dup Backups",
       "flatpak": "org.gnome.DejaDup",
       "apt": "deja-dup"
     },
@@ -321,7 +353,8 @@
     {
       "id": "com.heroicgameslauncher.hgl",
       "name": "Heroic Games Launcher",
-      "flatpak": "com.heroicgameslauncher.hgl"
+      "flatpak": "com.heroicgameslauncher.hgl",
+      "icon_asset": "heroicgameslauncher"
     },
     {
       "id": "net.davidotek.pupgui2",
