@@ -39,6 +39,12 @@ class ParseListUnitsTest(unittest.TestCase):
                          "this line is skipped")
         self.assertNotIn("bad-line-without-enough-columns", by_unit)
 
+    def test_failed_units_with_status_bullet_are_included(self):
+        rows = services.parse_list_units("● broken.service loaded failed failed Broken service\n")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["unit"], "broken.service")
+        self.assertEqual(rows[0]["active"], "failed")
+
     def test_empty_and_garbage(self):
         self.assertEqual(services.parse_list_units(""), [])
         self.assertEqual(services.parse_list_units("random text only"), [])
@@ -104,6 +110,18 @@ class SetServiceStateTest(unittest.TestCase):
         self.assertIn("restarted", outcome.message)
         self.assertNotIn("restartd", outcome.message)
 
+    def test_every_service_action_uses_one_simulate_gated_polkit_command(self):
+        from preen_tool.backend import utils
+        for action in services.ACTIONS:
+            with self.subTest(action=action), \
+                    mock.patch.object(services.utils, "run_cmd",
+                                      return_value=utils.CommandResult(0, "", "")) as run:
+                result = services.set_service_state("demo.service", action)
+            self.assertTrue(result.ok)
+            self.assertEqual(run.call_args.args[0], ["systemctl", action, "demo.service"])
+            self.assertTrue(run.call_args.kwargs["use_pkexec"])
+            self.assertTrue(run.call_args.kwargs["mutate"])
+
     def test_past_tense_covers_every_action(self):
         for action in services.ACTIONS:
             self.assertIn(action, services._PAST_TENSE)
@@ -120,6 +138,13 @@ class ParseAnalyzeTest(unittest.TestCase):
         self.assertEqual(info["kernel"], "2.316s")
         self.assertEqual(info["userspace"], "5.664s")
 
+    def test_multi_part_durations_are_not_truncated(self):
+        text = ("Startup finished in 2.200s (kernel) + 1min 5.500s (userspace) "
+                "= 1min 7.700s\n")
+        info = services.parse_analyze(text)
+        self.assertEqual(info["userspace"], "1min 5.500s")
+        self.assertEqual(info["total"], "1min 7.700s")
+
     def test_garbage(self):
         self.assertEqual(services.parse_analyze("nothing useful"), {})
 
@@ -132,6 +157,11 @@ class ParseBlameTest(unittest.TestCase):
         rows = services.parse_blame(text, limit=2)
         self.assertEqual(rows, [("NetworkManager-wait-online.service", "5.664s"),
                                 ("udisks2.service", "1.201s")])
+
+    def test_blame_with_minutes_keeps_the_unit_and_full_duration(self):
+        rows = services.parse_blame("1min 2.345s slow.service\n200ms fast.service\n")
+        self.assertEqual(rows, [("slow.service", "1min 2.345s"),
+                                ("fast.service", "200ms")])
 
 
 if __name__ == "__main__":

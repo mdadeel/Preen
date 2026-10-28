@@ -131,9 +131,12 @@ permanent; thumbnails are regenerated automatically.
   startup applications through a dedicated dialog.
 - **Memory and power:** create or remove a swapfile with a selectable size
   (1, 2, 4 or 8 GB), enable ZRAM, and choose a power profile. The profile
-  selector is disabled if its current state cannot be read.
-- Only settings that differ from the detected baseline are applied, so
-  pressing apply with no changes does nothing.
+  and animation controls are disabled if their current state cannot be read.
+- An existing inactive `/swapfile` is never reformatted. Preen leaves custom
+  or edited ZRAM configuration alone; it only removes the configuration it
+  created (including the unchanged format from older Preen versions).
+- Only settings that differ from the detected baseline are applied. Reloading
+  optimization settings does not discard staged changes on Customize Look.
 
 ### Services
 
@@ -148,22 +151,35 @@ permanent; thumbnails are regenerated automatically.
 
 ### Customize Look
 
-- Switch between **Light** and **Dark**, or apply the theme immediately.
-- Choose a **Text size** preset (85% to 125%) for desktop-wide scaling.
+- Switch between **Light** and **Dark**, or use **Apply Theme Now**. Preen's
+  own palette follows the detected desktop appearance and updates when GNOME
+  changes it. Modern GNOME uses the colour-scheme preference; older versions
+  use the installed GTK 3 theme. Some applications may require a restart or
+  follow a different theme mechanism.
+- Choose a **Text size** preset (85% to 125%) for desktop-wide scaling. A
+  custom existing factor is displayed and preserved until you choose a preset.
+  Unreadable settings are marked unavailable rather than reset to a default.
+- Applying only the theme preserves staged text-size, rounded-corner and
+  optimization changes. Reloading the look does not reset Optimize System.
 - Install an icon pack from a `.tar.xz` or `.tar.gz` archive. Unsafe archive
-  entries are refused.
+  entries are refused. If an icon theme of the same name exists, its old
+  contents are kept under `~/.icons/.preen-backups/`.
 - Add reversible rounded corners through a guarded block in
   `~/.config/gtk-3.0/gtk.css`.
 
 ### Backup & Restore
 
-- **Create Snapshot** requests a Timeshift snapshot, **Open Timeshift**
-  launches its own window, and **Refresh List** shows the snapshots already
-  saved on this machine.
+- **Create Snapshot** requests an on-demand Timeshift snapshot, **Open
+  Timeshift** launches its own window, and **Refresh List** requests
+  administrator authorization to show saved snapshots. The startup check
+  never prompts; it may show unavailable until you refresh. A refresh is not
+  run in Simulate mode.
 - **Export Settings** saves `~/.config` to a `.tar.xz` archive, skipping
   caches and links.
-- **Import Settings** restores an archive inside `~/.config` and nowhere
-  else. Import overwrites matching files, so export first if you are unsure.
+- **Import Settings** inspects the archive in the background and asks before
+  overwriting matching files. Unsafe entries or existing destination symlinks
+  are refused; export first if you are unsure. A disk or permission error
+  during extraction may leave some earlier files restored.
 
 ### Logs
 
@@ -222,8 +238,9 @@ reported as warnings.
 | Flatpak app not found | Check the ID on Flathub and run `preen --check-catalog`. Add the flathub remote if needed. |
 | APT package not found | Your repositories may not carry it. The Logs page shows the exact `apt-get` error. |
 | Power profile does nothing | Install `power-profiles-daemon` and reboot. |
-| Swapfile or ZRAM change failed | Open Logs for the failing command and check that `systemd-zram-generator` is installed. |
-| Theme did not change | GNOME 42 and newer use `color-scheme`. Some apps need a restart, and only installed GTK themes are applied. |
+| Swapfile or ZRAM change failed | Check Logs and install `systemd-zram-generator` if needed. Preen refuses to overwrite an existing inactive swapfile or a custom ZRAM configuration. |
+| Theme did not change | Check that GNOME settings and the desired GTK theme are available. Some applications need a restart or use their own theme mechanism. |
+| Snapshot list is unavailable | Install Timeshift and choose **Refresh List** to authorize the read, or open Timeshift directly. Simulate mode does not refresh it. |
 | An action failed | Read the banner and open Logs for the full stderr, then use **Save Log**. |
 | I want to undo a look change | Switch off rounded corners and apply, then re-select the Light or Dark theme. |
 

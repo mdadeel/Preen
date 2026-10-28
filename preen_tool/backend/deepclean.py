@@ -172,6 +172,20 @@ def clean_user_paths(keys: List[str], log=None) -> utils.Outcome:
                         shutil.rmtree(target)
                     else:
                         os.remove(target)
+                    # Freedesktop Trash keeps a sidecar for each item. Remove
+                    # it only after the matching payload was deleted, and do
+                    # not follow an unexpected symlinked info directory.
+                    if key == "trash" and os.path.basename(path) == "files":
+                        info_dir = os.path.join(os.path.dirname(path), "info")
+                        if os.path.islink(info_dir):
+                            errors.append("{}: trash info directory is a symbolic link".format(info_dir))
+                        elif os.path.isdir(info_dir):
+                            sidecar = os.path.join(info_dir, name + ".trashinfo")
+                            if os.path.lexists(sidecar):
+                                try:
+                                    os.unlink(sidecar)
+                                except OSError as exc:
+                                    errors.append("{}: {}".format(sidecar, exc))
                 except OSError as exc:
                     errors.append("{}: {}".format(target, exc))
         except OSError as exc:

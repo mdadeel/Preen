@@ -420,17 +420,18 @@ def _validate_entries(entries: Iterable[Dict]) -> Tuple[List[str], List[str], Li
 def _run_batches(report: Report, flatpaks: Sequence[str], apts: Sequence[str],
                  action: str, *, ensure_remote: bool = False) -> None:
     if flatpaks:
-        if ensure_remote:
-            if not ensure_flathub(log=report.log, mutate=True) and not is_simulate():
-                report.failures.append("flathub remote is not configured")
-                return
-        if action == "install":
-            argv = ["flatpak", "install", "-y", "--noninteractive", FLATHUB_REPO] + list(flatpaks)
-        elif action == "remove":
-            argv = ["flatpak", "uninstall", "-y", "--noninteractive"] + list(flatpaks)
+        remote_ready = not ensure_remote or ensure_flathub(log=report.log, mutate=True)
+        if not remote_ready and not is_simulate():
+            report.commands += 1
+            report.failures.append("flathub remote is not configured; Flatpak install skipped")
         else:
-            argv = ["flatpak", "update", "-y", "--noninteractive"] + list(flatpaks)
-        report.run(argv, mutate=True)
+            if action == "install":
+                argv = ["flatpak", "install", "-y", "--noninteractive", FLATHUB_REPO] + list(flatpaks)
+            elif action == "remove":
+                argv = ["flatpak", "uninstall", "-y", "--noninteractive"] + list(flatpaks)
+            else:
+                argv = ["flatpak", "update", "-y", "--noninteractive"] + list(flatpaks)
+            report.run(argv, mutate=True)
 
     if apts:
         if action == "install":

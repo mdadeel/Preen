@@ -129,6 +129,37 @@ class CleanUserPathsTest(unittest.TestCase):
             self.assertFalse(outcome.ok)
             self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
 
+    def test_trash_cleanup_removes_only_matching_metadata_after_deletion(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(utils, "is_simulate", return_value=False):
+            root = Path(tmp)
+            files, info = root / "files", root / "info"
+            files.mkdir()
+            info.mkdir()
+            (files / "item.txt").write_text("trash", encoding="utf-8")
+            (info / "item.txt.trashinfo").write_text("metadata", encoding="utf-8")
+            (info / "other.trashinfo").write_text("keep", encoding="utf-8")
+            with mock.patch.dict(deepclean.USER_CLEAN_PATHS, {"trash": str(files)}):
+                self.assertTrue(deepclean.clean_user_paths(["trash"]).ok)
+            self.assertFalse((info / "item.txt.trashinfo").exists())
+            self.assertTrue((info / "other.trashinfo").exists())
+
+    def test_trash_metadata_symlink_is_not_followed(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(utils, "is_simulate", return_value=False):
+            root = Path(tmp)
+            files, outside = root / "files", root / "outside"
+            files.mkdir()
+            outside.mkdir()
+            (files / "item").write_text("trash", encoding="utf-8")
+            marker = outside / "item.trashinfo"
+            marker.write_text("keep", encoding="utf-8")
+            (root / "info").symlink_to(outside, target_is_directory=True)
+            with mock.patch.dict(deepclean.USER_CLEAN_PATHS, {"trash": str(files)}):
+                outcome = deepclean.clean_user_paths(["trash"])
+            self.assertFalse(outcome.ok)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+
     def test_missing_dir_is_not_an_error(self):
         with mock.patch.dict(deepclean.USER_CLEAN_PATHS,
                              {"thumbnails": "/nonexistent/x"}), \

@@ -21,7 +21,7 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")  # systems shipping Gdk 4.0 otherwise load it by default and clash with Gtk 3
-from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import __version__  # noqa: E402
 from .backend import (  # noqa: E402
@@ -204,11 +204,15 @@ button:hover { background-color: #3a3d42; }
 button:active { background-color: #43464b; }
 button:disabled { color: alpha(@preen_muted, 0.55); background-color: @preen_surface; border-color: @preen_border; }
 button.suggested-action { background-color: @preen_accent; color: #ffffff; border-color: @preen_accent; font-weight: 600; }
+button.suggested-action label { color: #ffffff; }
 button.suggested-action:hover { background-color: #4a94ee; }
 button.suggested-action:disabled { background-color: #34475c; color: #8d9bab; border-color: #34475c; }
+button.suggested-action:disabled label { color: #8d9bab; }
 button.destructive-action { color: #f08080; background-color: @preen_surface; border-color: alpha(@preen_error, 0.55); }
+button.destructive-action label { color: #f08080; }
 button.destructive-action:hover { background-color: alpha(@preen_error, 0.17); }
 button.destructive-action:disabled { color: alpha(@preen_muted, 0.55); border-color: @preen_border; }
+button.destructive-action:disabled label { color: alpha(@preen_muted, 0.55); }
 button.flat { background: transparent; border-color: transparent; box-shadow: none; }
 button.flat:hover { background-color: @preen_elevated; }
 button:focus, entry:focus, check:focus, switch:focus, row:focus {
@@ -256,6 +260,23 @@ popover, menu { background-color: @preen_elevated; border: 1px solid @preen_bord
 dialog > box { padding: 8px; }
 """
 
+# Keep the required dark design intact, while providing a high-contrast light
+# counterpart for the same native GTK controls. No desktop theme files change.
+_LIGHT_CSS = _CSS
+for _dark, _light in (
+    (b"#202124", b"#f5f6f8"), (b"#1b1c1e", b"#eceff2"),
+    (b"#282a2d", b"#ffffff"), (b"#303236", b"#e8ebef"),
+    (b"#f1f3f4", b"#202124"), (b"#a5a9b0", b"#58616c"),
+    (b"#3b3e42", b"#ccd2d9"), (b"#57a773", b"#237a48"),
+    (b"#e5a84b", b"#996000"), (b"#e45b5b", b"#bc3434"),
+    (b"#293747", b"#dbeafb"), (b"#3a3d42", b"#d9dee5"),
+    (b"#43464b", b"#cbd1da"), (b"#34475c", b"#dbe4f0"),
+    (b"#8d9bab", b"#66717e"), (b"#f08080", b"#a52323"),
+    (b"#62666c", b"#8a929b"), (b"#263a50", b"#e2eefc"),
+    (b"#473a26", b"#fff2d8"), (b"#4b2e30", b"#fce8e6"),
+):
+    _LIGHT_CSS = _LIGHT_CSS.replace(_dark, _light)
+
 
 def _escape_markup(text: str) -> str:
     return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
@@ -268,6 +289,10 @@ class LogBuffer:
         "info": "#b8c5d4", "notice": "#a5a9b0", "warning": "#e5a84b",
         "error": "#e45b5b", "success": "#70c28a", "simulate": "#7db5f5",
     }
+    _LIGHT_COLORS = {
+        "info": "#344054", "notice": "#58616c", "warning": "#8a5200",
+        "error": "#a52323", "success": "#176b39", "simulate": "#145db1",
+    }
 
     def __init__(self, textbuffer: Gtk.TextBuffer, textview: Gtk.TextView):
         self.buf = textbuffer
@@ -276,11 +301,24 @@ class LogBuffer:
         self.auto_scroll = True
         self.filter_text = ""
         self._lock = threading.Lock()
+        self._next_sequence = 0
+        self._rendered_sequence = -1
+        self._render_pending = False
+        self._rebuild_requested = False
         create_tag = getattr(self.buf, "create_tag", None)
         self._tags_available = callable(create_tag)
         if self._tags_available:
             for name, color in self._COLORS.items():
                 create_tag("log-" + name, foreground=color)
+
+    def set_theme(self, mode):
+        if self._tags_available:
+            colors = self._LIGHT_COLORS if mode == "light" else self._COLORS
+            table = self.buf.get_tag_table()
+            for name, color in colors.items():
+                tag = table.lookup("log-" + name)
+                if tag is not None:
+                    tag.set_property("foreground", color)
 
     @staticmethod
     def _severity(line):
@@ -303,9 +341,13 @@ class LogBuffer:
             return
         with self._lock:
             self.lines.extend(lines)
+            self._next_sequence += len(lines)
             if len(self.lines) > MAX_LOG_LINES:
                 self.lines = self.lines[-MAX_LOG_LINES:]
-        GLib.idle_add(self._append, lines)
+                self._rebuild_requested = True
+            schedule = self._request_render_locked()
+        if schedule:
+            GLib.idle_add(self._sync_view)
 
     def _insert(self, line):
         end = self.buf.get_end_iter()
@@ -320,36 +362,50 @@ class LogBuffer:
             self.view.scroll_to_mark(mark, 0.0, True, 0.0, 1.0)
             self.buf.delete_mark(mark)
 
-    def _append(self, lines):
-        for line in lines:
-            if not self.filter_text or self.filter_text in line.lower():
+    def _request_render_locked(self):
+        if self._render_pending:
+            return False
+        self._render_pending = True
+        return True
+
+    def _sync_view(self):
+        # A filter/clear may be queued between two worker appends. Snapshot
+        # once and render each sequence number only once, even when the later
+        # append happened before this idle callback was dispatched.
+        with self._lock:
+            lines = list(self.lines)
+            first_sequence = self._next_sequence - len(lines)
+            last_sequence = self._next_sequence - 1
+            query = self.filter_text
+            rebuild = self._rebuild_requested
+            self._rebuild_requested = False
+            self._render_pending = False
+        if rebuild:
+            self.buf.set_text("")
+        for index, line in enumerate(lines):
+            if (rebuild or first_sequence + index > self._rendered_sequence) and (
+                    not query or query in line.lower()):
                 self._insert(line)
+        self._rendered_sequence = last_sequence
         self._scroll_to_end()
-        if self.buf.get_line_count() > MAX_LOG_LINES:
-            start = self.buf.get_start_iter()
-            cutoff = self.buf.get_iter_at_line(self.buf.get_line_count() - MAX_LOG_LINES)
-            self.buf.delete(start, cutoff)
         return False
 
     def set_filter(self, text: str):
         """Filter individual lines in the view, not the saved diagnostic log."""
-        self.filter_text = (text or "").strip().lower()
-        GLib.idle_add(self._rebuild)
-
-    def _rebuild(self):
         with self._lock:
-            lines = list(self.lines)
-        self.buf.set_text("")
-        for line in lines:
-            if not self.filter_text or self.filter_text in line.lower():
-                self._insert(line)
-        self._scroll_to_end()
-        return False
+            self.filter_text = (text or "").strip().lower()
+            self._rebuild_requested = True
+            schedule = self._request_render_locked()
+        if schedule:
+            GLib.idle_add(self._sync_view)
 
     def clear(self):
         with self._lock:
             self.lines.clear()
-        GLib.idle_add(self.buf.set_text, "")
+            self._rebuild_requested = True
+            schedule = self._request_render_locked()
+        if schedule:
+            GLib.idle_add(self._sync_view)
 
     def save(self, path: str) -> bool:
         try:
@@ -380,8 +436,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self.clean_checkbuttons = {}
         self.selected_service_row = None
         self.baseline = {
-            "animations_off": False, "swap": False, "zram": False,
-            "power": None, "theme": "light", "round": False,
+            "animations_off": None, "swap": False, "zram": False,
+            "power": None, "theme": None, "round": False, "scaling": None,
         }
         self.settings = settings_backend.load()
         if self.settings.get("simulate_on_startup"):
@@ -543,6 +599,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.stack.set_visible_child_name(self.settings.get("page_on_startup", "dashboard"))
         self.log_buf.append("[info] {} {} ready. Simulate is {}.\n".format(
             APP_NAME, __version__, "ON" if utils.is_simulate() else "OFF"))
+        self._watch_desktop_appearance()
         self._start_initial_tasks()
 
     # ------------------------------------------------------------------
@@ -550,23 +607,80 @@ class MainWindow(Gtk.ApplicationWindow):
     # ------------------------------------------------------------------
     def _install_css(self):
         self._style_error = None
+        self._app_theme = None
+        self._css_provider = None
         try:
-            gtk_settings = Gtk.Settings.get_default()
-            if gtk_settings is not None:
-                gtk_settings.set_property("gtk-application-prefer-dark-theme", True)
-        except (AttributeError, TypeError):
-            pass  # The application stylesheet still supplies its own palette.
-        try:
-            provider = Gtk.CssProvider()
-            provider.load_from_data(_CSS)
+            self._css_provider = Gtk.CssProvider()
             screen = Gdk.Screen.get_default()
             if screen is not None:
                 Gtk.StyleContext.add_provider_for_screen(
-                    screen, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+                    screen, self._css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            # Use the specified dark design until the asynchronous desktop
+            # settings read supplies the actual current appearance.
+            self._set_app_theme("dark")
         except Exception as exc:
-            # A theme problem should not prevent startup, but it must remain
-            # visible to someone diagnosing an unexpectedly unstyled window.
             self._style_error = str(exc)
+
+    def _set_app_theme(self, mode):
+        """Update this process's palette only; the backend owns desktop changes."""
+        if mode not in ("light", "dark") or mode == self._app_theme:
+            return
+        try:
+            if self._css_provider is not None:
+                self._css_provider.load_from_data(_LIGHT_CSS if mode == "light" else _CSS)
+            gtk_settings = Gtk.Settings.get_default()
+            if gtk_settings is not None:
+                gtk_settings.set_property("gtk-application-prefer-dark-theme", mode == "dark")
+        except (AttributeError, TypeError):
+            pass  # GTK test doubles/minimal installations may lack Settings.
+        except Exception as exc:
+            self._style_error = str(exc)
+            if hasattr(self, "log_buf"):
+                self.log_buf.append("[error] Could not update application appearance: {}\n".format(exc))
+            return
+        self._app_theme = mode
+        if hasattr(self, "log_buf"):
+            self.log_buf.set_theme(mode)
+
+    def _watch_desktop_appearance(self):
+        """Follow external GNOME appearance changes without blocking GTK."""
+        self._theme_watch_pending = False
+        self._theme_watch_dirty = False
+        try:
+            source = Gio.SettingsSchemaSource.get_default()
+            schema = source.lookup("org.gnome.desktop.interface", True) if source else None
+            if schema is None:
+                return
+            keys = [key for key in ("color-scheme", "gtk-theme") if schema.has_key(key)]
+            if keys:
+                self._desktop_appearance = Gio.Settings.new_full(schema, None, None)
+                for key in keys:
+                    self._desktop_appearance.connect("changed::" + key, self._on_desktop_appearance_changed)
+        except Exception as exc:
+            self.log_buf.append("[warning] Could not monitor desktop appearance: {}\n".format(exc))
+
+    def _on_desktop_appearance_changed(self, *_args):
+        if self._theme_watch_pending:
+            self._theme_watch_dirty = True
+            return
+        self._theme_watch_pending = True
+
+        def finished(mode):
+            self._theme_watch_pending = False
+            if mode in ("light", "dark"):
+                old_mode = self.baseline.get("theme")
+                staged_mode = self._theme_mode()
+                self.baseline["theme"] = mode
+                self._set_app_theme(mode)
+                # An external desktop change must not discard a choice the
+                # user has staged but not yet applied in Customize Look.
+                if staged_mode is None or staged_mode in (old_mode, mode):
+                    self.cmb_theme.set_active(1 if mode == "dark" else 0)
+            if self._theme_watch_dirty:
+                self._theme_watch_dirty = False
+                self._on_desktop_appearance_changed()
+
+        self.submit(ui_backend.get_theme_mode, done=finished)
 
     def _header_button(self, label, callback, tooltip):
         button = Gtk.Button(label=label)
@@ -631,26 +745,39 @@ class MainWindow(Gtk.ApplicationWindow):
         if tooltip:
             box.set_tooltip_text(tooltip)
         buttons = []
+        state = {"index": active_index, "changing": False}
 
-        def select(index, _btn=None):
-            for pos, button in enumerate(buttons):
-                button.set_active(pos == index)
+        def select(index, notify=False):
+            if state["changing"] or not 0 <= index < len(buttons):
+                return
+            changed = state["index"] != index
+            state["changing"] = True
+            state["index"] = index
+            try:
+                # Gtk.ToggleButton.set_active() can emit clicked recursively.
+                # Guard the entire update, including deselecting the old item.
+                for pos, button in enumerate(buttons):
+                    if button.get_active() != (pos == index):
+                        button.set_active(pos == index)
+            finally:
+                state["changing"] = False
+            callback = getattr(box, "on_changed", None)
+            if changed and notify and callable(callback):
+                callback()
 
         for index, text in enumerate(options):
             button = Gtk.ToggleButton(label=text)
             button.set_active(index == active_index)
-            button.connect("clicked", lambda _b, i=index: select(i))
+            button.connect("clicked", lambda _b, i=index: select(i, True))
             buttons.append(button)
             box.pack_start(button, False, False, 0)
 
         def get_active_text():
-            for index, button in enumerate(buttons):
-                if button.get_active():
-                    return options[index]
-            return options[0]
+            return options[state["index"]]
 
         box.get_active_text = get_active_text
         box.set_active = select
+        box.on_changed = None
         box.buttons = buttons
         box.show_all()
         return box
@@ -1022,7 +1149,10 @@ class MainWindow(Gtk.ApplicationWindow):
         return False
 
     def _start_initial_tasks(self):
-        # The FIFO queue runs these one at a time without dropping any.
+        # Read appearance first so a light desktop does not wait behind large
+        # package and service scans before Preen adopts the correct palette.
+        # The FIFO queue runs the rest one at a time without dropping any.
+        self.submit(self._read_settings, done=self._apply_settings)
         self.submit(apps_backend.get_status_label_map, done=self._apply_status)
         self.submit(self._scan_installed_worker, done=self._fill_manage_rows)
         self.submit(dash_backend.get_system_info, done=self._apply_stats)
@@ -1030,7 +1160,6 @@ class MainWindow(Gtk.ApplicationWindow):
         self.submit(services_backend.boot_info, done=self._apply_boot)
         self.submit(services_backend.list_services, done=self._apply_services)
         self.submit(backup_backend.list_snapshots, done=self._apply_snapshots)
-        self.submit(self._read_settings, done=self._apply_settings)
         interval = self.settings.get("auto_refresh_seconds", 15)
         if interval:
             GLib.timeout_add_seconds(interval, self._periodic_refresh)
@@ -1311,8 +1440,7 @@ class MainWindow(Gtk.ApplicationWindow):
             ("Flatpak", "APT"),
             active_index=1 if self.settings.get("default_source") == "apt" else 0,
             tooltip="The other source is used when the preferred package is not in the catalogue")
-        for button in self._segmented_buttons(self.install_source):
-            button.connect("clicked", lambda _b: self._on_source_changed())
+        self.install_source.on_changed = self._on_source_changed
         toolbar.pack_start(self.install_source, False, False, 0)
         page.pack_start(toolbar, False, False, 0)
 
@@ -1805,8 +1933,8 @@ class MainWindow(Gtk.ApplicationWindow):
         power_frame, power = self._frame("Memory & power", tight=True)
         swap_row, self.chk_swap = self._toggle_row(
             "Use a swapfile",
-            "Creates /swapfile and adds it to /etc/fstab",
-            tooltip="Creates /swapfile and adds it to /etc/fstab")
+            "Creates /swapfile; turning it off removes the file and its /etc/fstab entry",
+            tooltip="Creates or removes /swapfile and its /etc/fstab entry")
         self.chk_swap.connect("notify::active", self._on_swap_toggle)
         power.pack_start(swap_row, False, False, 0)
 
@@ -1821,7 +1949,7 @@ class MainWindow(Gtk.ApplicationWindow):
 
         zram_row, self.chk_zram = self._toggle_row(
             "Enable ZRAM",
-            "Needs systemd-zram-generator")
+            "Needs systemd-zram-generator; existing custom configurations are preserved")
         power.pack_start(zram_row, False, False, 0)
 
         self.cmb_power = Gtk.ComboBoxText()
@@ -1841,8 +1969,8 @@ class MainWindow(Gtk.ApplicationWindow):
             self._button("Apply Changes", self.on_run_optimize,
                          "Apply only the settings you changed", primary=True,
                          icon="object-select-symbolic"),
-            self._button("Reload Current Settings", self._refresh_settings,
-                         "Re-read the current state of your system"),
+            self._button("Reload Current Settings", self._refresh_optimize_settings,
+                         "Re-read the current optimization settings"),
         ), False, False, 0)
         page.pack_start(self._hint(
             "Current settings are detected automatically. If nothing changed, nothing runs."),
@@ -1857,23 +1985,38 @@ class MainWindow(Gtk.ApplicationWindow):
         available = self.baseline.get("power") in perf_backend.POWER_PROFILES
         self.cmb_power.set_sensitive(available and not self._busy)
 
-    def _read_settings(self):
+    def _read_optimize_settings(self):
+        animations = system_backend.are_animations_enabled()
         return {
-            "animations_off": not system_backend.are_animations_enabled(),
+            "animations_off": None if animations is None else not animations,
             "swap": perf_backend.is_swapfile_active(),
             "zram": perf_backend.is_zram_active() or perf_backend.is_zram_configured(),
             "power": perf_backend.get_power_profile(),
+        }
+
+    def _read_look_settings(self):
+        return {
             "theme": ui_backend.get_theme_mode(),
             "round": ui_backend.are_rounded_corners_enabled(),
             "scaling": ui_backend.get_text_scaling(),
-            "warnings": dash_backend.feature_warnings(),
         }
 
-    def _apply_settings(self, info):
+    def _read_settings(self):
+        info = self._read_optimize_settings()
+        info.update(self._read_look_settings())
+        info["warnings"] = dash_backend.feature_warnings()
+        return info
+
+    def _apply_optimize_settings(self, info):
         if not isinstance(info, dict):
             return
-        self.baseline = info
-        self.chk_animations.set_active(bool(info.get("animations_off")))
+        self.baseline.update(info)
+        animations = info.get("animations_off")
+        self.chk_animations.set_active(bool(animations))
+        self.chk_animations.set_sensitive(animations is not None)
+        self.chk_animations.set_tooltip_text(
+            "Current animation setting could not be read" if animations is None else
+            "Fewer transitions and window effects on supported desktops")
         self.chk_swap.set_active(bool(info.get("swap")))
         self.chk_zram.set_active(bool(info.get("zram")))
         profile = info.get("power")
@@ -1882,17 +2025,41 @@ class MainWindow(Gtk.ApplicationWindow):
         else:
             self.cmb_power.set_active(len(perf_backend.POWER_PROFILES))
         self._sync_power_control()
-        self.cmb_theme.set_active(1 if info.get("theme") == "dark" else 0)
-        self.chk_round.set_active(bool(info.get("round")))
-        current_scaling = float(info.get("scaling", 1.0) or 1.0)
-        scaling_index = 0
-        for index, (_label, factor) in enumerate(self.SCALING_OPTIONS):
-            if abs(factor - current_scaling) < 0.011:
-                scaling_index = index
-                break
-        self.cmb_scaling.set_active(scaling_index)
         self._on_swap_toggle(None)
 
+    def _apply_theme_setting(self, mode):
+        if mode not in ("light", "dark"):
+            mode = None
+        self.baseline["theme"] = mode
+        self.cmb_theme.set_active({"light": 0, "dark": 1}.get(mode, 2))
+        self._set_app_theme(mode)
+
+    def _apply_look_settings(self, info):
+        if not isinstance(info, dict):
+            return
+        self.baseline.update(info)
+        self._apply_theme_setting(info.get("theme"))
+        self.chk_round.set_active(bool(info.get("round")))
+        current = info.get("scaling")
+        if self._extra_scaling_option:
+            self.cmb_scaling.remove(len(self.SCALING_OPTIONS))
+            self._extra_scaling_option = False
+        index = next((i for i, (_label, factor) in enumerate(self.SCALING_OPTIONS)
+                      if current is not None and abs(factor - current) < 0.000001), None)
+        if index is None:
+            label = "Unavailable" if current is None else "Custom ({:g}%)".format(current * 100)
+            self.cmb_scaling.append_text(label)
+            self._extra_scaling_option = True
+            index = len(self.SCALING_OPTIONS)
+        self.cmb_scaling.set_active(index)
+        self.cmb_scaling.set_sensitive(current is not None)
+
+    def _apply_settings(self, info):
+        if not isinstance(info, dict):
+            return
+        self._apply_optimize_settings({key: info.get(key) for key in
+                                       ("animations_off", "swap", "zram", "power")})
+        self._apply_look_settings({key: info.get(key) for key in ("theme", "round", "scaling")})
         warnings = info.get("warnings") or []
         for child in list(self.health_chips.get_children()):
             self.health_chips.remove(child)
@@ -1914,6 +2081,15 @@ class MainWindow(Gtk.ApplicationWindow):
     def _refresh_settings(self, *_args):
         self.submit(self._read_settings, done=self._apply_settings)
 
+    def _refresh_optimize_settings(self, *_args):
+        self.submit(self._read_optimize_settings, done=self._apply_optimize_settings)
+
+    def _refresh_look_settings(self, *_args):
+        self.submit(self._read_look_settings, done=self._apply_look_settings)
+
+    def _refresh_theme_setting(self, *_args):
+        self.submit(ui_backend.get_theme_mode, done=self._apply_theme_setting)
+
     def on_run_optimize(self, _btn):
         opts = {
             "cleanup": self.chk_cleanup.get_active(),
@@ -1926,7 +2102,8 @@ class MainWindow(Gtk.ApplicationWindow):
         actions = []
         if opts["cleanup"]:
             actions.append(("System cleanup", system_backend.run_cleanup, ()))
-        if opts["animations_off"] != self.baseline.get("animations_off"):
+        if (self.baseline.get("animations_off") is not None and
+                opts["animations_off"] != self.baseline["animations_off"]):
             actions.append(("GNOME animations", system_backend.set_animations,
                             (not opts["animations_off"],)))
         if (self.baseline.get("power") in perf_backend.POWER_PROFILES
@@ -1941,15 +2118,26 @@ class MainWindow(Gtk.ApplicationWindow):
         if not actions:
             self._notify("Nothing to apply. Your settings already match.", "info")
             return
-        if (opts["cleanup"] or (not opts["swap"] and self.baseline.get("swap"))
-                or (not opts["zram"] and self.baseline.get("zram"))):
-            if not self._confirm("Apply system changes?",
-                                 "The selected cleanup or memory changes may remove data or alter system configuration."):
-                return
-        self.submit(utils.run_actions, actions, done=lambda _r: self._refresh_settings())
+        risks = []
+        if opts["cleanup"]:
+            risks.append("Cleanup removes unused packages and Flatpak runtimes.")
+        if not opts["swap"] and self.baseline.get("swap"):
+            risks.append("The active /swapfile will be disabled and permanently removed.")
+        if not opts["zram"] and self.baseline.get("zram"):
+            risks.append("Preen-managed ZRAM will be stopped and its configuration removed.")
+        if risks and not self._confirm("Apply system changes?", "\n".join(risks)):
+            return
+        self.submit(utils.run_actions, actions, done=lambda _r: self._refresh_optimize_settings())
 
     def on_manage_startup(self, _btn):
-        items = system_backend.list_startup_apps()
+        self.submit(system_backend.list_startup_apps, done=self._show_startup_dialog)
+
+    def _show_startup_dialog(self, items):
+        if items is None:
+            self._notify("Startup applications could not be read. See Logs for details.", "warning")
+            return
+        if not isinstance(items, list):
+            return  # the worker has already reported its error
         if not items:
             self._notify("No autostart entries were found on this system.", "info")
             return
@@ -2002,7 +2190,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self.cmb_theme = Gtk.ComboBoxText()
         self.cmb_theme.append_text("Light")
         self.cmb_theme.append_text("Dark")
-        self.cmb_theme.set_active(0)
+        self.cmb_theme.append_text("Not detected")
+        self.cmb_theme.set_active(2)
         theme.pack_start(self._value_row("Appearance", self.cmb_theme,
                                          "Switch the GNOME colour scheme"),
                          False, False, 0)
@@ -2014,6 +2203,7 @@ class MainWindow(Gtk.ApplicationWindow):
             ("Small (85%)", 0.85),
         )
         self.cmb_scaling = Gtk.ComboBoxText()
+        self._extra_scaling_option = False
         for label, _factor in self.SCALING_OPTIONS:
             self.cmb_scaling.append_text(label)
         self.cmb_scaling.set_active(0)
@@ -2051,32 +2241,39 @@ class MainWindow(Gtk.ApplicationWindow):
             self._button("Apply Look Changes", self.on_apply_look,
                          "Apply the theme and corner changes you made", primary=True,
                          icon="object-select-symbolic"),
-            self._button("Reload Current Look", self._refresh_settings,
+            self._button("Reload Current Look", self._refresh_look_settings,
                          "Re-read the current theme and CSS state"),
         ), False, False, 0)
 
     def _theme_mode(self):
-        return "dark" if (self.cmb_theme.get_active_text() or "Light").lower() == "dark" else "light"
+        text = (self.cmb_theme.get_active_text() or "").lower()
+        return text if text in ("light", "dark") else None
 
     def on_apply_theme(self, _btn):
-        self.submit(ui_backend.apply_theme_mode, self._theme_mode(),
-                    done=lambda _r: self._refresh_settings())
+        mode = self._theme_mode()
+        if mode is None:
+            self._notify("Choose Light or Dark first.", "warning")
+            return
+        self.submit(ui_backend.apply_theme_mode, mode,
+                    done=lambda _r: self._refresh_theme_setting())
 
     def on_apply_look(self, _btn):
         mode = self._theme_mode()
         actions = []
-        if mode != self.baseline.get("theme"):
+        if mode is not None and mode != self.baseline.get("theme"):
             actions.append(("Theme", ui_backend.apply_theme_mode, (mode,)))
         if self.chk_round.get_active() != self.baseline.get("round"):
             actions.append(("Rounded corners", ui_backend.set_rounded_corners,
                             (self.chk_round.get_active(),)))
-        scaling = self.SCALING_OPTIONS[self.cmb_scaling.get_active()][1]
-        if abs(float(scaling) - float(self.baseline.get("scaling", 1.0))) > 0.011:
-            actions.append(("Text size", ui_backend.set_text_scaling, (scaling,)))
+        index = self.cmb_scaling.get_active()
+        if 0 <= index < len(self.SCALING_OPTIONS) and self.baseline.get("scaling") is not None:
+            scaling = self.SCALING_OPTIONS[index][1]
+            if abs(scaling - self.baseline["scaling"]) > 0.000001:
+                actions.append(("Text size", ui_backend.set_text_scaling, (scaling,)))
         if not actions:
             self._notify("Nothing to apply. Your look already matches.", "info")
             return
-        self.submit(utils.run_actions, actions, done=lambda _r: self._refresh_settings())
+        self.submit(utils.run_actions, actions, done=lambda _r: self._refresh_look_settings())
 
     def on_install_icon(self, _btn):
         dialog = Gtk.FileChooserDialog(title="Select icon pack", parent=self,
@@ -2496,20 +2693,20 @@ class MainWindow(Gtk.ApplicationWindow):
             self._button("Open Timeshift", self.on_open_timeshift,
                          "Launch the Timeshift graphical interface"),
             self._button("Refresh List", self.on_refresh_snapshots,
-                         "Re-read saved Timeshift snapshots",
+                         "List saved Timeshift snapshots with administrator authorisation",
                          icon="view-refresh-symbolic"),
         ), False, False, 0)
         self.snapshot_listbox = Gtk.ListBox()
         self.snapshot_listbox.set_selection_mode(Gtk.SelectionMode.NONE)
-        self.snapshot_empty = self._hint("No snapshots found, or Timeshift is not installed.")
+        self.snapshot_empty = self._hint("Loading snapshots…")
         self.snapshot_empty.set_no_show_all(True)
         snap.pack_start(self.snapshot_empty, False, False, 0)
         snapshot_scroller = Gtk.ScrolledWindow()
         snapshot_scroller.set_min_content_height(130)
         snapshot_scroller.add(self.snapshot_listbox)
         snap.pack_start(snapshot_scroller, True, True, 0)
-        snap.pack_start(self._hint("Timeshift is a separate package. If it is missing, "
-                                   "install it first: sudo apt install timeshift"), False, False, 0)
+        snap.pack_start(self._hint("Timeshift is a separate package. Refresh List may ask for "
+                                   "administrator access; install it first if missing."), False, False, 0)
         page.pack_start(snap_frame, True, True, 0)
 
         config_frame, config = self._frame("Personal settings (~/.config)")
@@ -2526,16 +2723,25 @@ class MainWindow(Gtk.ApplicationWindow):
         page.pack_start(config_frame, False, False, 0)
 
     def on_refresh_snapshots(self, _btn=None):
-        self.submit(backup_backend.list_snapshots, done=self._apply_snapshots)
+        if utils.is_simulate():
+            self.log_buf.append("[simulate] would request administrator access to list Timeshift snapshots\n")
+            self._notify("Snapshot list was not refreshed in Simulate mode.", "info")
+            return
+        self.submit(backup_backend.list_snapshots, True, done=self._apply_snapshots)
 
     def _apply_snapshots(self, snapshots):
-        if not isinstance(snapshots, list):
-            return
         for row in list(self.snapshot_listbox.get_children()):
             self.snapshot_listbox.remove(row)
+        if not isinstance(snapshots, list):
+            self.snapshot_empty.set_text(
+                "Snapshots unavailable. Timeshift may be missing or require administrator access; "
+                "use Refresh List, see Logs, or open Timeshift.")
+            self.snapshot_empty.show()
+            return
         if snapshots:
             self.snapshot_empty.hide()
         else:
+            self.snapshot_empty.set_text("No snapshots found.")
             self.snapshot_empty.show()
         for item in snapshots:
             row = Gtk.ListBoxRow()
@@ -2559,8 +2765,11 @@ class MainWindow(Gtk.ApplicationWindow):
 
 
     def on_snapshot(self, _btn):
-        self.submit(backup_backend.timeshift_snapshot,
-                    done=lambda _r: self.on_refresh_snapshots())
+        def finished(result):
+            if isinstance(result, utils.Outcome) and result.ok and not utils.is_simulate():
+                self._notify("Snapshot requested. Use Refresh List to update the list.", "info")
+        # Never trigger a second, automatic polkit prompt after creating one.
+        self.submit(backup_backend.timeshift_snapshot, done=finished)
 
     def on_open_timeshift(self, _btn):
         self.submit(backup_backend.open_timeshift_gui)
@@ -2594,20 +2803,28 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def on_import_config(self, _btn):
         path = self._open_dialog("Open settings archive")
-        if not path:
+        if path:
+            # Reading and decompressing large archives can take a long time;
+            # inspect in the FIFO worker, then ask for confirmation on GTK.
+            self.submit(backup_backend.inspect_archive, path,
+                        done=lambda result: self._confirm_config_import(path, result))
+
+    def _confirm_config_import(self, path, result):
+        if not isinstance(result, tuple) or len(result) != 2:
+            return  # the worker has already reported its error
+        safe_count, unsafe = result
+        if unsafe:
+            self._notify("Cannot import: unsafe archive or destination. Nothing was restored. "
+                         + ", ".join(unsafe[:5]), "error")
             return
-        safe_count, unsafe = backup_backend.inspect_archive(path)
         if safe_count == 0:
-            self._notify("Cannot import: archive is empty, unreadable, or has only unsafe entries.",
-                         "error")
+            self._notify("Cannot import: archive is empty or unreadable.", "error")
             return
         message = "This overwrites files in ~/.config with {} item(s) from the archive.".format(safe_count)
-        if unsafe:
-            message += "\n\n{} unsafe entr(ies) will be refused: {}".format(
-                len(unsafe), ", ".join(unsafe[:5]))
-        if not self._confirm("Restore settings?", message):
-            return
-        self.submit(backup_backend.import_configs, path)
+        if self._confirm("Restore settings?", message):
+            # The backend revalidates after confirmation in case either the
+            # archive or destination changed while the dialog was open.
+            self.submit(backup_backend.import_configs, path)
 
     # ------------------------------------------------------------------
     # Logs page

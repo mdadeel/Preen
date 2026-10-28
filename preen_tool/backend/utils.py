@@ -17,6 +17,7 @@ import shlex
 import shutil
 import subprocess
 import threading
+import traceback
 from dataclasses import dataclass, field
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
@@ -261,6 +262,8 @@ def run_actions(actions, log=None) -> "Outcome":
             # mutating function must not cause that function to run twice.
             result = func(*args, log=log) if accepts_log(func) else func(*args)
         except Exception as exc:
+            if log:
+                log.append("[error] {}: {}\n{}\n".format(label, exc, traceback.format_exc()))
             outcomes.append(fail("{}: {}".format(label, exc)))
             continue
         if isinstance(result, Outcome):
@@ -367,8 +370,11 @@ def set_desktop_keys(path: str, values: Dict[str, str]) -> bool:
             out.append(line)
             continue
         key = stripped.split("=", 1)[0].strip() if "=" in stripped else ""
-        if in_entry and key in pending:
-            out.append("{}={}\n".format(key, pending.pop(key)))
+        if in_entry and key in values:
+            if key in pending:
+                out.append("{}={}\n".format(key, pending.pop(key)))
+            # Drop duplicate copies of a key being changed: a later old value
+            # could otherwise override the requested autostart state.
         else:
             out.append(line)
     if in_entry:
@@ -437,10 +443,9 @@ def safe_tar_members(tar, strip_prefixes: Sequence[str] = ()) -> Tuple[List, Lis
         if not clean:
             continue
         member.name = clean + ("/" if member.isdir() and not clean.endswith("/") else "")
-        # Strip setuid/setgid/sticky bits, and guarantee the owner can always
-        # traverse extracted directories and read extracted files (archives
-        # with 0644 directories would otherwise be unusable).
-        member.mode = member.mode & 0o777
+        # Strip special bits and group/world write permission, and guarantee
+        # the owner can traverse directories and read extracted files.
+        member.mode = member.mode & 0o755
         member.mode |= 0o700 if member.isdir() else 0o600
         allowed.append(member)
     return allowed, rejected

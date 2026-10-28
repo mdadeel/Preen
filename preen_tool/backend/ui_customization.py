@@ -6,7 +6,9 @@ traversal) and guessed the theme name from directory mtimes.
 """
 from __future__ import annotations
 
+import math
 import os
+import re
 import shutil
 import tarfile
 import tempfile
@@ -31,12 +33,14 @@ def _theme_roots() -> List[str]:
 
 
 def _installed_themes() -> Set[str]:
-    themes: Set[str] = set()
+    # GTK 3 bundles these themes as resources, even when /usr/share/themes
+    # has no corresponding directories (common on minimal GNOME installs).
+    themes: Set[str] = {"Adwaita", "Adwaita-dark"}
     for root in _theme_roots():
         try:
             themes.update(
                 name for name in os.listdir(root)
-                if os.path.isdir(os.path.join(root, name))
+                if os.path.isdir(os.path.join(root, name, "gtk-3.0"))
             )
         except OSError:
             continue
@@ -50,64 +54,80 @@ def _current_gtk_theme() -> str:
     return result.out.strip().strip("'\"") if result.ok else ""
 
 
-def get_theme_mode() -> str:
+def get_theme_mode() -> Optional[str]:
+    """Read the GNOME preference, falling back to the GTK 3 theme on older GNOME."""
     if not has_command("gsettings"):
-        return "light"
+        return None
     result = run_cmd(["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"], quiet=True)
-    value = result.out.strip().strip("'\"").lower()
+    value = result.out.strip().strip("'\"").lower() if result.ok else ""
     if value == "prefer-dark":
         return "dark"
-    if value == "default":
+    if value == "prefer-light":
         return "light"
-    return "dark" if _current_gtk_theme().lower().endswith("dark") else "light"
-
-
-def _pick_theme(mode: str) -> Optional[str]:
-    """Only ever return a theme that really exists on disk."""
-    installed = _installed_themes()
     current = _current_gtk_theme()
+    if current:
+        return "dark" if current.lower().endswith("dark") else "light"
+    return "light" if value == "default" else None
+
+
+def _pick_theme(mode: str, current: Optional[str] = None) -> Optional[str]:
+    """Prefer the current theme's installed light/dark partner, then Adwaita."""
+    installed = _installed_themes()
+    current = _current_gtk_theme() if current is None else current
+    suffix = re.search(r"(?:[-_]?dark|[-_]?light)$", current, flags=re.IGNORECASE)
+    stem = current[:suffix.start()] if suffix else current
+    is_dark = current.lower().endswith("dark")
     if mode == "dark":
-        candidates = [current, current + "-dark", current + "-Dark",
-                      "Yaru-dark", "Adwaita-dark", "ZorinBlue-Dark", "HighContrast"]
-        wanted = lambda name: "dark" in name.lower()  # noqa: E731
+        candidates = ([current] if is_dark else []) + [
+            stem + "-dark", stem + "-Dark", stem + "_dark", stem + "Dark",
+            "Adwaita-dark", "Yaru-dark", "ZorinBlue-Dark"]
     else:
-        candidates = [current, current.replace("-dark", "").replace("-Dark", ""),
-                      "Yaru", "Adwaita", "ZorinBlue-Light"]
-        wanted = lambda name: "dark" not in name.lower()  # noqa: E731
-    if current in installed and wanted(current):
-        return current
-    for candidate in candidates:
-        if candidate and candidate in installed and wanted(candidate):
-            return candidate
-    return None
+        candidates = ([current] if current and not is_dark else []) + [
+            stem, stem + "-Light", stem + "-light", stem + "_light", stem + "Light",
+            "Adwaita", "Yaru", "ZorinBlue-Light"]
+    return next((name for name in candidates if name and name in installed), None)
 
 
 def apply_theme_mode(mode: str, log=None) -> Outcome:
-    mode = (mode or "light").lower()
+    mode = (mode or "").lower()
     if mode not in ("light", "dark"):
         return fail("Unknown theme mode {!r}.".format(mode))
     if not has_command("gsettings"):
         return fail("gsettings is not available.")
-    value = "prefer-dark" if mode == "dark" else "default"
+
+    schema = "org.gnome.desktop.interface"
+    available = run_cmd(["gsettings", "list-keys", schema], quiet=True)
+    if not available.ok:
+        return fail("Could not inspect GNOME appearance settings: {}".format(available.detail()))
+    keys = set(available.out.splitlines())
+    has_scheme, has_theme = "color-scheme" in keys, "gtk-theme" in keys
+    if not (has_scheme or has_theme):
+        return fail("This desktop exposes neither color-scheme nor gtk-theme settings.")
+
+    current = _current_gtk_theme() if has_theme else ""
+    if has_theme and not current:
+        return fail("Could not read the current GTK theme; no appearance changes were made.")
+    theme = _pick_theme(mode, current) if has_theme else None
+    if has_theme and not theme:
+        return fail("No installed GTK theme matches the {} appearance.".format(mode))
+
+    # On older GNOME, color-scheme does not exist. GTK 3's theme setting is
+    # then the sole supported path; modern desktops use both where available.
+    if has_scheme:
+        value = "prefer-dark" if mode == "dark" else "default"
+        result = run_cmd(["gsettings", "set", schema, "color-scheme", value],
+                         mutate=True, log=log)
+        if not result.ok:
+            return fail("Could not set color-scheme: {}".format(result.detail()))
+    if theme and theme != current:
+        result = run_cmd(["gsettings", "set", schema, "gtk-theme", theme],
+                         mutate=True, log=log)
+        if not result.ok:
+            prefix = "Color scheme changed, but " if has_scheme and not is_simulate() else ""
+            return fail("{}gtk-theme failed: {}".format(prefix, result.detail()))
     if is_simulate():
-        if log:
-            log.append("[simulate] would set color-scheme={}\n".format(value))
-        return ok("Would apply the {} theme.".format(mode))
-
-    result = run_cmd(["gsettings", "set", "org.gnome.desktop.interface",
-                      "color-scheme", value], mutate=True, log=log)
-    if not result.ok:
-        return fail("Could not set color-scheme: {}".format(result.detail()))
-
-    theme = _pick_theme(mode)
-    if theme and theme != _current_gtk_theme():
-        theme_result = run_cmd(["gsettings", "set", "org.gnome.desktop.interface",
-                               "gtk-theme", theme], mutate=True, log=log)
-        if not theme_result.ok:
-            return fail("Color scheme changed, but gtk-theme failed: {}".format(theme_result.detail()))
-    elif log and not theme:
-        log.append("[theme] no installed GTK theme matches '{}'; kept current gtk-theme\n".format(mode))
-    return ok("Applied the {} theme.".format(mode))
+        return ok("Simulation complete. No changes were made.")
+    return ok("Applied the {} appearance.".format(mode))
 
 
 # ---------------------------------------------------------------------------
@@ -118,20 +138,18 @@ SCALING_KEY = "text-scaling-factor"
 SCALING_MIN, SCALING_MAX = 0.8, 2.0
 
 
-def get_text_scaling() -> float:
-    """Current GNOME text scaling factor; 1.0 when it cannot be read."""
+def get_text_scaling() -> Optional[float]:
+    """Return the actual factor, or None if the setting cannot be read."""
     if not has_command("gsettings"):
-        return 1.0
+        return None
     result = run_cmd(["gsettings", "get", SCALING_SCHEMA, SCALING_KEY], quiet=True)
     if not result.ok:
-        return 1.0
+        return None
     try:
         factor = float(result.out.strip().strip("'\""))
     except ValueError:
-        return 1.0
-    if SCALING_MIN <= factor <= SCALING_MAX:
-        return factor
-    return 1.0
+        return None
+    return factor if math.isfinite(factor) and factor > 0 else None
 
 
 def set_text_scaling(factor: float, log=None) -> Outcome:
@@ -187,21 +205,54 @@ def install_icon_pack(tar_path: str, log=None) -> Outcome:
             except TypeError:  # Python < 3.12
                 tar.extractall(path=tmp_dir, members=members)
 
-        theme_dirs = set()
-        for root, _dirs, files in os.walk(tmp_dir):
-            if "index.theme" in files:
-                rel = os.path.relpath(root, tmp_dir)
-                if rel != ".":
-                    theme_dirs.add(rel.split(os.sep)[0])
+        theme_dirs = sorted(root for root, _dirs, files in os.walk(tmp_dir) if "index.theme" in files)
         if not theme_dirs:
             return fail("No icon theme found (expected a folder containing index.theme).")
-        theme = sorted(theme_dirs)[0]
-        source = os.path.join(tmp_dir, theme)
+        source = theme_dirs[0]
+        if source == tmp_dir:
+            theme = os.path.basename(tar_path)
+            for extension in (".tar.xz", ".tar.gz", ".tar.bz2", ".tgz", ".tar"):
+                if theme.lower().endswith(extension):
+                    theme = theme[:-len(extension)]
+                    break
+            if not theme or theme in (".", ".."):
+                return fail("Could not determine an icon theme name from the archive.")
+        else:
+            theme = os.path.basename(source)
+        if theme.startswith(".preen-"):
+            return fail("The icon theme name is reserved by Preen.")
         os.makedirs(dest_root, exist_ok=True)
         target = os.path.join(dest_root, theme)
-        if os.path.exists(target):
-            shutil.rmtree(target)
-        shutil.copytree(source, target)
+        stage = tempfile.mkdtemp(prefix=".preen-icons-", dir=dest_root)
+        previous = None
+        try:
+            shutil.copytree(source, stage, dirs_exist_ok=True)
+            if os.path.lexists(target):
+                backup_dir = os.path.join(dest_root, ".preen-backups")
+                if os.path.islink(backup_dir):
+                    raise OSError("Icon backup directory is a symbolic link")
+                os.makedirs(backup_dir, mode=0o700, exist_ok=True)
+                # mkdtemp reserves a unique name; remove the empty placeholder
+                # so the previous theme (even a symlink) can be renamed there.
+                previous = tempfile.mkdtemp(prefix=theme + "-", dir=backup_dir)
+                os.rmdir(previous)
+                os.rename(target, previous)
+            os.rename(stage, target)
+            stage = None
+        except (OSError, shutil.Error) as exc:
+            if previous and not os.path.lexists(target):
+                try:
+                    os.rename(previous, target)
+                    previous = None
+                except OSError as restore_error:
+                    raise OSError("{}; original theme remains at {} ({})".format(
+                        exc, previous, restore_error)) from exc
+            raise
+        finally:
+            if stage:
+                shutil.rmtree(stage, ignore_errors=True)
+        if previous and log:
+            log.append("[icons] previous theme kept at {}\n".format(previous))
     except (OSError, tarfile.TarError, shutil.Error) as exc:
         return fail("Could not install icon pack: {}".format(exc))
     finally:
@@ -213,9 +264,10 @@ def install_icon_pack(tar_path: str, log=None) -> Outcome:
         if not result.ok:
             return fail("Installed theme {!r}, but could not activate it: {}".format(
                 theme, result.detail()))
-    elif log:
+        return ok("Installed and activated icon theme {}.".format(theme))
+    if log:
         log.append("[icons] gsettings missing; theme installed but not activated\n")
-    return ok("Installed and activated icon theme {}.".format(theme))
+    return ok("Installed icon theme {}, but could not activate it without gsettings.".format(theme))
 
 
 # ---------------------------------------------------------------------------
@@ -242,10 +294,9 @@ def set_rounded_corners(enable: bool, log=None) -> Outcome:
         start = content.find(START_GUARD)
         if start != -1:
             end = content.find(END_GUARD, start)
-            if end != -1:
-                content = content[:start] + content[end + len(END_GUARD):]
-            else:
-                content = content[:start]
+            if end == -1:
+                return fail("Rounded-corner CSS marker is incomplete; gtk.css was left unchanged.")
+            content = content[:start] + content[end + len(END_GUARD):]
         if enable:
             if content and not content.endswith("\n"):
                 content += "\n"

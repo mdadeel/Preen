@@ -26,7 +26,7 @@ preen --doctor ──► cli.py ──► backend/ (headless)
 |---|---|
 | `app.py` | GTK-free launcher. Handles `--doctor`, `--check-catalog`, `--version`, `--simulate` and prints a friendly error when PyGObject is missing. |
 | `cli.py` | Headless diagnostics, catalogue validation and the JSON report. |
-| `gui.py` | Nine GTK 3 screens, shared dark design tokens, dialogs, preferences, diagnostic log and the serial task queue. |
+| `gui.py` | Nine GTK 3 screens, light/dark design tokens, dialogs, preferences, diagnostic log and the serial task queue. |
 | `backend/utils.py` | `run_cmd`, `CommandResult`, `Report`, `Outcome`, `run_actions`, desktop-file parsing, `safe_tar_members`, `ensure_flathub`. |
 | `backend/apps.py` | Catalogue loading and validation, two-query installed-state detection, batched install/update/uninstall. |
 | `backend/deepclean.py` | Reclaimable-space scans, size formatting and simulate-gated cleaning. |
@@ -39,8 +39,8 @@ whole test suite usable on a headless machine.
 
 ## Command execution
 
-`utils.run_cmd(argv, ..., mutate=...)` is the only place subprocesses are
-spawned.
+Managed blocking commands use `utils.run_cmd(argv, ..., mutate=...)`.
+Opening the separate Timeshift GUI is intentionally non-blocking.
 
 - `CommandResult` is a named tuple `(code, out, err)` with `.ok`,
   `.simulated` and `.detail()`.
@@ -76,7 +76,12 @@ UI thread ◄──────── GLib.idle_add(_finish) ─────┘
   `done=` callback. Busy state remains active through callbacks and queued
   refreshes; the Simulate switch and action buttons cannot change mid-batch.
 - `utils.accepts_log()` inspects signatures instead of catching
-  `TypeError`, so a function is never executed twice.
+  `TypeError`, so a function is never executed twice. Archive inspection and
+  startup-app scans also use the queue.
+- Look and optimization settings have separate refresh paths. A Gio settings
+  monitor queues appearance reads after external GNOME changes without
+  discarding a staged theme choice. Log rendering coalesces pending updates
+  and uses sequence numbers so filter/clear races do not duplicate lines.
 
 ## Simulate contract
 
@@ -100,10 +105,15 @@ file is written in Simulate mode.
   `ESSENTIAL_APT_PACKAGES`.
 - **Archives.** `safe_tar_members()` rejects absolute paths, `..`
   traversal, symlinks, hardlinks, device nodes and unsafe permissions.
+  Config restore also refuses destination symlinks and uses directory-relative,
+  no-follow file descriptors and atomic file replacement, including on older
+  Python versions without `tarfile` extraction filters. Replaced icon themes
+  are kept in a backup directory.
 - **Preferences.** `settings.validate()` coerces hand-edited JSON back to
   known-safe values.
 - **Diff-based optimisation.** Only settings that changed from the detected
-  baseline are applied.
+  baseline are applied. Existing inactive swapfiles and custom or edited ZRAM
+  configurations are not overwritten or removed.
 - **Cleanable paths.** Only allowlisted directories are emptied; a symlink
   used as a cleanable root is refused. Unknown scan sizes stay unknown.
   Journal size above its retention target is an upper bound, not a promise.
@@ -114,11 +124,13 @@ file is written in Simulate mode.
 
 `tests/fakes.py` creates fake `flatpak`, `dpkg`, `dpkg-query`, `gsettings`,
 `pkexec`, `swapon`, `powerprofilesctl` and `timeshift` binaries that log
-every invocation to JSONL. A second fake GTK walks every screen and
-exercises every handler without a display server.
+every invocation to JSONL. Fake `gsettings` persists changes and can emulate
+older schemas and failures. A second fake GTK walks every screen and
+exercises handlers without a display server.
 
 - `test_backend.py` covers backend behaviour, packaging, tar safety,
-  Simulate mode and the CLI.
+  Simulate mode and the CLI; `test_theme.py` covers stateful modern and legacy
+  GNOME appearance changes, failures and simulation.
 - `test_deepclean.py`, `test_services.py`, `test_settings.py` cover the
   matching modules.
 - `test_gui_smoke.py` checks the import surface and the GTK-missing error
@@ -131,7 +143,7 @@ real GNOME desktop with polkit and package managers.
 
 Run them with `make test` or
 `python3 -m unittest discover -s tests -v`. No root, display server or
-network is required, and the suite finishes in about a second.
+network is required.
 
 ## Packaging
 
