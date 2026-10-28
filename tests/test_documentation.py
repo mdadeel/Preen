@@ -18,7 +18,7 @@ DOCUMENTS = (
     "PRIVACY.md", "SECURITY.md", "THIRD_PARTY_NOTICES.md",
     "docs/README.md", "docs/USER_GUIDE.md", "docs/ARCHITECTURE.md",
     "docs/FEATURE_AUDIT.md", "docs/PRODUCT_ROADMAP.md", "docs/WEBSITE_PLAN.md",
-    "docs/ROAST.md",
+    "docs/RELEASES.md", "docs/RELEASE_NOTES_0.5.0.md", "docs/ROAST.md",
 )
 LINK = re.compile(r"!?\[[^\]]*\]\(([^\s)]+)(?:\s+\"[^\"]*\")?\)")
 HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
@@ -128,8 +128,9 @@ class DocumentationTests(unittest.TestCase):
                 for expected in ("README.md", "LICENSE", "PRIVACY.md", "SECURITY.md",
                                  "THIRD_PARTY_NOTICES.md", "CODE_OF_CONDUCT.md",
                                  "docs/WEBSITE_PLAN.md", "docs/images/preen-dashboard.png",
-                                 "docs/images/preen-manage-apps.png", "debian/copyright",
-                                 "packaging/stage_docs.sh", "packaging/build_deb.sh"):
+                                 "docs/images/preen-manage-apps.png", "docs/RELEASES.md",
+                                 "debian/copyright", "packaging/stage_docs.sh",
+                                 "packaging/build_deb.sh", "packaging/build_release.sh"):
                     with self.subTest(path=expected):
                         matching = [m for m in members
                                     if m.name.partition("/")[2] == expected]

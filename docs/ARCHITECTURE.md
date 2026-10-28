@@ -180,5 +180,7 @@ network is required.
 - `packaging/stage_docs.sh` adds the license, policy, third-party notices and
   linked documentation to both native packages; Debian also installs
   `debian/copyright`. The source archive includes the screenshots and builders.
+- `packaging/build_release.sh` creates a source ZIP, sdist, wheel, Debian
+  package, optional AppImage and checksums from a clean, version-matched tree.
 - `.gitignore` excludes `build/`, `dist/`, `*.egg-info`, virtual
   environments, bytecode caches and generated Debian artefacts.

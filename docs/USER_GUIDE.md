@@ -31,12 +31,12 @@ system Python, such as `/usr/bin/python3`, for the last two commands.
 ### Option B: Build a Debian package
 
 Check the [releases page](https://github.com/mdadeel/Preen/releases) for
-available assets. When last checked on 2026-10-28, `v0.4.0` had no attached
-Debian or AppImage binaries. With `dpkg-deb` installed, build from a checkout:
+available assets. If a Debian package is attached, download the matching file;
+otherwise, with `dpkg-deb` installed, build from a checkout:
 
 ```bash
 ./packaging/build_deb.sh
-sudo apt install ./dist/preen_0.4.0_all.deb  # use the file the builder reports
+sudo apt install ./dist/preen_0.5.0_all.deb  # use the file the builder reports
 preen --simulate
 ```
 
@@ -44,8 +44,10 @@ preen --simulate
 
 On x86-64 Linux, `./packaging/build_appimage.sh` builds an AppImage from a
 checkout. It needs the host's Python, GTK and PyGObject, and may download
-`appimagetool` without verifying its checksum. Prefer a trusted pre-verified
-tool supplied through `APPIMAGETOOL`. The resulting file is in `dist/`.
+`appimagetool` without verifying its checksum; the tool may also fetch its
+runtime. Prefer a trusted pre-verified appimagetool AppImage supplied through
+`APPIMAGETOOL` and verify its runtime. The builder checks the result's header
+and version; the file is in `dist/`.
 
 ### Optional tools
 
