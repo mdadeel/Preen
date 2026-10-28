@@ -213,6 +213,7 @@ class FakeGtk:
 
     Orientation = SimpleNamespace(HORIZONTAL=0, VERTICAL=1)
     SelectionMode = SimpleNamespace(NONE=0, SINGLE=1)
+    PolicyType = SimpleNamespace(NEVER=0, AUTOMATIC=1, ALWAYS=2)
     Align = SimpleNamespace(CENTER=3, START=0)
     StackTransitionType = SimpleNamespace(CROSSFADE=0)
     MessageType = SimpleNamespace(INFO=0, WARNING=1, ERROR=2)
@@ -398,6 +399,38 @@ class GuiRuntimeTest(unittest.TestCase):
         self.assertIn("2 selected", window.clean_counter.get_text())
         window.on_clean_select_none(None)
         self.assertIn("No items selected", window.clean_counter.get_text())
+
+    def test_sidebar_search_filters_rows_and_hides_headers(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        rows = window.sidebar_list.get_children()
+
+        # An empty query keeps every row and section header visible.
+        self.assertTrue(all(window._sidebar_filter(row) for row in rows))
+
+        # A query matches the Deep Clean page and nothing else.
+        entry = SimpleNamespace(get_text=lambda: "deep")
+        window._on_sidebar_search_changed(entry)
+        visible = [row for row in rows if window._sidebar_filter(row)]
+        self.assertEqual(len(visible), 1)
+        self.assertEqual(visible[0].page_name, "deepclean")
+
+        # Section headers disappear while a search is active.
+        header = next(row for row in rows
+                      if getattr(row, "page_name", None) is None)
+        self.assertFalse(window._sidebar_filter(header))
+
+        # Clearing the query restores every row.
+        window._on_sidebar_search_changed(SimpleNamespace(get_text=lambda: ""))
+        self.assertTrue(all(window._sidebar_filter(row) for row in rows))
+
+    def test_swap_size_combo_sensitivity_follows_switch(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window.chk_swap.set_active(False)
+        window._on_swap_toggle(None)
+        self.assertFalse(window.cmb_swap_size.get_sensitive())
+        window.chk_swap.set_active(True)
+        window._on_swap_toggle(None)
+        self.assertTrue(window.cmb_swap_size.get_sensitive())
 
     def test_services_filter_and_count(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
