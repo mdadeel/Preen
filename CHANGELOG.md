@@ -20,6 +20,9 @@ backend, package catalogue and serial task queue.
 - Bundled Preen launcher artwork, checkbox/radio indicators and offline
   catalogue marks with generic fallbacks, plus a proposed roadmap for the
   visual refresh, folder organizer and future Linux utilities.
+- Two example screenshots, a desktop privacy policy, security reporting
+  guidance, third-party notices, community conduct and a proposed minimal,
+  no-gradient website plan.
 
 ### Changed
 
@@ -29,6 +32,11 @@ backend, package catalogue and serial task queue.
   commands can be previewed without polkit and report that no changes occurred.
 - Cleanup, uninstall and restore always require confirmation; the preference
   controls the additional confirmation for Update All.
+- README and user guidance now distinguish source from release assets, explain
+  Simulate and package-protection limits, and advise redacting sensitive logs.
+- Source archives and native package staging include the policy, license,
+  third-party notices and screenshot documentation; Python metadata links to
+  the project documentation and policies.
 
 ### Fixed
 

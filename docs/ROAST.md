@@ -1,8 +1,10 @@
 # 🔥 The Brutal Roast (and the rebuild)
 
-An audit of **v0.1.0** (commit `68356a5`), written while fixing it. This is
-about the code, not the person who wrote it. Every claim below was verified
-against the shipped files, and every fix has a test in `tests/`.
+A historical audit of **v0.1.0** (commit `68356a5`), written while fixing it.
+This is about the code, not the person who wrote it. Counts and claims below
+refer to that review, not necessarily the current release. For present-day
+behaviour and test limitations, see the [README](../README.md) and
+[functional review](FEATURE_AUDIT.md).
 
 > **Update (2026-10-27):** after the reliability rewrite below, the repo got a
 > UX and cleanliness pass — Dashboard landing page, getting-started guide,
@@ -71,9 +73,10 @@ gated. A user who turned on "Safety: Simulate Mode" and clicked through the UI
 would still get a new theme, a rewritten `gtk.css`, an extracted icon pack and
 an overwritten config directory. The safety feature was a sticker.
 
-**Fix:** every mutation is gated, and `test_simulate_mode_blocks_EVERY_mutating_action`
-calls **19** mutating operations with simulate ON and asserts the fake system
-saw zero mutating commands and zero new files.
+**Historical fix:** the listed maintenance actions were gated and a regression
+test checks selected operations with Simulate on using a fake system. Simulate
+is not a no-write sandbox: preferences, saved logs and legacy-settings migration
+are exceptions. See the current [architecture](ARCHITECTURE.md#simulate-contract).
 
 ---
 
@@ -262,9 +265,8 @@ malicious tarballs and assert nothing escapes.
 - `pkexec` was hardcoded as `argv[0]` in ~10 places while `use_pkexec=True`
   existed. Now normalised once: one pkexec, none when root, clear error when
   polkit is absent.
-- `docs/code_review.md` still claims the presets are broken; they were already
-  fixed. The audit doc was auditing a ghost. (It now lives in
-  [`archive/code_review.md`](archive/code_review.md) for historical context.)
+- The earlier `docs/code_review.md` claimed the presets were broken; they were
+  already fixed. That historical audit is not included in the current checkout.
 - The repo committed `build/`, `.pybuild/`, `*.pyc`, `zorin_optimizer.egg-info/`,
   a complete staged `debian/zorin-optimizer/` tree, **and a `.venv/` whose
   `pyvenv.cfg` contains `/home/moft/Music/zorin-optimizer/.venv`**. Someone
@@ -284,7 +286,7 @@ malicious tarballs and assert nothing escapes.
 | Apps | validated catalogue, 2-query detection, batching, source fallback, essential-package guard, regex-validated scanner rows |
 | GUI | new `gui.py` with serialised task runner, all UI updates on the main thread, searchable lists, confirmations, error dialogs, live status, saveable log |
 | CLI | `app.py` is GTK-free; `--doctor`, `--doctor --json`, `--check-catalog`, `--version`, `--simulate` |
-| Safety | Simulate covers all mutations; theme/icon/CSS/backup/gsettings/startup gated; tar traversal blocked |
+| Safety | Selected maintenance actions are gated by Simulate; archive traversal checks added. See the current [Simulate limitations](ARCHITECTURE.md#simulate-contract). |
 | UX | Dashboard landing page with a 3-step guide and tool-availability panel; dismissible info/warning/error banner instead of modal spam; progress spinner; persistent Simulate banner; search + empty states; Select all / Clear; selection counters; Preferences (persistent, validated), Help and About; primary/destructive button styling. |
 | Repository | `LICENSE`, `CONTRIBUTING.md`, `CHANGELOG.md`, `Makefile`, `.editorconfig`, docs index, `USER_GUIDE.md`, `ARCHITECTURE.md`; historical docs moved to `docs/archive/`; generated build output gitignored. |
 | Tests | 36 tests (backend, settings, packaging, CLI, GUI construction + all handlers) with a fake Linux userspace and fake GTK; runs in ~1 s with no root, no display, no network. A ready-to-use GitHub Actions workflow is included as [`docs/ci-workflow.yml.example`](ci-workflow.yml.example) for Python 3.9/3.11/3.12 — copy it to `.github/workflows/ci.yml` to enable CI. |

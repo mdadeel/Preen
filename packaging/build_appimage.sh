@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build Preen as an AppImage (AppDir + appimagetool).
-# Uses the *system* Python and GTK — every supported distro has them — so the
-# AppImage stays a few MB instead of bundling a runtime.
+# Uses the host's Python and GTK rather than bundling a runtime; the host must
+# provide the required Python, GTK and PyGObject packages.
 # Result: dist/Preen-<version>-x86_64.AppImage
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -53,6 +53,9 @@ install -m 644 data/io.github.mdadeel.Preen.desktop "$APPDIR/usr/share/applicati
 install -m 644 preen_tool/assets/preen.png "$APPDIR/preen.png"
 install -m 644 preen_tool/assets/preen.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/preen.png"
 ln -sf preen.png "$APPDIR/.DirIcon"
+
+# License, privacy information and documentation travel with the AppImage.
+./packaging/stage_docs.sh "$APPDIR/usr/share/doc/preen"
 
 mkdir -p dist
 ARCH=x86_64 "$TOOL" --appimage-extract-and-run "$APPDIR" \

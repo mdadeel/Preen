@@ -6,4 +6,12 @@
 # The test suite uses fake system binaries and is meant for development/CI,
 # not for running inside a package build chroot.
 override_dh_auto_test:
-	@echo "Skipping upstream test suite during package build (use: pytest -q)"
+	@echo "Skipping upstream test suite during package build (use: make test)"
+
+# Keep the policy, license and linked Markdown documentation in the package.
+override_dh_installdocs:
+	dh_installdocs
+	./packaging/stage_docs.sh "$(CURDIR)/debian/preen/usr/share/doc/preen"
+
+override_dh_compress:
+	dh_compress -X.md -X.example

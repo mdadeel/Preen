@@ -34,6 +34,8 @@ install -d "$PKG/usr/share/applications" "$PKG/usr/share/doc/preen" \
           "$PKG/usr/share/icons/hicolor/256x256/apps"
 install -m 644 data/preen.desktop data/io.github.mdadeel.Preen.desktop "$PKG/usr/share/applications/"
 install -m 644 preen_tool/assets/preen.png "$PKG/usr/share/icons/hicolor/256x256/apps/preen.png"
+./packaging/stage_docs.sh "$PKG/usr/share/doc/preen"
+install -m 644 debian/copyright "$PKG/usr/share/doc/preen/copyright"
 gzip -9 -c debian/changelog > "$PKG/usr/share/doc/preen/changelog.gz"
 
 # --- Control ---
@@ -44,7 +46,7 @@ install -d "$PKG/DEBIAN"
   echo "Architecture: all"
   echo "Section: utils"
   echo "Priority: optional"
-  echo "Maintainer: Preen contributors <noreply@example.com>"
+  echo "Maintainer: Preen contributors <64582744+mdadeel@users.noreply.github.com>"
   echo "Homepage: https://github.com/mdadeel/Preen"
   echo "Depends: python3, python3-gi, gir1.2-gtk-3.0, python3-psutil, polkitd | policykit-1"
   echo "Recommends: flatpak, gsettings-desktop-schemas, power-profiles-daemon"
@@ -54,7 +56,7 @@ install -d "$PKG/DEBIAN"
   echo " Install and remove APT/Flatpak apps, deep-clean caches with a size"
   echo " preview, manage systemd services, tune power/swap/ZRAM and back up"
   echo " user configuration from a single GTK interface."
-  echo " Includes a Simulate mode that dry-runs every mutating action."
+  echo " Includes a Simulate mode that previews supported maintenance actions."
 } > "$PKG/DEBIAN/control"
 
 mkdir -p dist
