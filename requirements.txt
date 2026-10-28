@@ -1,2 +1,0 @@
-# Python deps via pip (system GTK via apt)
-psutil>=5.9

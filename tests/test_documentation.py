@@ -18,7 +18,7 @@ DOCUMENTS = (
     "PRIVACY.md", "SECURITY.md", "THIRD_PARTY_NOTICES.md",
     "docs/README.md", "docs/USER_GUIDE.md", "docs/ARCHITECTURE.md",
     "docs/FEATURE_AUDIT.md", "docs/PRODUCT_ROADMAP.md", "docs/WEBSITE_PLAN.md",
-    "docs/RELEASES.md", "docs/RELEASE_NOTES_0.5.0.md", "docs/ROAST.md",
+    "docs/RELEASES.md",
 )
 LINK = re.compile(r"!?\[[^\]]*\]\(([^\s)]+)(?:\s+\"[^\"]*\")?\)")
 HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
@@ -125,6 +125,14 @@ class DocumentationTests(unittest.TestCase):
             name = build_meta.build_sdist(tmp)
             with tarfile.open(Path(tmp) / name, "r:gz") as archive:
                 members = archive.getmembers()
+                source_docs = {path.relative_to(ROOT).as_posix()
+                               for path in (ROOT / "docs").rglob("*")
+                               if path.is_file() and path.suffix in {".md", ".png"}}
+                archived_docs = {m.name.partition("/")[2] for m in members
+                                 if m.isfile() and m.name.partition("/")[2].startswith("docs/")}
+                self.assertTrue(source_docs.issubset(archived_docs))
+                for name in archived_docs:
+                    self.assertTrue((ROOT / name).is_file(), "Stale archive document: " + name)
                 for expected in ("README.md", "LICENSE", "PRIVACY.md", "SECURITY.md",
                                  "THIRD_PARTY_NOTICES.md", "CODE_OF_CONDUCT.md",
                                  "docs/WEBSITE_PLAN.md", "docs/images/preen-dashboard.png",

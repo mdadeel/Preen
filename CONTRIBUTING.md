@@ -35,10 +35,12 @@ python -m pip install -e .
 preen --doctor
 ```
 
-Pip may access package repositories for build dependencies. Avoid installing
-into an externally managed system Python. On non-Debian distributions use the
-appropriate package manager for GTK 3, PyGObject and Python; APT-specific
-features still require APT/dpkg and are not universally supported.
+Python package dependencies are declared in `pyproject.toml`; GTK and
+PyGObject remain system dependencies. Pip may access package repositories for
+build dependencies. Avoid installing into an externally managed system Python.
+On non-Debian distributions use the appropriate package manager for GTK 3,
+PyGObject and Python; APT-specific features still require APT/dpkg and are not
+universally supported.
 
 ## Project layout
 
