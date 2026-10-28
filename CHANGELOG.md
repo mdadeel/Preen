@@ -6,7 +6,19 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Removed an obsolete early audit, an outdated inactive CI example and
+  duplicated release and dependency files. Historical documents remain
+  available in the `v0.5.0` tag, and Python dependencies are declared in
+  `pyproject.toml`. Package documentation staging now includes only current
+  documentation.
+- Ignore generated Debian staging and named release artifacts to reduce
+  accidental build-output commits.
+
 ## [0.5.0] - 2026-10-28
+
+[Release notes and source archives](https://github.com/mdadeel/Preen/releases/tag/v0.5.0)
 
 A GNOME-native dark GTK 3 refresh of all nine pages, retaining the existing
 backend, package catalogue and serial task queue.
@@ -165,8 +177,9 @@ Rebrand to **Preen**, system setup, deep cleaning and tuning for Linux
 
 ## [0.2.0] - 2026-10-27
 
-Reliability rewrite plus a UX and repository clean-up pass. The full audit of
-the previous release is in [`docs/ROAST.md`](docs/ROAST.md).
+Reliability rewrite plus a UX and repository clean-up pass. The full
+[historical audit](https://github.com/mdadeel/Preen/blob/v0.5.0/docs/ROAST.md)
+of the previous release is preserved in the `v0.5.0` tag.
 
 ### Fixed
 
@@ -211,8 +224,9 @@ the previous release is in [`docs/ROAST.md`](docs/ROAST.md).
 - `LICENSE`, `CONTRIBUTING.md`, this changelog, `Makefile`, `.editorconfig`,
   `docs/USER_GUIDE.md`, `docs/ARCHITECTURE.md`, `docs/README.md` and
   `docs/archive/` for historical documents.
-- 36 regression tests with a fake Linux userspace and a fake GTK;
-  `docs/ci-workflow.yml.example` for GitHub Actions.
+- 36 regression tests with a fake Linux userspace and a fake GTK; an
+  [early GitHub Actions example](https://github.com/mdadeel/Preen/blob/v0.5.0/docs/ci-workflow.yml.example)
+  is preserved in the `v0.5.0` tag (it is not an active workflow).
 - `.gitignore`, build output, `.pyc`, egg-info and virtualenvs are no longer
   committed.
 

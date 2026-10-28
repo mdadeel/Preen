@@ -14,4 +14,4 @@ override_dh_installdocs:
 	./packaging/stage_docs.sh "$(CURDIR)/debian/preen/usr/share/doc/preen"
 
 override_dh_compress:
-	dh_compress -X.md -X.example
+	dh_compress -X.md

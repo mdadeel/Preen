@@ -9,14 +9,18 @@ htmlcov/
 # Build artifacts (none of these belong in git)
 build/
 dist/
+sdist/
 .pybuild/
 *.whl
 *.deb
 *.tar.gz
+preen-*-source.zip
+Preen-*.AppImage
 .venv/
 venv/
 
 # Debian packaging output
+debian/preen/
 debian/zorin-optimizer/
 debian/.debhelper/
 debian/debhelper-build-stamp

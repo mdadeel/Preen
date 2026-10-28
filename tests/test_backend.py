@@ -1,4 +1,4 @@
-"""Regression tests for every bug found in the roast.
+"""Backend regression tests.
 
 Run with:  python3 -m unittest discover -s tests -v
       or:  pytest -q
