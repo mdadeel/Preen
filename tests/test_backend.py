@@ -275,6 +275,7 @@ class BackendTestCase(unittest.TestCase):
             lambda: ui_customization.apply_theme_mode("dark", log=self.log),
             lambda: ui_customization.install_icon_pack(str(dummy_tar), log=self.log),
             lambda: ui_customization.set_rounded_corners(True, log=self.log),
+            lambda: ui_customization.set_text_scaling(1.25, log=self.log),
             lambda: backup.export_configs(str(self.root / "export.tar.xz"), log=self.log),
             lambda: backup.import_configs(str(dummy_tar), log=self.log),
             lambda: backup.timeshift_snapshot(log=self.log),
@@ -452,6 +453,54 @@ class BackendTestCase(unittest.TestCase):
             info = dashboard.get_system_info()
         for key in ("cpu_percent", "mem_percent", "disk_percent", "os", "kernel", "uptime"):
             self.assertIn(key, info)
+
+    def test_dashboard_reports_swap_and_load_average(self):
+        info = dashboard.get_system_info()
+        for key in ("swap_percent", "swap_used", "load_average"):
+            self.assertIn(key, info)
+        float(str(info["swap_percent"]).rstrip("%"))  # numeric, percent formatted
+
+    def test_text_scaling_is_validated_simulate_gated_and_applied(self):
+        # Out of range: refused before any command runs.
+        self.assertFalse(ui_customization.set_text_scaling(5.0, log=self.log).ok)
+        self.assertEqual(self.fake.mutating_commands(), [])
+
+        # Simulate: no gsettings set is spawned.
+        utils.set_simulate(True)
+        outcome = ui_customization.set_text_scaling(1.25, log=self.log)
+        self.assertTrue(outcome.ok)
+        self.assertEqual(self.fake.mutating_commands(), [])
+        utils.set_simulate(False)
+
+        # Real run: the factor is written through gsettings.
+        outcome = ui_customization.set_text_scaling(1.15, log=self.log)
+        self.assertTrue(outcome.ok)
+        sets = [c for c in self.fake.commands()
+                if c["cmd"] == "gsettings" and c["args"][:2] == ["set", "org.gnome.desktop.interface"]]
+        self.assertTrue(any("text-scaling-factor" in c["args"] for c in sets))
+
+        # Unreadable values fall back to 1.0 instead of crashing.
+        with mock.patch.object(ui_customization, "run_cmd",
+                               return_value=utils.CommandResult(0, "not-a-number\n", "")):
+            self.assertEqual(ui_customization.get_text_scaling(), 1.0)
+
+    def test_snapshot_list_is_parsed_into_plain_dicts(self):
+        sample = (
+            "Local @ /\n"
+            "Num     Name                 Tags  Description        Date\n"
+            "0       2024-01-15_10-00-00   D     daily snapshot     2024-01-15 10:00:01\n"
+            "1       2024-01-14_10-00-00   B                        2024-01-14 10:00:01\n"
+            "junk line that must be ignored\n"
+        )
+        snapshots = backup.parse_snapshot_list(sample)
+        self.assertEqual(len(snapshots), 2)
+        self.assertEqual(snapshots[0]["name"], "2024-01-15_10-00-00")
+        self.assertEqual(snapshots[0]["tags"], "D")
+        self.assertEqual(snapshots[0]["description"], "daily snapshot")
+        self.assertEqual(snapshots[0]["date"], "2024-01-15 10:00:01")
+        self.assertEqual(snapshots[1]["description"], "")
+        self.assertEqual(snapshots[1]["date"], "2024-01-14 10:00:01")
+        self.assertEqual(backup.parse_snapshot_list(""), [])
 
 
 if __name__ == "__main__":

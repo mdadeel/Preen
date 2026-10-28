@@ -263,7 +263,7 @@ class GuiRuntimeTest(unittest.TestCase):
         repo.Gdk = SimpleNamespace(
             Screen=SimpleNamespace(get_default=lambda: object()))
         repo.Pango = SimpleNamespace(
-            EllipsizeMode=SimpleNamespace(END=3))
+            EllipsizeMode=SimpleNamespace(END=3, MIDDLE=2, START=1))
         gi.repository = repo
         self.patch = mock.patch.dict(sys.modules, {"gi": gi, "gi.repository": repo})
         self.patch.start()
@@ -292,6 +292,30 @@ class GuiRuntimeTest(unittest.TestCase):
         self.assertEqual(len(window.stack.get_children()), 9)
         self.assertIn("code", window.app_rows)
         self.assertTrue(window.log_buf.lines)
+        # New 0.4.0 surfaces.
+        self.assertEqual(set(window.stat_bars), {"cpu", "mem", "disk", "swap"})
+        self.assertTrue(window.install_source.buttons)
+        self.assertIn(window.install_source.get_active_text(), ("Flatpak", "APT"))
+        self.assertTrue(hasattr(window, "snapshot_listbox"))
+        self.assertTrue(hasattr(window, "log_filter"))
+        self.assertTrue(hasattr(window, "chk_running_only"))
+        self.assertTrue(hasattr(window, "cmb_swap_size"))
+        self.assertTrue(hasattr(window, "cmb_scaling"))
+        # Four non-selectable section headers plus nine page rows.
+        section_rows = [r for r in window.sidebar_list.get_children()
+                        if getattr(r, "page_name", False) is None]
+        self.assertEqual(len(section_rows), 4)
+
+    def test_log_filter_rebuilds_the_view(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window.log_buf.append("[ok] first line\n")
+        window.log_buf.append("[failed] second line\n")
+        entry = SimpleNamespace(get_text=lambda: "failed")
+        window.on_log_filter_changed(entry)
+        self.assertEqual(window.log_buf.filter_text, "failed")
+        entry = SimpleNamespace(get_text=lambda: "")
+        window.on_log_filter_changed(entry)
+        self.assertEqual(window.log_buf.filter_text, "")
 
     def test_handlers_run_without_exceptions(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
@@ -332,7 +356,12 @@ class GuiRuntimeTest(unittest.TestCase):
             window.on_about,
             window.on_open_logs_page,
             window.on_clear_log,
-            window._dismiss_banner,
+            window.on_clean_select_all,
+            window.on_clean_select_none,
+            window.on_refresh_snapshots,
+            window.on_refresh_services,
+            window._on_services_filter_changed,
+            window._update_clean_counter,
         ]
         for handler in handlers:
             with self.subTest(handler=handler.__name__):
@@ -349,6 +378,43 @@ class GuiRuntimeTest(unittest.TestCase):
             {"source": "apt", "id": "gnome-shell", "name": "GNOME Shell", "protected": True},
         ])
         self.assertEqual(len(window.manage_listbox.get_children()), 2)
+
+    def test_segmented_source_control_switches_and_reports(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        self.assertEqual(window.install_source.get_active_text(), "Flatpak")
+        window.install_source.set_active(1)
+        self.assertEqual(window.install_source.get_active_text(), "APT")
+        window.install_source.set_active(0)
+        self.assertEqual(window._source(), "flatpak")
+
+    def test_deep_clean_counter_tracks_selection(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_clean_scan([
+            {"key": "thumbnails", "label": "Thumbnails", "detail": "", "size": 1024, "root": False},
+            {"key": "trash", "label": "Trash", "detail": "", "size": 3 * 1024 ** 2, "root": False},
+        ])
+        self.assertIn("No items selected", window.clean_counter.get_text())
+        window.on_clean_select_all(None)
+        self.assertIn("2 selected", window.clean_counter.get_text())
+        window.on_clean_select_none(None)
+        self.assertIn("No items selected", window.clean_counter.get_text())
+
+    def test_services_filter_and_count(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_services([
+            {"unit": "running.service", "load": "loaded", "active": "active",
+             "sub": "running", "description": "Running one", "unit_state": "enabled"},
+            {"unit": "stopped.service", "load": "loaded", "active": "inactive",
+             "sub": "dead", "description": "Stopped one", "unit_state": "disabled"},
+        ])
+        self.assertEqual(len(window.services_listbox.get_children()), 2)
+        window.chk_running_only.set_active(1)
+        window._on_services_filter_changed(None)
+        visible = [r for r in window.services_listbox.get_children()
+                   if window._services_filter(r, None)]
+        self.assertEqual(len(visible), 1)
+        self.assertEqual(visible[0].unit, "running.service")
+        self.assertIn("Showing 1 of 2", window.services_count.get_text())
 
 
 if __name__ == "__main__":

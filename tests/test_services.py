@@ -67,6 +67,21 @@ class SetServiceStateTest(unittest.TestCase):
         outcome = services.set_service_state("not-a-real-unit-xyz.service", "stop")
         self.assertIsInstance(outcome.ok, bool)
 
+    def test_restart_is_supported_and_uses_proper_tense(self):
+        from unittest import mock
+        from preen_tool.backend import utils
+        self.assertIn("restart", services.ACTIONS)
+        with mock.patch.object(services.utils, "run_cmd",
+                               return_value=utils.CommandResult(0, "", "")):
+            outcome = services.set_service_state("demo.service", "restart")
+        self.assertTrue(outcome.ok)
+        self.assertIn("restarted", outcome.message)
+        self.assertNotIn("restartd", outcome.message)
+
+    def test_past_tense_covers_every_action(self):
+        for action in services.ACTIONS:
+            self.assertIn(action, services._PAST_TENSE)
+
 
 class ParseAnalyzeTest(unittest.TestCase):
     def test_full_summary(self):

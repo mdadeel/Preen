@@ -1,21 +1,22 @@
 # Contributing
 
-Thanks for helping out. This project targets Zorin OS 17/18 (Ubuntu 22.04/24.04
-base) with GTK 3 and Python 3.8+.
+Thanks for helping out. Preen targets the Ubuntu 22.04/24.04 family (Zorin OS,
+Pop!_OS, Mint and Debian) with GTK 3 and Python 3.8+.
 
 ## 1. Get set up
 
 ```bash
-git clone https://github.com/mdadeel/ZorinOS-Optimizer.git
-cd ZorinOS-Optimizer
+git clone https://github.com/mdadeel/Preen.git
+cd Preen
 make setup          # installs the system GTK/psutil packages (needs sudo)
 make check          # catalogue + doctor, no GTK required
 make test           # full regression suite, no GTK/root/network required
 make run            # launch the GTK app
 ```
 
-Prefer the `Makefile` targets over memorising commands — `make help` lists all
-of them. If you cannot run `make setup` (non-Debian host), the equivalent is:
+Prefer the `Makefile` targets over memorising commands. `make help` lists all
+of them. If you cannot run `make setup` on a non-Debian host, the equivalent
+is:
 
 ```bash
 sudo apt install python3-gi gir1.2-gtk-3.0 python3-psutil flatpak \
@@ -40,9 +41,10 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). The short version:
 
 1. **Backend must stay headless.** Never import `gi` in `backend/`; it must be
    importable over SSH and in CI.
-2. **Never touch a GTK widget from a worker thread.** Submit work with
-   `MainWindow.submit()` and update the UI in the `done=` callback, which runs
-   on the main thread.
+2. **Never touch a GTK widget from a worker thread.** Enqueue work with
+   `MainWindow.submit()` (a FIFO queue, so several reads can be enqueued at
+   once) and update the UI in the `done=` callback, which runs on the main
+   thread.
 3. **Every mutating command must pass `mutate=True`.** Otherwise Simulate mode
    will not protect it. Use `Report.run()` so exit codes are checked.
 4. **Never interpolate untrusted values into a shell string** without
@@ -63,7 +65,7 @@ Edit `preen_tool/config/apps.json`:
 {"id": "myapp", "name": "My App", "flatpak": "org.example.MyApp", "apt": "myapp"}
 ```
 
-- `id` is used by presets — keep it stable and unique.
+- `id` is used by presets, so keep it stable and unique.
 - Verify the Flatpak ID really exists on Flathub (its build repo is usually
   `github.com/flathub/<app-id>`). Runtime/SDK extensions are **not** apps.
 - Only add an `apt` name that exists in the Ubuntu/Zorin repositories.
@@ -83,12 +85,12 @@ make test
 - Keep the diff focused and explain *why*, not just *what*.
 - Include the output of `make check` and `make test`.
 - Do not commit build output, `.pyc`, `.venv`, `*.egg-info` or generated
-  `debian/` trees — they are covered by `.gitignore`.
+  `debian/` trees, since they are covered by `.gitignore`.
 - New user-facing behaviour needs a line in `CHANGELOG.md` and, if it changes
   a workflow, an update to `docs/USER_GUIDE.md`.
 
 ## 6. Reporting bugs
 
-Include the output of `zorin-optimizer --doctor`, the relevant **Logs** page
-contents (Logs → Save Log…), your Zorin OS version, and whether Simulate mode
-was on.
+Include the output of `preen --doctor`, the relevant **Logs** page contents
+(use Logs, then Save Log), your distribution and desktop version, and whether
+Simulate mode was on.

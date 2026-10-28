@@ -1,33 +1,38 @@
-# User Guide
+# Preen User Guide
 
-Zorin Optimizer installs apps, cleans up packages, and tunes your Zorin OS
-system. This guide assumes no Linux experience.
+Preen helps you set up, clean and tune a Linux desktop from one window. This
+guide assumes no Linux experience and walks through every page.
 
-> **The single most important feature is the Simulate switch.** Turn it on
-> before trying anything. Nothing changes; the Logs page shows exactly what
-> would have run.
+> The single most important control is the **Simulate** switch in the
+> top-right corner. Turn it on before trying anything: nothing changes, and
+> the Logs page shows exactly what would have run.
 
 ---
 
 ## 1. Install
 
-### Option A — Debian package (recommended)
+### Option A: Debian package (recommended)
+
+Download `preen_0.4.0_all.deb` from the
+[releases page](https://github.com/mdadeel/Preen/releases/latest), then:
 
 ```bash
-sudo apt update
-sudo apt install -y python3-gi gir1.2-gtk-3.0 python3-psutil \
-  flatpak gsettings-desktop-schemas polkitd tar xz-utils
-
-cd ZorinOS-Optimizer
-DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -us -uc --no-sign
-sudo apt install -y ../zorin-optimizer_0.2.0_all.deb
+sudo apt install ./preen_0.4.0_all.deb
+preen
 ```
 
-Launch it from the app menu (**Zorin Optimizer**) or run `zorin-optimizer`.
-
-### Option B — Run from a source checkout
+### Option B: AppImage (no installation)
 
 ```bash
+chmod +x Preen-0.4.0-x86_64.AppImage
+./Preen-0.4.0-x86_64.AppImage
+```
+
+### Option C: Run from a source checkout
+
+```bash
+sudo apt install -y python3-gi gir1.2-gtk-3.0 python3-psutil \
+  flatpak gsettings-desktop-schemas polkitd tar xz-utils
 python3 -m pip install -e .
 python3 -m preen_tool.app
 ```
@@ -38,27 +43,27 @@ Install these only if you want the matching features:
 
 ```bash
 sudo apt install power-profiles-daemon systemd-zram-generator timeshift
-flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak remote-add --if-not-exists flathub \
+  https://flathub.org/repo/flathub.flatpakrepo
 ```
 
-Missing tools are **not fatal**. The Dashboard → **Tool availability** panel
-tells you exactly which features are unavailable, and `--doctor` prints the
-same information in a terminal.
+Missing tools are never fatal. The Dashboard tool panel explains which
+features are unavailable, and `preen --doctor` prints the same report in a
+terminal.
 
 ---
 
 ## 2. Your first five minutes
 
-1. **Launch the app.** You land on the **Dashboard**.
-2. **Read Tool availability.** If something is missing, install it or accept
-   that the related feature will be greyed out / report an error.
-3. **Turn on Simulate** (top-right switch). An amber banner confirms it.
-4. Go to **Install Apps**, search for something (e.g. `vlc`), tick it and
+1. Launch Preen. You land on the **Dashboard**.
+2. Read the **Tool availability** panel and install anything you need.
+3. Turn on **Simulate**. An amber pill appears in the window.
+4. Open **Install Apps**, search for something such as `vlc`, tick it and
    press **Install Selected**.
-5. Open **Logs**. You will see `$ flatpak install ...` (or the APT command)
-   with `[simulate] would run:` — proof that nothing was installed.
-6. When you are happy, switch Simulate **off** and repeat the action for real.
-   You will be asked for your password once per batch via polkit.
+5. Open **Logs**. You will see the exact command prefixed with
+   `[simulate] would run:`, proof that nothing was installed.
+6. When you are happy, switch Simulate off and repeat the action for real.
+   You enter your password once per batch through polkit.
 
 ---
 
@@ -66,109 +71,132 @@ same information in a terminal.
 
 ### Dashboard
 
-- **Getting started** — the three-step safe workflow.
-- **System at a glance** — CPU, RAM, disk, OS, kernel, uptime, power profile.
-  Refreshes automatically (configurable in Preferences).
-- **Tool availability** — plain-language warnings for missing `flatpak`,
-  `apt-get`, `pkexec`, `gsettings`, `powerprofilesctl` or `timeshift`.
-- **Refresh Status**, **Run Cleanup Now**, **Open Logs**.
+- A hero card with your operating system, kernel, uptime, power profile and
+  load average.
+- Four live metric cards: CPU, memory, disk and swap, each with a progress
+  bar in its own accent colour. They refresh automatically, and the interval
+  is configurable in Preferences.
+- A three-step getting-started checklist.
+- A **Tool availability** panel with plain-language warnings.
+- Shortcuts: **Refresh Status**, **Run Cleanup Now** and **Open Logs**.
 
 ### Install Apps
 
-- **Preferred source** (`Flatpak` or `APT`) is a preference, not a restriction.
-  If an app has no package for that source, the other one is used and the
-  fallback is written to Logs.
-- The badge next to each app shows which sources are available
-  (`Flatpak`, `APT`, or `Flatpak + APT`). Hover for extra notes.
-- **Status** shows `Installed (…)` / `Not installed`. Press **Refresh Status**
-  after installing anything outside the app.
-- **Search**, **Select all**, **Clear**, and **Quick picks** presets make large
-  selections quick. The counter shows how many apps are ticked.
-- **Install Selected** (green) is the primary action.
-  **Uninstall Selected** (red) asks for confirmation.
+- Pick a preferred source with the segmented **Flatpak / APT** switch. It is
+  a preference, not a restriction: when an app is missing from one source,
+  the other is used automatically and the fallback is logged.
+- The badge next to each app shows the available source or sources. Hover
+  for notes.
+- Search, **Select all**, **Clear** and **Quick picks** presets make large
+  selections fast. The counter shows what is ticked.
+- **Install Selected** is the primary action. **Update Selected**,
+  **Update All** and **Uninstall Selected** share the same list, and
+  uninstall always asks for confirmation.
 
-> Uninstall acts on the format that is actually installed, not just the
-> selected source.
+### Manage Apps
 
-### Manage Installed Apps
-
-- Lists Flatpak apps and **graphical** APT applications (packages owning a
-  `.desktop` launcher) — not thousands of libraries.
+- Lists Flatpak apps and graphical APT applications (packages that own a
+  `.desktop` launcher), never thousands of libraries.
 - Search, then **Update Selected** or **Uninstall Selected**.
-- Rows marked **🔒 protected** are core desktop packages. Their checkboxes are
-  disabled so you cannot break your session.
+- Rows marked **protected** are core desktop packages. Their checkboxes are
+  disabled so a cleanup cannot break your session.
+
+### Deep Clean
+
+1. Press **Scan Now**. Every item shows the space it reclaims before
+   anything is deleted.
+2. Tick what you want, or use **Select all** and **Clear**. The counter
+   shows the selected total.
+3. Press **Clean Selected**. Root items share one polkit prompt.
+
+Items include the APT package cache, the systemd journal (vacuumed to keep
+the newest 100 MB), thumbnails, the pip cache and the trash. Thumbnails are
+regenerated automatically.
 
 ### Optimize System
 
-- **Cleanup & desktop behaviour** — remove unused packages, disable GNOME
-  animations, manage startup apps.
-- **Memory & power** — 2 GB swapfile, ZRAM, power profile.
-- Press **Apply Changes**. **Only settings you changed are applied** — pressing
-  the button with nothing ticked does nothing. This is deliberate: it will not
-  delete a swapfile you created earlier.
-- **Reload Current Settings** re-reads the actual state of your machine.
+- **Cleanup and desktop behaviour:** autoremove and autoclean packages,
+  remove unused Flatpak runtimes, disable GNOME animations, and manage
+  startup applications through a dedicated dialog.
+- **Memory and power:** create or remove a swapfile with a selectable size
+  (1, 2, 4 or 8 GB), enable ZRAM, and choose a power profile.
+- Only settings that differ from the detected baseline are applied, so
+  pressing apply with no changes does nothing.
+
+### Services
+
+- **Boot time** card with the firmware, loader, kernel and userspace
+  breakdown plus the slowest units.
+- Searchable list of systemd services with status chips: green for running,
+  red for failed, grey for stopped. Use **Running only** to shrink the list,
+  and the counter shows how many rows match.
+- **Start**, **Stop**, **Restart**, **Enable** and **Disable** act on the
+  selected unit. Stop, restart and disable ask for confirmation, and unit
+  names are validated before they reach `systemctl`.
 
 ### Customize Look
 
-- **Appearance**: Light / Dark. Only GTK themes that exist on your system are
-  applied; the GNOME `color-scheme` is always set.
-- **Rounded corners** adds a clearly-marked, reversible block to
-  `~/.config/gtk-3.0/gtk.css`. Restart apps to see it.
-- **Install Icon Pack…** accepts `.tar.xz` / `.tar.gz` archives containing an
-  `index.theme`. Unsafe archive entries are refused.
+- Switch between **Light** and **Dark**, or apply the theme immediately.
+- Choose a **Text size** preset (85% to 125%) for desktop-wide scaling.
+- Install an icon pack from a `.tar.xz` or `.tar.gz` archive. Unsafe archive
+  entries are refused.
+- Add reversible rounded corners through a guarded block in
+  `~/.config/gtk-3.0/gtk.css`.
 
 ### Backup & Restore
 
-- **Create Snapshot** / **Open Timeshift** — requires Timeshift to be installed.
-- **Export Settings…** saves `~/.config` to a `.tar.xz` archive.
-- **Import Settings…** restores it. The archive is inspected first: absolute
-  paths, `../` traversal and links are refused. **Import overwrites matching
-  files — export first.**
+- **Create Snapshot** requests a Timeshift snapshot, **Open Timeshift**
+  launches its own window, and **Refresh List** shows the snapshots already
+  saved on this machine.
+- **Export Settings** saves `~/.config` to a `.tar.xz` archive, skipping
+  caches and links.
+- **Import Settings** restores an archive inside `~/.config` and nowhere
+  else. Import overwrites matching files, so export first if you are unsure.
 
 ### Logs
 
-- Every command, its exit code, stdout/stderr and any error are recorded here.
-- **Save Log…**, **Clear**, and an **Auto-scroll** switch.
-- Attach a saved log when reporting a problem.
+- Every command, exit code, stdout fragment and error is recorded here.
+- Use **Filter log** to find a line, and the **Auto-scroll** switch to hold
+  a position while new lines arrive.
+- **Save Log** writes the full history to a text file you can attach to a
+  support request.
 
 ---
 
-## 4. Preferences & Help
+## 4. Preferences and Help
 
-**Preferences** (header bar) saves to
-`~/.config/zorin-optimizer/settings.json`:
+Open the menu button in the header bar to find Preferences, Help and About.
+Preferences are saved to `~/.config/preen/settings.json`.
 
 | Setting | Default | Meaning |
 |---|---|---|
 | Preferred package source | Flatpak | Pre-selected source on the Install page |
-| Dashboard auto-refresh | 15 s | `Off` disables the periodic refresh |
-| Start in Simulate mode | Off | Safer default for shared machines |
-| Confirm destructive actions | On | Ask before uninstall / restore |
+| Dashboard auto-refresh | 15 s | `Off` stops the periodic refresh |
+| Page shown on startup | Dashboard | Any sidebar page can open first |
+| Start in Simulate mode | Off | Safe default for shared machines |
+| Confirm destructive actions | On | Ask before uninstall or restore |
 | Show dependency warnings | On | Startup banner when a tool is missing |
 
-Source and safety options apply immediately; startup and refresh options apply
-after a restart. If the file is corrupted it is silently reset to defaults —
-the app will not crash.
-
-**Help** shows the quick-start summary. **About** shows the version, licence
-and project link.
+Source and safety options apply immediately. Startup and refresh options
+apply after a restart. A corrupted settings file is reset to defaults
+instead of crashing the app.
 
 ---
 
 ## 5. Command line reference
 
 ```bash
-zorin-optimizer                    # start the GUI
-zorin-optimizer --simulate         # start with dry-run enabled
-zorin-optimizer --doctor           # check installation and tools (no GTK)
-zorin-optimizer --doctor --json    # same, machine-readable
-zorin-optimizer --check-catalog    # validate apps.json / presets.json
-zorin-optimizer --version
+preen                         # start the GUI
+preen --simulate              # start with dry-run enabled
+preen --doctor                # check installation and tools (no GTK)
+preen --doctor --json         # machine-readable report
+preen --check-catalog         # validate apps.json and presets.json
+preen --version
 ```
 
-`--doctor` exits non-zero only if the catalogue is invalid, the Python version
-is too old, or the installed package layout is broken. Missing external tools
-are reported as notes/warnings.
+`--doctor` exits non-zero only when the catalogue is invalid, Python is too
+old or the installed package layout is broken. Missing external tools are
+reported as warnings.
 
 ---
 
@@ -176,46 +204,38 @@ are reported as notes/warnings.
 
 | Symptom | What to do |
 |---|---|
-| App will not start / `python3-gi` error | `sudo apt install python3-gi gir1.2-gtk-3.0 python3-psutil`; then run `--doctor`. |
-| "pkexec is required" | Install polkit: `sudo apt install polkitd` (or `policykit-1` on older releases). |
-| Flatpak app not found | Check the ID on Flathub and `--check-catalog`. Also add the flathub remote (see §1). |
-| APT package not found | Your repos may not have it (e.g. Timeshift needs a PPA). The Logs page shows the exact `apt-get` error. |
+| App will not start or a `python3-gi` error appears | Install `python3-gi gir1.2-gtk-3.0 python3-psutil`, then run `preen --doctor`. |
+| "pkexec is required" | Install polkit with `sudo apt install polkitd` (or `policykit-1` on older releases). |
+| Flatpak app not found | Check the ID on Flathub and run `preen --check-catalog`. Add the flathub remote if needed. |
+| APT package not found | Your repositories may not carry it. The Logs page shows the exact `apt-get` error. |
 | Power profile does nothing | Install `power-profiles-daemon` and reboot. |
-| Swapfile / ZRAM change failed | The Logs page shows the failing command; check that `systemd-zram-generator` is installed. |
-| Theme did not change | GNOME 42+ uses `color-scheme`; some apps need a restart. Only installed GTK themes are applied. |
-| An action failed | A red banner appears at the top. Open **Logs** for the full stderr, then **Save Log…**. |
-| I want to undo a look change | Turn off **Rounded corners** and apply; the CSS block is removed. Re-select Light/Dark. |
-| Preferences not applying | Restart the app — that is stated in the dialog. |
+| Swapfile or ZRAM change failed | Open Logs for the failing command and check that `systemd-zram-generator` is installed. |
+| Theme did not change | GNOME 42 and newer use `color-scheme`. Some apps need a restart, and only installed GTK themes are applied. |
+| An action failed | Read the banner and open Logs for the full stderr, then use **Save Log**. |
+| I want to undo a look change | Switch off rounded corners and apply, then re-select the Light or Dark theme. |
 
 ---
 
 ## 7. FAQ
 
 **Is Simulate mode really safe?**
-Yes. All 19 mutating actions are gated by it, including file writes, gsettings,
-icon packs and config import. Read-only checks still run so statuses stay
-accurate. A test calls every one of them with Simulate on and asserts no
-mutating command is spawned and no file is created.
+Yes. Every mutating operation, including file writes, gsettings, icon packs,
+archives and service changes, is gated by it. A test calls each one with
+Simulate on and asserts that no command is spawned and no file is written.
 
 **Will it remove important system packages?**
-No. Core packages (`gnome-shell`, `apt`, `python3`, …) are marked 🔒 protected
-and their checkboxes are disabled. Scanner rows are also validated with a
-strict pattern before becoming command arguments.
+No. Core packages such as `gnome-shell`, `apt` and `python3` are protected,
+their checkboxes are disabled, and scanner rows pass strict validation
+before becoming command arguments.
 
 **Why does it ask for my password?**
 APT, `/etc/fstab` and systemd changes need root. Commands are batched so you
-get **one** polkit prompt per operation, not one per package.
+see one polkit prompt per operation, not one per package.
 
 **Where are my settings stored?**
-`~/.config/zorin-optimizer/settings.json`. Your exported config archives are
-ordinary `.tar.xz` files you choose the location of.
+In `~/.config/preen/settings.json`. Exported config archives go wherever you
+choose in the file chooser.
 
 **Does it phone home?**
-No. The only network activity is what `apt-get` or `flatpak` does when you ask
-them to install something.
-
----
-
-Need more? See [ARCHITECTURE.md](ARCHITECTURE.md) for developers,
-[CONTRIBUTING.md](../CONTRIBUTING.md) to help out, or
-[ROAST.md](ROAST.md) for the full list of bugs that used to be here.
+No. The only network activity is what `apt-get` or `flatpak` performs when
+you ask them to install or update something.

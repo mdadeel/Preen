@@ -255,7 +255,7 @@ def run_actions(actions, log=None) -> "Outcome":
         if isinstance(result, Outcome):
             outcomes.append(result)
     if not actions:
-        return ok("No changes requested — everything already matches.")
+        return ok("No changes requested. Everything already matches.")
     failed = [o for o in outcomes if not o.ok]
     if failed:
         details = ["{}: {}".format(o.message, "; ".join(o.details)) for o in failed]

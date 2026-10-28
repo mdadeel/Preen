@@ -28,3 +28,4 @@ debian/*.debhelper.log
 # Local config / secrets
 .env
 *.log
+.zcode/

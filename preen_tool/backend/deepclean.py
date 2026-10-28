@@ -14,10 +14,28 @@ from typing import Dict, List
 from . import utils
 
 # The directories a clean action may touch, keyed by scan item. Nothing else
-# is ever deleted — new cleanables must be added here explicitly.
+# is ever deleted, new cleanables must be added here explicitly.
 USER_CLEAN_PATHS: Dict[str, str] = {
     "thumbnails": os.path.expanduser("~/.cache/thumbnails"),
+    "pip_cache": os.path.expanduser("~/.cache/pip"),
     "trash": os.path.expanduser("~/.local/share/Trash/files"),
+}
+
+# Human-facing copy for the user-level cleanables, kept next to the paths so
+# the scan list and the clean list can never disagree.
+USER_CLEAN_INFO: Dict[str, Dict[str, str]] = {
+    "thumbnails": {
+        "label": "Thumbnail cache",
+        "detail": "Image and file previews; they are regenerated automatically.",
+    },
+    "pip_cache": {
+        "label": "Python package cache (pip)",
+        "detail": "Downloaded wheels and build artefacts kept by pip.",
+    },
+    "trash": {
+        "label": "Empty trash",
+        "detail": "Files moved to the wastebasket.",
+    },
 }
 
 _JOURNAL_RE = re.compile(
@@ -76,27 +94,29 @@ def scan_cleanable() -> List[dict]:
     items = [
         {"key": "apt_cache",
          "label": "APT package cache",
-         "detail": "/var/cache/apt/archives — downloaded .deb files kept after install",
+         "detail": "/var/cache/apt/archives. Downloaded .deb files kept after install",
          "size": _apt_cache_size(), "root": True},
         {"key": "journal",
          "label": "System journal logs",
          "detail": "systemd logs; cleaning keeps the most recent 100 MB",
          "size": _journal_size(), "root": True},
-        {"key": "thumbnails",
-         "label": "Thumbnail cache",
-         "detail": USER_CLEAN_PATHS["thumbnails"] + " — regenerated automatically",
-         "size": du_size(USER_CLEAN_PATHS["thumbnails"]), "root": False},
-        {"key": "trash",
-         "label": "Empty trash",
-         "detail": USER_CLEAN_PATHS["trash"] + " — files moved to the wastebasket",
-         "size": du_size(USER_CLEAN_PATHS["trash"]), "root": False},
     ]
+    items.extend(
+        {
+            "key": key,
+            "label": info["label"],
+            "detail": USER_CLEAN_PATHS[key] + ". " + info["detail"],
+            "size": du_size(USER_CLEAN_PATHS[key]),
+            "root": False,
+        }
+        for key, info in USER_CLEAN_INFO.items()
+    )
     items.sort(key=lambda item: item["size"], reverse=True)
     return items
 
 
 # ---------------------------------------------------------------------------
-# Cleaning actions (mutating — gated by Simulate mode)
+# Cleaning actions (mutating, gated by Simulate mode)
 # ---------------------------------------------------------------------------
 def clean_user_paths(keys: List[str], log=None) -> utils.Outcome:
     """Delete the *contents* of the selected user-level cleanable dirs."""
@@ -148,7 +168,7 @@ def vacuum_journal(log=None) -> utils.Outcome:
                          "Could not vacuum the system journal")
 
 
-#: Keys understood by :func:`clean_user_paths` — shared with the GUI so both
+#: Keys understood by :func:`clean_user_paths`, shared with the GUI so both
 #: sides agree on which items are file-level (no pkexec) cleans.
 USER_KEYS = tuple(USER_CLEAN_PATHS)
 

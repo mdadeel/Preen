@@ -4,10 +4,60 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-27
+
+A macOS-inspired design pass, a queue-based task runner that no longer drops
+background work, and a round of feature upgrades across every page.
+
+### Added
+
+- **Task queue**: background reads and actions now queue in FIFO order
+  instead of being rejected while another task runs. Startup reads (boot
+  info, service list, cleanable scan, Timeshift snapshots and preferences)
+  all complete reliably.
+- **Dashboard**: swap usage card with its own accent colour, plus load
+  average in the system summary line.
+- **Deep Clean**: pip cache is now a cleanable item, alongside select-all /
+  clear buttons and a live counter showing how many items are ticked and how
+  much space they reclaim.
+- **Services**: Restart action, a "Running only" filter, a visible
+  result count, and correct status colours (green running, red failed,
+  grey stopped).
+- **Customize Look**: desktop text scaling factor with four presets, applied
+  through gsettings and gated by Simulate mode like every other change.
+- **Optimize System**: swapfile size is now selectable (1, 2, 4 or 8 GB)
+  instead of a fixed 2 GB.
+- **Backup & Restore**: read-only Timeshift snapshot list with a refresh
+  button.
+- **Logs**: filter entry that shows only matching lines while keeping the
+  full history in memory.
+- **Install Apps**: catalogue grows from 45 to 55 curated apps across 10
+  categories, with a new "Flatpak Toolkit" preset (Flatseal, Extension
+  Manager, Mission Center, Warehouse and more).
+- **Preferences**: choose which page opens on startup.
+
+### Changed
+
+- macOS-style visual refresh: grouped sidebar sections with small caps
+  headers, a segmented source switch replacing the dropdown, softer frosted
+  cards, an SF-like font stack, rounded 16 px surfaces and refined pill
+  buttons.
+- Service actions now report correct grammar ("started", "stopped",
+  "restarted") instead of malformed strings.
+- User-facing strings no longer use em dashes.
+- About dialog and Debian packaging point at the current Preen repository.
+
+### Fixed
+
+- Queued `submit()` calls were silently rejected while a task was running,
+  which left several pages unpopulated at startup.
+- Manage Apps empty state did not explain a search with no matches.
+- Snapshot and other startup refreshes now survive being enqueued together.
+
 ## [0.3.0] - 2026-10-28
 
-Rebrand to **Preen** — system setup, deep cleaning and tuning for Linux
-(formerly "Zorin Optimizer") — plus two new feature pages and a visual pass.
+Rebrand to **Preen**, system setup, deep cleaning and tuning for Linux
+(formerly "Zorin Optimizer"), plus two new feature pages and a visual pass.
 
 ### Added
 
@@ -35,7 +85,7 @@ Rebrand to **Preen** — system setup, deep cleaning and tuning for Linux
 
 ### Fixed
 
-- The GUI crashed on startup on systems shipping Gdk 4.0 — `Gdk` is now
+- The GUI crashed on startup on systems shipping Gdk 4.0, `Gdk` is now
   pinned to 3.0 before import.
 
 ## [0.2.0] - 2026-10-27
@@ -88,7 +138,7 @@ the previous release is in [`docs/ROAST.md`](docs/ROAST.md).
   `docs/archive/` for historical documents.
 - 36 regression tests with a fake Linux userspace and a fake GTK;
   `docs/ci-workflow.yml.example` for GitHub Actions.
-- `.gitignore` — build output, `.pyc`, egg-info and virtualenvs are no longer
+- `.gitignore`, build output, `.pyc`, egg-info and virtualenvs are no longer
   committed.
 
 ### Changed

@@ -41,5 +41,5 @@ deb: check test  ## Build the Debian package
 	DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -us -uc --no-sign
 
 clean:  ## Remove generated build artefacts
-	rm -rf build dist .pybuild .pytest_cache *.egg-info zorin_optimizer.egg-info
+	rm -rf build dist .pybuild .pytest_cache *.egg-info preen.egg-info
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

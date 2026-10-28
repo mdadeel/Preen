@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import tarfile
 import time
 from typing import Optional
+
+_SNAPSHOT_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}$")
 
 from . import utils
 from .utils import Outcome, fail, has_command, is_simulate, ok, run_cmd
@@ -117,6 +120,48 @@ def inspect_archive(src_tar: str):
 # ---------------------------------------------------------------------------
 # Timeshift
 # ---------------------------------------------------------------------------
+def parse_snapshot_list(text: str):
+    """Parse ``timeshift --list`` rows into plain dicts.
+
+    Rows look like ``0  2024-01-15_10-00-00  D  daily snapshot  2024-01-15 10:00:01``.
+    The date always occupies the last two tokens; the description is whatever
+    sits between the tags and the date and may be empty.
+    """
+    snapshots = []
+    for line in (text or "").splitlines():
+        fields = line.split()
+        if len(fields) < 4 or not fields[0].isdigit():
+            continue
+        num, name, tags = fields[0], fields[1], fields[2]
+        tail = fields[3:]
+        description, date = "", ""
+        # The date always occupies the final two tokens (date then time),
+        # so peel it off from the right and keep every word of the
+        # description in the middle.
+        if len(tail) >= 2 and _SNAPSHOT_DATE_RE.match(" ".join(tail[-2:])):
+            date = " ".join(tail[-2:])
+            description = " ".join(tail[:-2])
+        else:
+            description = " ".join(tail)
+        snapshots.append({
+            "num": num,
+            "name": name,
+            "tags": tags,
+            "description": description,
+            "date": date,
+        })
+    return snapshots
+
+
+def list_snapshots(log=None):
+    """Read-only Timeshift snapshot list; empty when Timeshift is absent."""
+    if not has_command("timeshift"):
+        return []
+    result = run_cmd(["timeshift", "--list"], log=log, timeout=utils.DEFAULT_TIMEOUT)
+    if not result.ok:
+        return []
+    return parse_snapshot_list(result.out)
+
 def timeshift_snapshot(comment: str = None, log=None) -> Outcome:
     if not has_command("timeshift"):
         return fail("Timeshift is not installed. Install it first (sudo apt install timeshift).")

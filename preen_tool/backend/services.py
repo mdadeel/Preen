@@ -11,10 +11,17 @@ from typing import Dict, List, Tuple
 
 from . import utils
 
-#: Only well-formed unit names ever reach systemctl — defence in depth on top
+#: Only well-formed unit names ever reach systemctl, defence in depth on top
 #: of never passing user input through a shell.
 _UNIT_RE = re.compile(r"^[A-Za-z0-9@._\-\\]+\.service$")
-ACTIONS = ("enable", "disable", "start", "stop")
+ACTIONS = ("enable", "disable", "start", "stop", "restart")
+_PAST_TENSE = {
+    "enable": "enabled",
+    "disable": "disabled",
+    "start": "started",
+    "stop": "stopped",
+    "restart": "restarted",
+}
 
 
 def valid_unit_name(unit: str) -> bool:
@@ -80,7 +87,7 @@ def set_service_state(unit: str, action: str, log=None) -> utils.Outcome:
         return utils.fail("Not a valid unit name: {}".format(unit))
     report = utils.Report(log)
     report.run(["systemctl", action, unit], use_pkexec=True, mutate=True)
-    return report.finish("Service {}: {}d.".format(unit, action),
+    return report.finish("Service {} {}.".format(unit, _PAST_TENSE[action]),
                          "Could not {} {}".format(action, unit))
 
 
