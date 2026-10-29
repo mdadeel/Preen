@@ -1,327 +1,215 @@
-# Preen
+# Preen — Linux system utility for apps, cleanup and maintenance
 
-**System setup, deep cleaning and tuning for Linux, in one calm window.**
+Preen is an open-source Linux desktop utility for managing APT and Flatpak
+applications, reviewing disk cleanup, inspecting systemd services and backing up
+user configuration. It brings these tools together in a native Python and GTK 3
+interface for Ubuntu-family and Debian-based desktops.
 
-Preen is a small GTK 3 desktop app that installs and removes APT and Flatpak
-apps, reclaims disk space with an honest size preview, manages systemd
-services and boot time, tunes power, swap and ZRAM, customises the look of
-your desktop, and backs up your settings. Every action is protected by a
-**Simulate switch** that previews the exact commands first, so nothing
-changes until you say so.
-
-- Native Python 3 and GTK 3, no daemon, no telemetry
-- One polkit prompt per batch instead of one password prompt per package
-- Core desktop packages are locked so a cleanup cannot break your session
-- Works on Ubuntu, Zorin OS, Debian, Pop!_OS, Linux Mint and similar systems
-
----
-
-## Table of contents
-
-1. [About Preen](#about-preen)
-2. [Screenshots](#screenshots)
-3. [Features at a glance](#features-at-a-glance)
-4. [Installation](#installation)
-5. [First five minutes](#first-five-minutes)
-6. [Command line](#command-line)
-7. [Development](#development)
-8. [Safety model](#safety-model)
-9. [Project layout](#project-layout)
-10. [Contributing and licence](#contributing-and-licence)
-
----
+**Start here:** [Run from source](#run-from-source) · [User guide](docs/USER_GUIDE.md) ·
+[Privacy](PRIVACY.md) · [Security](SECURITY.md) ·
+[Releases](https://github.com/mdadeel/Preen/releases)
 
 ## Screenshots
 
-| | |
+![Preen dashboard showing system information, resource usage and maintenance shortcuts](docs/images/preen-dashboard.png)
+
+![Preen Manage Apps page with a searchable list of installed applications](docs/images/preen-manage-apps.png)
+
+These user-provided screenshots show one example system. The operating system,
+resource readings, installed apps and available actions vary by machine; they
+are not live data or guarantees of compatibility.
+
+![Preen AppImages page listing downloaded and installed AppImage files with install and uninstall actions](docs/images/preen-appimages.png)
+
+*AppImages (new in 0.5.0) — install downloads with a menu entry, update by
+reinstalling, and drag-and-drop `.AppImage` or `.deb` files onto the window.*
+
+## What can Preen do?
+
+| Area | What is available in the current source |
 |---|---|
-| ![Dashboard](screenshots/01_dashboard.png) | ![Install Apps](screenshots/02_install_apps.png) |
-| *Dashboard* | *Install Apps* |
-| ![Manage Apps](screenshots/03_manage_apps.png) | ![AppImages](screenshots/07_appimages.png) |
-| *Manage Apps* | *AppImages — install downloaded AppImages, drag-and-drop, update by reinstalling* |
-| ![Deep Clean](screenshots/04_deep_clean.png) | ![Services](screenshots/06_services.png) |
-| *Deep Clean* | *Services & Boot* |
+| **Dashboard** | Review system information, resource usage and missing tools; open common maintenance pages. |
+| **Install Apps** | Search a curated catalogue, select APT or Flatpak, use presets and install or update apps. A source fallback is available where the catalogue provides one. |
+| **Manage Apps** | Search installed Flatpaks and graphical APT packages, select apps for removal and see protected package rows. |
+| **AppImages** | Install downloaded `.AppImage` files with a menu entry and icon; installing an installed app again updates it, and drag-and-drop also accepts `.deb` files. |
+| **Deep Clean** | Review selected cache, trash and journal cleanup targets with measured sizes or estimates before confirming deletion. |
+| **Optimize System** | Manage supported power profiles, animations, startup entries, swap and ZRAM settings when their system tools are available. |
+| **Services** | Inspect systemd services, filter the list and request supported service actions; stop, disable and restart require confirmation. |
+| **Backup & Restore** | Export and restore user configuration archives; use Timeshift where installed. |
+| **Customize Look** | Choose Preen's own light, dark or system appearance. Separate, confirmed controls can also change desktop text scaling, icon themes and GTK 3 corner styling. |
+| **Logs** | Filter, select, copy, clear and save diagnostic output; command failures include exit details. |
 
----
+Availability depends on the distribution, installed tools, permissions and the
+selected operation. See the [user guide](docs/USER_GUIDE.md) for details and
+[product roadmap](docs/PRODUCT_ROADMAP.md) for ideas that are **not yet
+implemented**, including the proposed folder organizer.
 
-## About Preen
+## Use maintenance tools carefully
 
-Linux desktops ship with dozens of small maintenance tasks scattered across
-the terminal: removing old packages, vacuuming logs, checking which services
-slow down boot, adding a swapfile, or simply installing the same handful of
-apps on a fresh machine. Preen collects those jobs into a single, friendly
-interface built for people who want the power of the terminal without
-memorising it.
+1. Back up important data and review the affected packages, files or services.
+2. Turn on **Simulate** before trying a maintenance action. Supported system
+   changes are previewed instead of applied; inspect **Logs** for the result.
+3. Confirm the operation and turn Simulate off only when you are ready to make
+   the real change. Some actions require authorization through polkit.
 
-Three principles guide every screen.
+Simulate is **not a no-write sandbox**: read-only checks still run, saving
+preferences or a log can write files, and loading old settings may migrate the
+legacy configuration directory. A simulated command does not reveal every
+package-manager dependency change. Cleanup sizes are measurements or estimates,
+not a promise of space reclaimed. Preen's direct app-uninstall paths block a
+defined set of essential APT package names, but APT autoremove and dependency
+changes can affect other packages. No list can guarantee an operation is
+risk-free. Read the [safety and security guidance](SECURITY.md) first.
 
-1. **Show before you change.** Turn on Simulate and every action is written
-   to the Logs page as the exact command that would run, with nothing
-   executed. The same switch covers package installs, deletions, gsettings,
-   icon packs, archives and service changes.
-2. **Protect the system, not just the user.** Essential packages such as
-   `gnome-shell`, `apt` and `systemd` cannot be bulk-removed, service names
-   are validated before they reach `systemctl`, and archives are inspected
-   for path traversal, links and device nodes before extraction.
-3. **Tell the truth.** Deep Clean measures each item in bytes before you
-   delete it, every command keeps its exit code, and failures appear in a
-   dismissible banner plus the log instead of failing silently.
+## Requirements
 
-The app is lightweight by design. It runs only while open, speaks to the
-system tools already installed on your machine, and its AppImage weighs
-around 1 MB.
+- Linux with Python **3.8 or newer**, GTK 3 and PyGObject. A graphical desktop is
+  required for the GUI; the doctor and catalogue checks are headless.
+- APT/dpkg features target Debian and Ubuntu-family distributions, including
+  derivatives such as Zorin OS, Linux Mint and Pop!_OS. Other Linux systems may
+  run parts of Preen but APT-specific features need APT/dpkg and have not been
+  established as universally supported.
+- Flatpak, polkit, systemd, GNOME settings, Timeshift, power profiles and ZRAM
+  tooling are needed only for the features that use them. Feature and desktop
+  availability varies; run the doctor to see what is missing.
 
----
+### Run from source
 
-## Features at a glance
-
-| Page | What you can do |
-|---|---|
-| **Dashboard** | Live CPU, memory, disk and swap cards, load average, kernel, uptime and power profile, plus a plain-language report of missing optional tools |
-| **Install Apps** | 55 curated apps across 10 categories with search, source badges, status badges, quick-pick presets and bulk install, update and remove actions |
-| **Manage Apps** | Installed Flatpak apps and graphical APT packages in one searchable list, with protected core packages clearly marked |
-| **AppImages** | Install `.AppImage` files from your Downloads folder (or drag them onto the window) with a menu entry and icon; installing an installed app again updates it, and drag-and-drop also accepts `.deb` files |
-| **Deep Clean** | Sized scan of the APT cache, systemd journal, thumbnails, pip cache and trash, with select-all and a running total of reclaimable space |
-| **Optimize System** | Package cleanup, GNOME animations, startup apps, power profile, swapfile size (1 to 8 GB) and ZRAM, applied only where settings actually changed |
-| **Services** | Boot-time breakdown, slowest units, and start, stop, restart, enable and disable for systemd services, with a running-only filter |
-| **Customize Look** | Preen-only Follow system/Light/Dark appearance, plus clearly separated and confirmed desktop-wide text scaling, icon packs and reversible GTK corner CSS |
-| **Backup & Restore** | Timeshift snapshots with a saved-snapshot list, plus safe export and import of `~/.config` |
-| **Logs** | Every command, exit code and error, with a text filter, auto-scroll toggle and one-click save |
-
-The header bar holds the **Simulate** switch and a compact menu for
-Preferences, Help and About. Preferences live in
-`~/.config/preen/settings.json`, and settings from older 0.2.x releases are
-migrated automatically.
-
----
-
-## Installation
-
-### Option 1: Debian package (recommended for Ubuntu, Zorin OS and Debian)
-
-Download `preen_0.5.0_all.deb` from the
-[latest release](https://github.com/mdadeel/Preen/releases/latest), then run:
+On a Debian/Ubuntu-family system, install the Python/GTK packages, clone the
+repository and start with Simulate enabled:
 
 ```bash
-sudo apt install ./preen_0.5.0_all.deb
-preen
-```
-
-`apt` resolves the required GTK and psutil dependencies for you. Launch it
-from the app menu as **Preen**, or type `preen` in a terminal.
-
-### Option 2: AppImage (any distribution)
-
-Download `Preen-0.5.0-x86_64.AppImage` from the
-[releases page](https://github.com/mdadeel/Preen/releases/latest). It uses the
-Python and GTK already on your system, so the file stays small.
-
-Run it directly, no installation:
-
-```bash
-chmod +x Preen-0.5.0-x86_64.AppImage
-./Preen-0.5.0-x86_64.AppImage
-```
-
-Or install it for real — a menu entry, launcher icon and a matching
-uninstaller:
-
-```bash
-./packaging/install_appimage.sh Preen-0.5.0-x86_64.AppImage
-# or, from a checkout: make install-appimage
-```
-
-The default is a per-user install under `~/.local/share` (no root needed);
-pass `--system` to install into `/opt/preen` and `/usr/share` instead
-(`sudo ./packaging/install_appimage.sh Preen-0.5.0-x86_64.AppImage --system`).
-
-Uninstall when you are done:
-
-```bash
-./packaging/uninstall_appimage.sh            # per-user install
-sudo ./packaging/uninstall_appimage.sh --system
-# add --purge to also delete Preen's settings in ~/.config/preen
-```
-
-### Option 3: Python wheel
-
-If you prefer pip and already have the GTK bindings installed:
-
-```bash
-pip install preen-0.5.0-py3-none-any.whl
-preen
-```
-
-### Option 4: Run from a source checkout
-
-```bash
-# System dependencies (Debian and Ubuntu family)
 sudo apt update
-sudo apt install -y python3-gi gir1.2-gtk-3.0 python3-psutil \
-  flatpak gsettings-desktop-schemas polkitd tar xz-utils
+sudo apt install -y git python3 python3-gi gir1.2-gtk-3.0 python3-psutil
 
-# Optional tools unlock matching features
-sudo apt install -y power-profiles-daemon systemd-zram-generator timeshift
-
-# Install in editable mode and launch
-python3 -m pip install -e .
-python3 -m preen_tool.app
+git clone https://github.com/mdadeel/Preen.git
+cd Preen
+python3 -m preen_tool.app --doctor
+python3 -m preen_tool.app --simulate
 ```
 
-### Option 5: Build the packages yourself
+Install optional tools for the features you need; the
+[user guide](docs/USER_GUIDE.md#optional-tools) gives examples. If your default
+`python3` is not the distribution's Python and cannot import `gi`, use the
+system Python, for example `/usr/bin/python3`, with the same commands.
+
+### Releases and local packages
+
+Check [GitHub Releases](https://github.com/mdadeel/Preen/releases) for the
+files attached to a particular release. GitHub also provides source ZIP and
+`.tar.gz` archives for each tag. Debian packages, Python wheels and AppImages
+are available only when listed among that release's assets; the current source
+may contain changes not present in an older tag.
+
+To build a Debian package from a checkout with `dpkg-deb` installed:
 
 ```bash
-# Debian package, no debhelper required
 ./packaging/build_deb.sh
-sudo apt install -y ./dist/preen_0.5.0_all.deb
-
-# AppImage, then install it with a menu entry
-./packaging/build_appimage.sh
-./packaging/install_appimage.sh
+# Install the versioned file reported by the builder, for example:
+sudo apt install ./dist/preen_0.5.0_all.deb
 ```
 
-Everything is also wired into the Makefile — `make wheel`, `make deb`,
-`make appimage`, `make install-appimage`, `make uninstall-appimage`. Run
-`make help` to see the full list of targets.
+To build the x86-64 AppImage, run `./packaging/build_appimage.sh`; the builder
+may download `appimagetool` without checksum verification, and that tool may
+fetch an unverified runtime. Prefer a trusted, pre-verified appimagetool
+AppImage supplied through `APPIMAGETOOL` and verify its runtime. Preen's
+AppImage uses the host's Python, GTK and PyGObject rather than bundling them.
+A Python virtual environment with `--system-site-packages` can also be used for
+an editable install; see the
+[contributor guide](CONTRIBUTING.md#get-set-up).
 
-### Verify the install
+### AppImage desktop integration
 
-The built-in doctor checks Python, GTK, the package layout and every optional
-tool without opening the window, which makes it handy over SSH:
+From a checkout, install any Preen AppImage with a menu entry and launcher
+icon — and remove it again the same way:
 
 ```bash
-preen --doctor
-preen --doctor --json
+./packaging/install_appimage.sh Preen-0.5.0-x86_64.AppImage    # per-user, no root
+sudo ./packaging/install_appimage.sh Preen-0.5.0-x86_64.AppImage --system
+./packaging/uninstall_appimage.sh                              # add --system or --purge as needed
 ```
 
-Missing optional tools only disable the features that need them. The
-Dashboard explains exactly which ones and why.
+The default installs under `~/.local/share` (`/opt/preen` and `/usr/share`
+with `--system`); `--purge` also deletes Preen's settings in
+`~/.config/preen`. The Makefile wraps the common paths: `make wheel`,
+`make deb`, `make appimage`, `make install-appimage`, `make uninstall-appimage`.
+Run `make help` for the full list of targets.
 
----
+## Command-line checks
 
-## First five minutes
-
-1. Launch Preen. You land on the **Dashboard**, where the health panel lists
-   any tools that are not installed yet.
-2. Turn on **Simulate** in the top-right corner. An amber pill confirms the
-   mode, and every mutating action becomes a dry run.
-3. Open **Install Apps**, search for something such as `vlc`, tick it and
-   press **Install Selected**.
-4. Open **Logs**. You will see the full `flatpak` or `apt-get` command marked
-   `[simulate] would run:`, proof that nothing was installed.
-5. When you are comfortable, switch Simulate off and repeat the action for
-   real. Root commands are batched into a single polkit prompt.
-
-The same habit works everywhere: scan Deep Clean before cleaning, read the
-boot analysis before touching services, and export your settings before
-importing an archive.
-
----
-
-## Command line
+From a source checkout use `python3 -m preen_tool.app`; after installing the
+package, use `preen` instead:
 
 ```bash
-preen                         # start the graphical app
-preen --simulate              # start with dry-run mode enabled
-preen --doctor                # installation and dependency report, no GTK
-preen --doctor --json         # the same report as machine-readable JSON
-preen --check-catalog         # validate apps.json and presets.json
-preen --version
+python3 -m preen_tool.app --doctor          # dependency and capability report
+python3 -m preen_tool.app --doctor --json   # machine-readable report
+python3 -m preen_tool.app --check-catalog    # validate app and preset data
+python3 -m preen_tool.app --version
+python3 -m preen_tool.app --simulate        # start the GUI in Simulate mode
 ```
 
-The `zorin-optimizer` command still works as an alias for users upgrading
-from the 0.2.x line.
+Doctor reports and logs can contain local paths, app names and diagnostic
+output. Review and redact them before sharing.
 
----
+## Frequently asked questions
 
-## Development
+### What is Preen?
 
-```bash
-make setup        # system dependencies plus an editable install
-make check        # validate the app catalogue and presets
-make test         # full regression suite (no root, GTK display or network)
-make doctor       # headless diagnostics
-make wheel        # build a wheel after check and test
-make deb          # build the Debian package
-make clean        # remove generated artefacts
-```
+Preen is an open-source GTK 3 utility that brings Linux app management, cleanup,
+service controls, configuration backups and selected system settings into one
+desktop interface. It uses existing system tools rather than replacing them.
 
-The test suite runs entirely on fakes. `tests/fakes.py` provides a fake
-Linux userspace with stand-ins for `flatpak`, `dpkg`, `gsettings`,
-`pkexec`, `swapon`, `powerprofilesctl` and `timeshift`, while a fake GTK
-walks every screen and handler. The suite is intended to run without root,
-a display server or network access.
+### Is Preen free and open source?
 
-```bash
-python3 -m unittest discover -s tests -v
-```
+Preen's project code is available under the [MIT License](LICENSE). Bundled
+third-party artwork has separate terms; see [third-party notices](THIRD_PARTY_NOTICES.md).
 
-When you add an app to `preen_tool/config/apps.json`, run `make check` so the
-ID and package-name validators verify the entry.
+### Does Preen work on my Linux distribution?
 
----
+APT-related features are intended for Debian and Ubuntu-family systems.
+Flatpak, GNOME, systemd and other features require the corresponding tools and
+desktop support. Preen is not verified on every distribution or configuration;
+run `--doctor` and test carefully on your own system.
 
-## Safety model
+### Does Preen collect or send my data?
 
-- **Simulate first.** All mutating paths, including file writes and
-  gsettings, check the simulate flag before acting. A dedicated test calls
-  every mutating operation with Simulate on and asserts nothing is spawned
-  or written.
-- **Batched authorisation.** Privileged steps are joined into one shell
-  script behind a single `pkexec` prompt, and every interpolated value is
-  quoted with `shlex.quote`.
-- **Package protection.** A frozen allowlist of essential APT packages is
-  refused at removal time, and scanner rows pass strict regular-expression
-  validation before becoming command arguments.
-- **Archive hardening.** Tar extraction rejects absolute paths, parent
-  traversal, symlinks, hardlinks, device nodes and unsafe permissions.
-- **Diff-based tuning.** Optimize and Customize only apply settings that
-  differ from the detected baseline, so an existing swapfile or theme is
-  never clobbered by accident.
-- **Atomic writes.** Preferences, desktop entries and CSS are written via
-  temp files and `os.replace`, so an interrupted write cannot corrupt them.
+The current desktop app has no built-in telemetry or analytics and does not
+send diagnostic logs to the Preen maintainers. APT, Flatpak, Flathub setup and
+other external tools may contact their own repositories or services. Local
+settings, exported archives and logs can contain sensitive information; read
+the [privacy policy](PRIVACY.md) before sharing or deleting them.
 
----
+### Do I need administrator privileges?
 
-## Project layout
+Run Preen as your normal user. System-level changes, such as APT, swap and
+system service operations, can ask for authorization through polkit; the
+specific prompt and permissions depend on the operation and system.
 
-```
-preen_tool/
-  app.py                  GTK-free entry point and friendly GTK error message
-  cli.py                  headless doctor, catalogue validation and JSON output
-  gui.py                  all GTK screens, styling and the serial task queue
-  backend/
-    apps.py               APT and Flatpak catalogue, detection and actions
-    deepclean.py          sized scans and safe cleaning
-    services.py           systemd units, boot analysis and validation
-    performance.py        power profiles, swapfile and ZRAM
-    system.py             cleanup, animations and startup applications
-    ui_customization.py   themes, text scaling, icon packs and CSS
-    backup.py             Timeshift integration and config archives
-    dashboard.py          live system metrics and capability checks
-    settings.py           validated preferences storage
-    utils.py              command runner, outcomes and shared safety helpers
-  config/
-    apps.json             curated application catalogue (data, not code)
-    presets.json          quick-pick bundles
-  assets/                 bundled control indicators and offline catalogue marks
-packaging/                reproducible .deb and AppImage builders
-tests/                    fake userspace, fake GTK and regression tests
-docs/                     user guide, architecture and product roadmap
-```
+### Does Preen change the theme of my whole desktop?
 
----
+The Preen appearance selector changes Preen only. Other controls are explicitly
+labelled desktop-wide: text scaling and icon themes can affect the GNOME
+desktop, and rounded-corner CSS can affect GTK 3 apps. Review and confirm those
+changes separately.
 
-## Contributing and licence
+### Can Preen organize files in a folder?
 
-Pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the
-workflow and coding rules, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-for the module map and threading contracts. The
-[user guide](docs/USER_GUIDE.md) covers every page in plain language, the
-[product roadmap](docs/PRODUCT_ROADMAP.md) proposes the interface refresh,
-folder organizer and additional utilities, and [the changelog](CHANGELOG.md)
-records the history of each release.
+Not yet. A selectable-folder organizer is a proposal in the
+[product roadmap](docs/PRODUCT_ROADMAP.md), not a current feature.
 
-Preen is released under the MIT licence. See [LICENSE](LICENSE) for the full
-text. Bundled catalogue marks are derived from CC0-licensed Simple Icons;
-see [their attribution and licence](preen_tool/assets/brand/README.md).
+## Documentation and community
+
+- [User guide](docs/USER_GUIDE.md) · [Documentation index](docs/README.md) ·
+  [Architecture](docs/ARCHITECTURE.md) · [Changelog](CHANGELOG.md) ·
+  [Release building](docs/RELEASES.md)
+- [Contributing](CONTRIBUTING.md) · [Code of conduct](CODE_OF_CONDUCT.md) ·
+  [Report a bug](https://github.com/mdadeel/Preen/issues)
+- [Privacy policy](PRIVACY.md) · [Security policy](SECURITY.md) ·
+  [Third-party notices](THIRD_PARTY_NOTICES.md) · [MIT License](LICENSE)
+- [Product roadmap](docs/PRODUCT_ROADMAP.md) ·
+  [Proposed website plan](docs/WEBSITE_PLAN.md)
+
+For sensitive security issues, follow [SECURITY.md](SECURITY.md) rather than
+posting exploit details or personal data in a public issue. Automated tests use
+fakes and do not substitute for validation on a supported live GNOME desktop;
+see the [functional review](docs/FEATURE_AUDIT.md) for test limitations.

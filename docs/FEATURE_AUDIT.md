@@ -7,8 +7,8 @@ changes on a supported GNOME desktop.
 
 ## Current appearance and icon follow-up
 
-The current `python3 -m unittest discover -s tests -q` run passes 151 tests.
-Headless regressions cover Preen-only preference persistence, simulated changes,
+The 2026-10-28 appearance follow-up's `python3 -m unittest discover -s tests -q`
+run passed 151 tests. Headless regressions cover Preen-only preference persistence, simulated changes,
 read-only GNOME detection, staged choices, confirmation of explicitly
 desktop-wide controls, palette contrast calculations, icon resolution, launcher
 identity and packaged assets. They use fake GTK and fake GNOME commands. The

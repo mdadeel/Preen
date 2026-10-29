@@ -6,8 +6,10 @@ All notable changes to this project are documented here. Format follows
 
 ## [0.5.0] - 2026-10-29
 
-AppImage management, drag-and-drop and a round of selection fixes across the
-checkbox lists.
+[Release notes and source archives](https://github.com/mdadeel/Preen/releases/tag/v0.5.0)
+
+A GNOME-native dark GTK 3 refresh of all ten pages, a new AppImages manager
+with drag-and-drop, release plumbing, and a round of selection fixes.
 
 ### Added
 
@@ -16,29 +18,18 @@ checkbox lists.
   a menu entry and launcher icon at user scope, and lists already-installed
   AppImages — including those installed outside Preen.
 - Installing an AppImage that is already installed replaces it in place:
-  the update path keeps the same versionless menu entry.
-- Uninstalling deletes the AppImage copy only when Preen installed it;
-  external AppImage setups keep their files and lose only the menu entry.
+  the update path keeps the same versionless menu entry. Uninstalling deletes
+  the AppImage copy only when Preen installed it; external AppImage setups
+  keep their files and lose only the menu entry.
 - Drag-and-drop onto the window: drop `.AppImage` files to install them and
   jump to the AppImages page, or drop a `.deb` to install it with one polkit
-  prompt.
-- `Install from File…` chooser and a Rescan action on the AppImages page.
-
-### Fixed
-
-- Manage Apps gained the Select all / Clear buttons the other lists had.
-- Clicking anywhere on an Install, Manage or Deep Clean row now toggles it —
-  previously only the small checkbox reacted.
-- Select all and Clear both operate on the rows visible under the active
-  search, so a stale search box can no longer make the buttons misbehave.
-
-## [0.4.0] - 2026-10-28
-
-A GNOME-native dark GTK 3 refresh of all nine pages, retaining the existing
-backend, package catalogue and serial task queue.
-
-### Added
-
+  prompt. `Install from File…` and Rescan actions on the AppImages page.
+- `packaging/install_appimage.sh` and `packaging/uninstall_appimage.sh`
+  install Preen itself with desktop integration and remove it again; the
+  Makefile gains `appimage`, `install-appimage` and `uninstall-appimage`
+  targets.
+- Full-page screenshots for the Dashboard, Install Apps, Manage Apps,
+  AppImages, Deep Clean and Services pages.
 - Shared dark design tokens, grouped searchable sidebar, responsive cards and
   button rows, compact simulation control and contextual notices.
 - Honest package and cleanup states, partial-scan warnings, protected rows,
@@ -48,6 +39,8 @@ backend, package catalogue and serial task queue.
 - Bundled Preen launcher artwork, checkbox/radio indicators and offline
   catalogue marks with generic fallbacks, plus a proposed roadmap for the
   visual refresh, folder organizer and future Linux utilities.
+- A desktop privacy policy, security reporting guidance, third-party notices,
+  community conduct and a proposed minimal, no-gradient website plan.
 
 ### Changed
 
@@ -57,9 +50,29 @@ backend, package catalogue and serial task queue.
   commands can be previewed without polkit and report that no changes occurred.
 - Cleanup, uninstall and restore always require confirmation; the preference
   controls the additional confirmation for Update All.
+- README and user guidance now distinguish source from release assets, explain
+  Simulate and package-protection limits, and advise redacting sensitive logs.
+- Source archives and native package staging include the policy, license,
+  third-party notices and screenshot documentation; Python metadata links to
+  the project documentation and policies.
+- A release builder creates version-matched source and package artifacts with
+  checksums. The AppImage builder checks its output and CLI version rather than
+  reporting success when the tool produces no runnable artifact.
+- Removed an obsolete early audit, an outdated inactive CI example and
+  duplicated release and dependency files. Historical documents remain
+  available in the `v0.5.0` tag, and Python dependencies are declared in
+  `pyproject.toml`. Package documentation staging now includes only current
+  documentation.
+- Ignore generated Debian staging and named release artifacts to reduce
+  accidental build-output commits.
 
 ### Fixed
 
+- Manage Apps gained the Select all / Clear buttons the other lists had.
+- Clicking anywhere on an Install, Manage or Deep Clean row now toggles it —
+  previously only the small checkbox reacted.
+- Select all and Clear both operate on the rows visible under the active
+  search, so a stale search box can no longer make the buttons misbehave.
 - Light, dark and Follow system appearance now affect Preen only and persist
   across restarts, without writing the GNOME colour scheme or GTK theme.
   Explicit choices are not overwritten by desktop changes; simulation previews
@@ -180,8 +193,9 @@ Rebrand to **Preen**, system setup, deep cleaning and tuning for Linux
 
 ## [0.2.0] - 2026-10-27
 
-Reliability rewrite plus a UX and repository clean-up pass. The full audit of
-the previous release is in [`docs/ROAST.md`](docs/ROAST.md).
+Reliability rewrite plus a UX and repository clean-up pass. The full
+[historical audit](https://github.com/mdadeel/Preen/blob/v0.5.0/docs/ROAST.md)
+of the previous release is preserved in the `v0.5.0` tag.
 
 ### Fixed
 
@@ -226,8 +240,9 @@ the previous release is in [`docs/ROAST.md`](docs/ROAST.md).
 - `LICENSE`, `CONTRIBUTING.md`, this changelog, `Makefile`, `.editorconfig`,
   `docs/USER_GUIDE.md`, `docs/ARCHITECTURE.md`, `docs/README.md` and
   `docs/archive/` for historical documents.
-- 36 regression tests with a fake Linux userspace and a fake GTK;
-  `docs/ci-workflow.yml.example` for GitHub Actions.
+- 36 regression tests with a fake Linux userspace and a fake GTK; an
+  [early GitHub Actions example](https://github.com/mdadeel/Preen/blob/v0.5.0/docs/ci-workflow.yml.example)
+  is preserved in the `v0.5.0` tag (it is not an active workflow).
 - `.gitignore`, build output, `.pyc`, egg-info and virtualenvs are no longer
   committed.
 

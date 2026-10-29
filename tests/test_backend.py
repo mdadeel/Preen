@@ -1,4 +1,4 @@
-"""Regression tests for every bug found in the roast.
+"""Backend regression tests.
 
 Run with:  python3 -m unittest discover -s tests -v
       or:  pytest -q
@@ -109,6 +109,13 @@ class BackendTestCase(unittest.TestCase):
         wheel_name = build_meta.build_wheel(out)
         with zipfile.ZipFile(Path(out) / wheel_name) as archive:
             names = set(archive.namelist())
+            metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
+            license_name = next(name for name in names if name.endswith(".dist-info/LICENSE"))
+            metadata = archive.read(metadata_name).decode("utf-8")
+            self.assertEqual(archive.read(license_name), (REPO / "LICENSE").read_bytes())
+        self.assertIn("Project-URL: Privacy, https://github.com/mdadeel/Preen/blob/main/PRIVACY.md", metadata)
+        self.assertIn("Project-URL: Security, https://github.com/mdadeel/Preen/blob/main/SECURITY.md", metadata)
+        self.assertIn("License :: OSI Approved :: MIT License", metadata)
         for required in (
             "preen_tool/app.py",
             "preen_tool/gui.py",

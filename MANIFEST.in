@@ -1,6 +1,9 @@
-include README.md LICENSE CHANGELOG.md CONTRIBUTING.md requirements.txt Makefile .editorconfig
+include README.md LICENSE CHANGELOG.md CONTRIBUTING.md CODE_OF_CONDUCT.md
+include PRIVACY.md SECURITY.md THIRD_PARTY_NOTICES.md Makefile .editorconfig
+include debian/changelog debian/control debian/copyright debian/install debian/rules debian/source/format
+recursive-include packaging *.sh
 recursive-include data *.desktop
 recursive-include preen_tool/config *.json
 recursive-include preen_tool/assets *.png *.svg *.md
-recursive-include docs *.md *.example
+recursive-include docs *.md *.png
 recursive-include tests *.py

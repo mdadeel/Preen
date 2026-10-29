@@ -107,7 +107,7 @@ UI thread ◄──────── GLib.idle_add(_finish) ─────┘
 
 ## Simulate contract
 
-Every function that changes anything must:
+System-maintenance functions that change settings or files must:
 
 1. pass `mutate=True` to `run_cmd` or `Report.run` for commands, or
 2. check `utils.is_simulate()` before writing files (startup entries, CSS,
@@ -115,8 +115,11 @@ Every function that changes anything must:
 3. return an `Outcome` so the UI can report success or failure.
 
 `tests/test_backend.py::test_simulate_mode_blocks_EVERY_mutating_action`
-enumerates every mutating operation and asserts no command is spawned and no
-file is written in Simulate mode.
+exercises a defined list of maintenance operations and checks their fake
+commands and selected file effects; its name does not prove every possible
+write is blocked. Read-only commands run, preferences and explicitly saved logs
+can be written, and loading legacy settings can migrate a directory even in
+Simulate mode. See the [privacy policy](../PRIVACY.md).
 
 ## Safety layers
 
@@ -178,5 +181,10 @@ network is required.
   `packaging/uninstall_appimage.sh` install it with a menu entry and icon
   (per-user by default, `--system` for /opt + /usr/share) and remove it
   again.
+- `packaging/stage_docs.sh` adds the license, policy, third-party notices and
+  linked documentation to both native packages; Debian also installs
+  `debian/copyright`. The source archive includes the screenshots and builders.
+- `packaging/build_release.sh` creates a source ZIP, sdist, wheel, Debian
+  package, optional AppImage and checksums from a clean, version-matched tree.
 - `.gitignore` excludes `build/`, `dist/`, `*.egg-info`, virtual
   environments, bytecode caches and generated Debian artefacts.

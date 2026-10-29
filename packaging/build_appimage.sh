@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build Preen as an AppImage (AppDir + appimagetool).
-# Uses the *system* Python and GTK — every supported distro has them — so the
-# AppImage stays a few MB instead of bundling a runtime.
+# Uses the host's Python and GTK rather than bundling a runtime; the host must
+# provide the required Python, GTK and PyGObject packages.
 # Result: dist/Preen-<version>-x86_64.AppImage
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -9,13 +9,20 @@ cd "$(dirname "$0")/.."
 VERSION=$(python3 -c "import sys; sys.path.insert(0,'.'); import preen_tool; print(preen_tool.__version__)")
 TOOL=${APPIMAGETOOL:-/tmp/appimagetool-x86_64.AppImage}
 APPDIR=$(mktemp -d)
-trap 'rm -rf "$APPDIR"' EXIT
+OUTPUT_DIR=$(mktemp -d)
+trap 'rm -rf "$APPDIR" "$OUTPUT_DIR"' EXIT
 
 if [ ! -x "$TOOL" ]; then
-  echo "Downloading appimagetool..."
-  curl -sL -o "$TOOL" \
+  if [ -n "${APPIMAGETOOL:-}" ]; then
+    echo "APPIMAGETOOL is not executable: $TOOL" >&2
+    exit 1
+  fi
+  echo "Downloading appimagetool without checksum verification; prefer a trusted APPIMAGETOOL."
+  DOWNLOAD="$OUTPUT_DIR/appimagetool-x86_64.AppImage"
+  curl --fail --location --silent --show-error -o "$DOWNLOAD" \
     https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-  chmod +x "$TOOL"
+  chmod +x "$DOWNLOAD"
+  TOOL=$DOWNLOAD
 fi
 
 # --- Python package ---
@@ -54,7 +61,29 @@ install -m 644 preen_tool/assets/preen.png "$APPDIR/preen.png"
 install -m 644 preen_tool/assets/preen.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/preen.png"
 ln -sf preen.png "$APPDIR/.DirIcon"
 
+# License, privacy information and documentation travel with the AppImage.
+./packaging/stage_docs.sh "$APPDIR/usr/share/doc/preen"
+
+# Build to a temporary path so a failed or stubbed tool cannot leave a stale
+# artifact looking like a successful build.
+OUTPUT="$OUTPUT_DIR/Preen-${VERSION}-x86_64.AppImage"
+ARCH=x86_64 "$TOOL" --appimage-extract-and-run "$APPDIR" "$OUTPUT"
+if [ ! -s "$OUTPUT" ] || [ ! -x "$OUTPUT" ]; then
+  echo "AppImage build failed: the tool did not create an executable artifact." >&2
+  exit 1
+fi
+python3 - "$OUTPUT" <<'PY'
+import sys
+with open(sys.argv[1], "rb") as image:
+    header = image.read(11)
+if header[:4] != b"\x7fELF" or header[8:11] != b"AI\x02":
+    sys.exit("AppImage build failed: invalid type-2 AppImage header")
+PY
+REPORTED_VERSION=$("$OUTPUT" --appimage-extract-and-run --version)
+if [ "$REPORTED_VERSION" != "$VERSION" ]; then
+  echo "AppImage build failed: expected version $VERSION, got $REPORTED_VERSION" >&2
+  exit 1
+fi
 mkdir -p dist
-ARCH=x86_64 "$TOOL" --appimage-extract-and-run "$APPDIR" \
-  "dist/Preen-${VERSION}-x86_64.AppImage"
-echo "Built dist/Preen-${VERSION}-x86_64.AppImage"
+install -m 755 "$OUTPUT" "dist/Preen-${VERSION}-x86_64.AppImage"
+echo "Built and smoke-tested dist/Preen-${VERSION}-x86_64.AppImage"

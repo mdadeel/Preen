@@ -47,8 +47,8 @@ python3 -m preen_tool.app --simulate
   `performance`, `ui_customization`, `backup`, `dashboard`, `deepclean`,
   `services`, `settings` (validated preferences JSON).
 - `config/`: `apps.json` catalogue and `presets.json`.
-- `docs/`: `USER_GUIDE.md`, `ARCHITECTURE.md`, `ROAST.md`, `README.md`
-  index and the CI workflow example.
+- `docs/`: user and architecture guides, release instructions, functional
+  review, product roadmap and website plan; see the `README.md` index.
 - `tests/`: unittest suite with `fakes.py`, a fake Linux userspace and a
   fake GTK.
 

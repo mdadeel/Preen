@@ -8,8 +8,12 @@ preen (0.5.0) stable; urgency=medium
   * Selection fixes: Manage Apps gains Select all/Clear; rows on Install,
     Manage and Deep Clean toggle when clicked; Select all and Clear both
     respect the active search.
+  * Refresh all ten GTK pages, Preen-only appearance and bundled icons.
+  * Improve cleanup, package, service, backup and diagnostic safeguards.
+  * Include privacy, security, licence notices and screenshot documentation.
+  * Prepare version-matched source and binary release artifacts.
 
- -- Preen contributors <noreply@example.com>  Wed, 29 Oct 2026 12:00:00 +0000
+ -- Preen contributors <64582744+mdadeel@users.noreply.github.com>  Wed, 29 Oct 2026 12:00:00 +0600
 
 preen (0.4.0) stable; urgency=medium
 
