@@ -56,6 +56,9 @@ Install these only if you want the matching features:
 ```bash
 sudo apt install flatpak gsettings-desktop-schemas polkitd
 sudo apt install power-profiles-daemon systemd-zram-generator timeshift
+# Optional: Snap apps on the Manage Apps page, the Drivers page and the
+# firewall toggle on Optimize System.
+sudo apt install snapd ubuntu-drivers-common ufw
 # Optional: add Flathub if you choose to use that Flatpak repository.
 flatpak remote-add --if-not-exists flathub \
   https://flathub.org/repo/flathub.flatpakrepo
@@ -83,7 +86,7 @@ they are installed. The Dashboard and `--doctor` report available capabilities.
 
 ## 3. The pages
 
-The sidebar groups the nine pages under Overview, Software, System and
+The sidebar groups the eleven pages under Overview, Software, System and
 Personal, with symbolic icons and a highlighted selected row. Use **Find a
 page** at the top of the sidebar to filter by name. Section headers hide
 while a search is active and return when you clear it. On smaller windows,
@@ -117,8 +120,17 @@ scroll the sidebar and page content to reach additional controls.
 
 ### Manage Apps
 
-- Lists Flatpak apps and graphical APT applications (packages that own a
-  `.desktop` launcher), never thousands of libraries.
+- Lists Flatpak apps, Snap apps and graphical APT applications (packages that
+  own a `.desktop` launcher), never thousands of libraries. A package that
+  ships several launchers shows one row per launcher; removing any of them
+  removes the owning package. Base snaps such as `core22` appear as
+  **protected** rows. If snapd is not installed, snaps are simply absent from
+  the list.
+- After each scan Preen checks for updates (APT from the cached package
+  index; Flatpak and Snap contact their stores). Matching rows show
+  **Update available**; pressing **Update Selected** with nothing ticked
+  selects those rows for you. Store checks can fail offline — the badge is
+  best-effort and the Logs page says why.
 - Search, then **Update Selected** or **Uninstall Selected**. A scan warning
   means the list may be incomplete; see Logs for the cause.
 - Rows marked **protected** are core desktop packages. Their checkboxes are
@@ -133,16 +145,29 @@ scroll the sidebar and page content to reach additional controls.
 3. Press **Clean Selected** and confirm. APT and journal actions are separate
    privileged steps and may each request polkit authentication.
 
-Items include the APT cache, journal, thumbnails, pip cache and trash. Journal
-usage includes active files that cannot be vacuumed, so the amount above the
-100 MiB retention target is only an upper-bound estimate. Trash deletion is
-permanent; thumbnails are regenerated automatically.
+Items include the APT cache, the system journal, old kernel packages,
+thumbnails, pip cache and trash. Old-kernel cleanup always keeps the running
+kernel plus one spare. Journal usage includes active files that cannot be
+vacuumed, so the amount above the 100 MiB retention target is only an
+upper-bound estimate. Trash deletion is permanent; thumbnails are
+regenerated automatically.
+
+**Automatic maintenance** (bottom card) installs a systemd timer that runs
+the root-level cleanup tasks — package cache, unused packages, journal
+vacuum, unused Flatpak runtimes — on a Daily, Weekly or Monthly schedule,
+even when Preen is closed. Enabling asks for confirmation and one
+administrator prompt; disabling removes the units again. The change is
+previewed without touching the system while Simulate is on.
 
 ### Optimize System
 
 - **Cleanup and desktop behaviour:** autoremove and autoclean packages,
   remove unused Flatpak runtimes, disable GNOME animations, and manage
   startup applications through a dedicated dialog.
+- **Security:** a **Firewall (UFW)** toggle. Enabling blocks unsolicited
+  incoming connections (this can affect file sharing or SSH) and applies
+  immediately after confirmation. The row is disabled when ufw is missing
+  or its state cannot be read.
 - **Memory and power:** create or remove a swapfile with a selectable size
   (1, 2, 4 or 8 GB), enable ZRAM, and choose a power profile. The profile
   and animation controls are disabled if their current state cannot be read.
@@ -162,6 +187,18 @@ permanent; thumbnails are regenerated automatically.
 - **Start**, **Stop**, **Restart**, **Enable** and **Disable** act on the
   selected unit. Stop, restart and disable ask for confirmation, and unit
   names are validated before they reach `systemctl`.
+
+### Drivers
+
+- Runs `ubuntu-drivers devices` and lists the hardware it offers driver
+  packages for, with every candidate package named on the row and the
+  **recommended** one badged. Search filters the rows.
+- Tick devices and press **Install Selected**, or use **Auto Install
+  (recommended)** to let ubuntu-drivers choose. Both ask for confirmation
+  and one administrator prompt. The list is rescanned afterwards.
+- The page says so when `ubuntu-drivers` is not installed (the
+  `ubuntu-drivers-common` package provides it) and when detection reports
+  errors; see Logs for details.
 
 ### Customize Look
 

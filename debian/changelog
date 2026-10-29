@@ -1,3 +1,23 @@
+preen (0.7.0) stable; urgency=medium
+
+  * Manage Apps lists Snap apps alongside Flatpak and APT; base snaps are
+    protected and snapd absence is silent.
+  * Manage Apps shows an "Update available" badge (APT from the cached
+    index, Flatpak and Snap from their stores) and Update Selected with
+    nothing ticked updates every flagged app.
+  * Manage Apps fixes: the desktop scan follows XDG data directories, a
+    failed batch dpkg -S query falls back to per-file queries, localized
+    Name[locale] entries are preferred, and packages shipping several
+    launchers show one row per launcher.
+  * Deep Clean gains an "Automatic maintenance" card: a systemd timer
+    (daily/weekly/monthly) runs the root-level cleanup tasks on schedule.
+  * New Drivers page wrapping ubuntu-drivers with recommended badges,
+    Install Selected and Auto Install.
+  * Snap, ubuntu-drivers and UFW are reported by --doctor; ufw and
+    ubuntu-drivers-common are suggested packages.
+
+ -- Md Moft <mdadeel125@gmail.com>  Fri, 30 Oct 2026 01:30:00 +0600
+
 preen (0.6.0) stable; urgency=medium
 
   * Right-click integration: .AppImage files can be opened with Preen to

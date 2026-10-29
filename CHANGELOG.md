@@ -4,6 +4,41 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-10-30
+
+Snap support, update badges, scheduled maintenance and a Drivers page.
+
+### Added
+
+- **Snap apps in Manage Apps**: installed snaps are listed with a Snap
+  badge; base/platform snaps appear as protected rows; removal goes through
+  the same confirmed, polkit-gated batch path as Flatpak and APT. snapd
+  being absent is silent rather than a warning.
+- **Update-available badges**: after every scan Preen checks APT (cached
+  index, no network), Flatpak (`remote-ls --updates`) and Snap
+  (`refresh --list`); flagged rows show "Update available" and
+  **Update Selected** with nothing ticked selects them. Store failures
+  downgrade to log warnings.
+- **Automatic maintenance** on Deep Clean: an optional systemd timer
+  (daily/weekly/monthly, persistent, randomized) runs apt clean, autoremove,
+  journal vacuum and Flatpak runtime cleanup on schedule. One confirmation
+  and one administrator prompt to enable; disabling removes the units.
+- **Drivers page**: wraps `ubuntu-drivers devices` as searchable device rows
+  with the recommended package badged, plus **Install Selected** and
+  **Auto Install (recommended)**, both confirmed and polkit-gated.
+- Snap, ubuntu-drivers and UFW are now reported by `--doctor` and the
+  Dashboard capability panel; `ufw` and `ubuntu-drivers-common` join the
+  suggested packages.
+
+### Fixed
+
+- Manage Apps no longer misses installed applications: the desktop scan
+  follows `XDG_DATA_DIRS` (including `~/.local/share`), a failed batch
+  `dpkg -S` query falls back to per-file queries instead of hiding every
+  APT row, localized `Name[locale]` entries are preferred over raw file
+  names, and packages shipping several visible launchers list one row per
+  launcher with independent selection.
+
 ## [0.6.0] - 2026-10-30
 
 Right-click integration for AppImage files, a Downloads watcher, old-kernel
