@@ -8,6 +8,7 @@ import-only test cannot.
 from __future__ import annotations
 
 import importlib
+import os
 import re
 import sys
 import tempfile
@@ -263,6 +264,12 @@ class FakeCssProvider(Widget):
         self.css = css
 
 
+class FakeTargetEntry:
+    @staticmethod
+    def new(*_args, **_kwargs):
+        return object()
+
+
 class FakeGtk:
     ApplicationWindow = Widget
     Application = Widget
@@ -295,11 +302,14 @@ class FakeGtk:
     Frame = Widget
     AboutDialog = Widget
     CssProvider = FakeCssProvider
+    TargetEntry = FakeTargetEntry
 
     class StyleContext:
         @staticmethod
         def add_provider_for_screen(*_args):
             return None
+
+    DestDefaults = SimpleNamespace(ALL=0)
 
     Orientation = SimpleNamespace(HORIZONTAL=0, VERTICAL=1)
     SelectionMode = SimpleNamespace(NONE=0, SINGLE=1)
@@ -351,10 +361,15 @@ class GuiRuntimeTest(unittest.TestCase):
         repo = types.ModuleType("gi.repository")
         repo.Gtk = FakeGtk()
         repo.GLib = FakeGLib()
-        repo.Gio = SimpleNamespace(SettingsSchemaSource=SimpleNamespace(get_default=lambda: None))
+        repo.Gio = SimpleNamespace(
+            SettingsSchemaSource=SimpleNamespace(get_default=lambda: None),
+            File=SimpleNamespace(new_for_uri=lambda uri: SimpleNamespace(get_path=lambda: None)),
+        )
         repo.GdkPixbuf = SimpleNamespace(Pixbuf=FakePixbuf)
         repo.Gdk = SimpleNamespace(
-            Screen=SimpleNamespace(get_default=lambda: object()))
+            Screen=SimpleNamespace(get_default=lambda: object()),
+            DragAction=SimpleNamespace(COPY=1),
+        )
         repo.Pango = SimpleNamespace(
             EllipsizeMode=SimpleNamespace(END=3, MIDDLE=2, START=1))
         gi.repository = repo
@@ -379,10 +394,18 @@ class GuiRuntimeTest(unittest.TestCase):
             patch = mock.patch.object(settings_backend, target, value)
             patch.start()
             self.addCleanup(patch.stop)
+        # AppImage scans must hit a sandboxed HOME, never the real one.
+        env_patch = mock.patch.dict(os.environ, {
+            "HOME": tmp.name,
+            "XDG_DATA_HOME": os.path.join(tmp.name, "xdg-data"),
+            "XDG_CONFIG_HOME": os.path.join(tmp.name, "xdg-config"),
+        })
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
 
     def test_window_builds_and_all_pages_exist(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
-        self.assertEqual(len(window.stack.get_children()), 9)
+        self.assertEqual(len(window.stack.get_children()), 10)
         self.assertIn("code", window.app_rows)
         self.assertTrue(window.log_buf.lines)
         # New 0.4.0 surfaces.
@@ -394,12 +417,13 @@ class GuiRuntimeTest(unittest.TestCase):
         self.assertTrue(hasattr(window, "chk_running_only"))
         self.assertTrue(hasattr(window, "cmb_swap_size"))
         self.assertTrue(hasattr(window, "cmb_scaling"))
+        self.assertTrue(hasattr(window, "appimage_list"))
         self.assertTrue(window.icon_file.endswith("assets/preen.png"))
         self.assertTrue((self.gui.ASSETS_DIR / "preen.png").is_file())
         self.assertEqual(window.sim_switch.get_accessible().name, "Simulate")
         self.assertEqual(window.cmb_theme.get_accessible().name, "Preen appearance")
         self.assertEqual(window.app_rows["org.mozilla.firefox"].chk.get_accessible().name, "Select Firefox")
-        # Four non-selectable section headers plus nine page rows.
+        # Four non-selectable section headers plus ten page rows.
         section_rows = [r for r in window.sidebar_list.get_children()
                         if getattr(r, "page_name", False) is None]
         self.assertEqual(len(section_rows), 4)
@@ -1094,6 +1118,11 @@ class GuiRuntimeTest(unittest.TestCase):
             window.on_refresh_services,
             window._on_services_filter_changed,
             window._update_clean_counter,
+            # new AppImages page
+            window.on_rescan_appimages,
+            window.on_appimage_install,
+            window.on_appimage_uninstall,
+            window.on_pick_appimage,
         ]
         for handler in handlers:
             with self.subTest(handler=handler.__name__):
@@ -1130,6 +1159,135 @@ class GuiRuntimeTest(unittest.TestCase):
         self.assertIn("2 selected", window.clean_counter.get_text())
         window.on_clean_select_none(None)
         self.assertIn("No items selected", window.clean_counter.get_text())
+
+    def test_manage_select_all_and_clear_honor_search_and_protection(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._fill_manage_rows([
+            {"source": "flatpak", "id": "com.spotify.Client", "name": "Spotify", "protected": False},
+            {"source": "apt", "id": "gnome-shell", "name": "GNOME Shell", "protected": True},
+        ])
+        window.on_manage_select_all(None)
+        self.assertEqual(len(window._selected_manage()), 1)  # protected row skipped
+        window.on_manage_select_none(None)
+        self.assertEqual(window._selected_manage(), [])
+        window.manage_search.set_text("spotify")
+        window.on_manage_select_all(None)
+        self.assertEqual(len(window._selected_manage()), 1)
+        # Clear only touches the rows the search leaves visible.
+        window.manage_search.set_text("gnome")
+        window.on_manage_select_none(None)
+        self.assertEqual(len(window._selected_manage()), 1)
+
+    def test_install_clear_respects_active_search(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window.on_select_all(None)
+        self.assertGreater(len(window._selected_apps()), 5)
+        window.install_search.set_text("firefox")
+        window.on_select_none(None)
+        # Visible rows are cleared; rows hidden by the search keep theirs.
+        self.assertFalse(window.app_rows["org.mozilla.firefox"].chk.get_active())
+        self.assertTrue(window.app_rows["vlc"].chk.get_active())
+
+    def test_row_activation_toggles_selection(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        row = window.app_rows["vlc"]
+        self.assertFalse(row.chk.get_active())
+        window._on_install_row_activated(window.install_list, row)
+        self.assertTrue(row.chk.get_active())
+        window._on_install_row_activated(window.install_list, row)
+        self.assertFalse(row.chk.get_active())
+
+    def test_manage_row_activation_toggles_selection(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._fill_manage_rows([
+            {"source": "flatpak", "id": "com.spotify.Client", "name": "Spotify", "protected": False},
+            {"source": "apt", "id": "gnome-shell", "name": "GNOME Shell", "protected": True},
+        ])
+        rows = {r.entry["id"]: r for r in window.manage_listbox.get_children()
+                if hasattr(r, "entry")}
+        window._on_manage_row_activated(window.manage_listbox, rows["com.spotify.Client"])
+        self.assertEqual(len(window._selected_manage()), 1)
+        # A protected row never toggles from a row click.
+        window._on_manage_row_activated(window.manage_listbox, rows["gnome-shell"])
+        self.assertEqual(len(window._selected_manage()), 1)
+
+    # -- AppImages page ----------------------------------------------------
+    def _sandbox_stub(self, name="StubApp-1.2.3-x86_64.AppImage"):
+        downloads = Path(os.environ["XDG_DATA_HOME"]).parent / "Downloads"
+        downloads.mkdir(exist_ok=True)
+        stub = downloads / name
+        stub.write_text("#!/bin/sh\n", encoding="utf-8")
+        stub.chmod(0o755)
+        return stub
+
+    def _installed_entries(self):
+        apps = Path(os.environ["XDG_DATA_HOME"]) / "applications"
+        return list(apps.glob("preen-appimage-*.desktop"))
+
+    def test_appimages_page_installs_selected_download(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        self._sandbox_stub()
+        window.on_rescan_appimages()
+        downloads = [r for r in window.appimage_list.get_children()
+                     if getattr(r, "kind", None) == "download"]
+        self.assertEqual(len(downloads), 1)
+        downloads[0].chk.set_active(True)
+        window._update_appimage_counter()  # the fake emits no toggled signal
+        self.assertTrue(window.appimage_buttons["install"].get_sensitive())
+        with mock.patch.object(utils, "_simulate", False):
+            window.on_appimage_install(None)
+        installed = [r for r in window.appimage_list.get_children()
+                     if getattr(r, "kind", None) == "installed"]
+        self.assertEqual(len(installed), 1)
+        self.assertEqual(len(self._installed_entries()), 1)
+        self.assertTrue(installed[0].entry.get("managed"))
+
+    def test_appimages_uninstall_removes_selected_install(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        stub = self._sandbox_stub()
+        window.on_rescan_appimages()
+        [r for r in window.appimage_list.get_children()
+         if getattr(r, "kind", None) == "download"][0].chk.set_active(True)
+        window._update_appimage_counter()
+        with mock.patch.object(utils, "_simulate", False):
+            window.on_appimage_install(None)
+        installed = [r for r in window.appimage_list.get_children()
+                     if getattr(r, "kind", None) == "installed"]
+        self.assertEqual(len(installed), 1)
+        installed[0].chk.set_active(True)
+        window._update_appimage_counter()
+        with mock.patch.object(utils, "_simulate", False):
+            with mock.patch.object(window, "_confirm", return_value=True):
+                window.on_appimage_uninstall(None)
+        installed = [r for r in window.appimage_list.get_children()
+                     if getattr(r, "kind", None) == "installed"]
+        self.assertEqual(installed, [])
+        self.assertEqual(self._installed_entries(), [])
+        # The download in ~/Downloads survives an uninstall.
+        self.assertTrue(stub.exists())
+
+    def test_dropped_appimage_installs_and_unknown_files_are_ignored(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        dropped = Path(os.environ["XDG_DATA_HOME"]).parent / "dropped.AppImage"
+        dropped.write_text("#!/bin/sh\n", encoding="utf-8")
+        dropped.chmod(0o755)
+        with mock.patch.object(utils, "_simulate", False):
+            window._handle_dropped_files([str(dropped)])
+        self.assertEqual(len(self._installed_entries()), 1)
+        # A non-package file is reported and ignored, never installed.
+        window._handle_dropped_files(["/tmp/notes.txt"])
+        self.assertEqual(len(self._installed_entries()), 1)
+
+    def test_appimage_search_filters_rows(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        self._sandbox_stub()
+        window.on_rescan_appimages()
+        window.appimage_search.set_text("nothing-matches-this")
+        window._on_appimage_search_changed(None)
+        self.assertTrue(window.appimage_empty.get_visible())
+        window.appimage_search.set_text("")
+        window._on_appimage_search_changed(None)
+        self.assertFalse(window.appimage_empty.get_visible())
 
     def test_sidebar_search_filters_rows_and_hides_headers(self):
         window = self.gui.MainWindow(self.gui.PreenApp())

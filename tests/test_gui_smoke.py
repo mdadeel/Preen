@@ -68,7 +68,11 @@ class GuiImportTest(unittest.TestCase):
             self.assertTrue(hasattr(gui, "LogBuffer"))
             for name in ("submit", "_finish", "on_install_selected", "on_run_optimize",
                          "on_snapshot", "on_open_timeshift", "on_import_config",
-                         "on_toggle_simulate", "_build_dashboard_page"):
+                         "on_toggle_simulate", "_build_dashboard_page",
+                         "_build_appimages_page", "on_rescan_appimages",
+                         "on_appimage_install", "on_appimage_uninstall",
+                         "_handle_dropped_files", "on_manage_select_all",
+                         "on_manage_select_none"):
                 self.assertTrue(hasattr(gui.MainWindow, name), "missing " + name)
         sys.modules.pop("preen_tool.gui", None)
 

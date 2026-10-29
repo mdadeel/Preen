@@ -18,8 +18,8 @@ SETTINGS_PATH = os.path.join(CONFIG_DIR, "settings.json")
 VALID_SOURCES = ("flatpak", "apt")
 VALID_APPEARANCE = ("system", "light", "dark")
 VALID_REFRESH = (0, 10, 15, 30, 60)
-VALID_PAGES = ("dashboard", "install", "manage", "optimize", "customize",
-               "backup", "logs", "deepclean", "services")
+VALID_PAGES = ("dashboard", "install", "manage", "appimages", "optimize",
+               "customize", "backup", "logs", "deepclean", "services")
 
 DEFAULTS: Dict[str, Any] = {
     "simulate_on_startup": False,

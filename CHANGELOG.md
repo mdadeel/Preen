@@ -4,7 +4,35 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-10-29
+
+AppImage management, drag-and-drop and a round of selection fixes across the
+checkbox lists.
+
+### Added
+
+- New **AppImages** page: scans the XDG Downloads folder for `.AppImage`
+  files (reading their embedded name, icon and version), installs them with
+  a menu entry and launcher icon at user scope, and lists already-installed
+  AppImages — including those installed outside Preen.
+- Installing an AppImage that is already installed replaces it in place:
+  the update path keeps the same versionless menu entry.
+- Uninstalling deletes the AppImage copy only when Preen installed it;
+  external AppImage setups keep their files and lose only the menu entry.
+- Drag-and-drop onto the window: drop `.AppImage` files to install them and
+  jump to the AppImages page, or drop a `.deb` to install it with one polkit
+  prompt.
+- `Install from File…` chooser and a Rescan action on the AppImages page.
+
+### Fixed
+
+- Manage Apps gained the Select all / Clear buttons the other lists had.
+- Clicking anywhere on an Install, Manage or Deep Clean row now toggles it —
+  previously only the small checkbox reacted.
+- Select all and Clear both operate on the rows visible under the active
+  search, so a stale search box can no longer make the buttons misbehave.
+
+## [0.4.0] - 2026-10-28
 
 A GNOME-native dark GTK 3 refresh of all nine pages, retaining the existing
 backend, package catalogue and serial task queue.

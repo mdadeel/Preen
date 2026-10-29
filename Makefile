@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup run simulate doctor check test lint wheel deb clean install-dev
+.PHONY: help setup run simulate doctor check test lint wheel deb appimage install-appimage uninstall-appimage clean install-dev
 
 PYTHON ?= python3
 
@@ -39,6 +39,15 @@ wheel: check test  ## Build a wheel after validating the catalogue and tests
 
 deb: check test  ## Build the Debian package
 	DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -us -uc --no-sign
+
+appimage: check test  ## Build the AppImage (dist/Preen-<version>-x86_64.AppImage)
+	./packaging/build_appimage.sh
+
+install-appimage:  ## Install the built AppImage with a menu entry (extra args: ARGS=--system)
+	./packaging/install_appimage.sh $(ARGS)
+
+uninstall-appimage:  ## Remove the AppImage install (extra args: ARGS='--system --purge')
+	./packaging/uninstall_appimage.sh $(ARGS)
 
 clean:  ## Remove generated build artefacts
 	rm -rf build dist .pybuild .pytest_cache *.egg-info preen.egg-info

@@ -26,9 +26,10 @@ preen --doctor ──► cli.py ──► backend/ (headless)
 |---|---|
 | `app.py` | GTK-free launcher. Handles `--doctor`, `--check-catalog`, `--version`, `--simulate` and prints a friendly error when PyGObject is missing. |
 | `cli.py` | Headless diagnostics, catalogue validation and the JSON report. |
-| `gui.py` | Nine GTK 3 screens, light/dark design tokens, dialogs, preferences, diagnostic log and the serial task queue. |
+| `gui.py` | Ten GTK 3 screens, light/dark design tokens, dialogs, preferences, diagnostic log, the serial task queue and window drag-and-drop. |
 | `backend/utils.py` | `run_cmd`, `CommandResult`, `Report`, `Outcome`, `run_actions`, desktop-file parsing, `safe_tar_members`, `ensure_flathub`. |
 | `backend/apps.py` | Catalogue loading and validation, two-query installed-state detection, batched install/update/uninstall. |
+| `backend/appimages.py` | Downloads scanning, AppImage install/update/uninstall with desktop integration at user scope, and local .deb installs. |
 | `backend/deepclean.py` | Reclaimable-space scans, size formatting and simulate-gated cleaning. |
 | `backend/services.py` | systemd listing and actions, boot analysis, strict unit-name validation. |
 | `backend/settings.py` | Validated preferences in `~/.config/preen/settings.json` with legacy migration. |
@@ -156,7 +157,7 @@ exercises handlers without a display server.
   matching modules.
 - `test_gui_smoke.py` checks the import surface and the GTK-missing error
   path.
-- `test_gui_runtime.py` builds all nine pages and exercises handlers, the
+- `test_gui_runtime.py` builds all ten pages and exercises handlers, the
   snapshot callback, queued work, simulation, notices, filters and counters.
 
 The fake GTK tests do not establish visual correctness or replace tests on a
@@ -173,6 +174,9 @@ network is required.
   source archive.
 - `packaging/build_deb.sh` stages a Debian package without debhelper.
 - `packaging/build_appimage.sh` builds a small AppImage that reuses the
-  system Python and GTK.
+  system Python and GTK. `packaging/install_appimage.sh` /
+  `packaging/uninstall_appimage.sh` install it with a menu entry and icon
+  (per-user by default, `--system` for /opt + /usr/share) and remove it
+  again.
 - `.gitignore` excludes `build/`, `dist/`, `*.egg-info`, virtual
   environments, bytecode caches and generated Debian artefacts.

@@ -19,14 +19,28 @@ changes until you say so.
 ## Table of contents
 
 1. [About Preen](#about-preen)
-2. [Features at a glance](#features-at-a-glance)
-3. [Installation](#installation)
-4. [First five minutes](#first-five-minutes)
-5. [Command line](#command-line)
-6. [Development](#development)
-7. [Safety model](#safety-model)
-8. [Project layout](#project-layout)
-9. [Contributing and licence](#contributing-and-licence)
+2. [Screenshots](#screenshots)
+3. [Features at a glance](#features-at-a-glance)
+4. [Installation](#installation)
+5. [First five minutes](#first-five-minutes)
+6. [Command line](#command-line)
+7. [Development](#development)
+8. [Safety model](#safety-model)
+9. [Project layout](#project-layout)
+10. [Contributing and licence](#contributing-and-licence)
+
+---
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Dashboard](screenshots/01_dashboard.png) | ![Install Apps](screenshots/02_install_apps.png) |
+| *Dashboard* | *Install Apps* |
+| ![Manage Apps](screenshots/03_manage_apps.png) | ![AppImages](screenshots/07_appimages.png) |
+| *Manage Apps* | *AppImages — install downloaded AppImages, drag-and-drop, update by reinstalling* |
+| ![Deep Clean](screenshots/04_deep_clean.png) | ![Services](screenshots/06_services.png) |
+| *Deep Clean* | *Services & Boot* |
 
 ---
 
@@ -66,6 +80,7 @@ around 1 MB.
 | **Dashboard** | Live CPU, memory, disk and swap cards, load average, kernel, uptime and power profile, plus a plain-language report of missing optional tools |
 | **Install Apps** | 55 curated apps across 10 categories with search, source badges, status badges, quick-pick presets and bulk install, update and remove actions |
 | **Manage Apps** | Installed Flatpak apps and graphical APT packages in one searchable list, with protected core packages clearly marked |
+| **AppImages** | Install `.AppImage` files from your Downloads folder (or drag them onto the window) with a menu entry and icon; installing an installed app again updates it, and drag-and-drop also accepts `.deb` files |
 | **Deep Clean** | Sized scan of the APT cache, systemd journal, thumbnails, pip cache and trash, with select-all and a running total of reclaimable space |
 | **Optimize System** | Package cleanup, GNOME animations, startup apps, power profile, swapfile size (1 to 8 GB) and ZRAM, applied only where settings actually changed |
 | **Services** | Boot-time breakdown, slowest units, and start, stop, restart, enable and disable for systemd services, with a running-only filter |
@@ -84,27 +99,48 @@ migrated automatically.
 
 ### Option 1: Debian package (recommended for Ubuntu, Zorin OS and Debian)
 
-Download `preen_0.4.0_all.deb` from the
+Download `preen_0.5.0_all.deb` from the
 [latest release](https://github.com/mdadeel/Preen/releases/latest), then run:
 
 ```bash
-sudo apt install ./preen_0.4.0_all.deb
+sudo apt install ./preen_0.5.0_all.deb
 preen
 ```
 
 `apt` resolves the required GTK and psutil dependencies for you. Launch it
 from the app menu as **Preen**, or type `preen` in a terminal.
 
-### Option 2: AppImage (any distribution, no installation)
+### Option 2: AppImage (any distribution)
 
-Download `Preen-0.4.0-x86_64.AppImage` from the
-[releases page](https://github.com/mdadeel/Preen/releases/latest), make it
-executable and run it. It uses the Python and GTK already on your system, so
-the file stays small.
+Download `Preen-0.5.0-x86_64.AppImage` from the
+[releases page](https://github.com/mdadeel/Preen/releases/latest). It uses the
+Python and GTK already on your system, so the file stays small.
+
+Run it directly, no installation:
 
 ```bash
-chmod +x Preen-0.4.0-x86_64.AppImage
-./Preen-0.4.0-x86_64.AppImage
+chmod +x Preen-0.5.0-x86_64.AppImage
+./Preen-0.5.0-x86_64.AppImage
+```
+
+Or install it for real — a menu entry, launcher icon and a matching
+uninstaller:
+
+```bash
+./packaging/install_appimage.sh Preen-0.5.0-x86_64.AppImage
+# or, from a checkout: make install-appimage
+```
+
+The default is a per-user install under `~/.local/share` (no root needed);
+pass `--system` to install into `/opt/preen` and `/usr/share` instead
+(`sudo ./packaging/install_appimage.sh Preen-0.5.0-x86_64.AppImage --system`).
+
+Uninstall when you are done:
+
+```bash
+./packaging/uninstall_appimage.sh            # per-user install
+sudo ./packaging/uninstall_appimage.sh --system
+# add --purge to also delete Preen's settings in ~/.config/preen
 ```
 
 ### Option 3: Python wheel
@@ -112,7 +148,7 @@ chmod +x Preen-0.4.0-x86_64.AppImage
 If you prefer pip and already have the GTK bindings installed:
 
 ```bash
-pip install preen-0.4.0-py3-none-any.whl
+pip install preen-0.5.0-py3-none-any.whl
 preen
 ```
 
@@ -137,14 +173,16 @@ python3 -m preen_tool.app
 ```bash
 # Debian package, no debhelper required
 ./packaging/build_deb.sh
-sudo apt install -y ./dist/preen_0.4.0_all.deb
+sudo apt install -y ./dist/preen_0.5.0_all.deb
 
-# AppImage
+# AppImage, then install it with a menu entry
 ./packaging/build_appimage.sh
+./packaging/install_appimage.sh
 ```
 
-Everything is also wired into the Makefile. Run `make help` to see the full
-list of targets.
+Everything is also wired into the Makefile — `make wheel`, `make deb`,
+`make appimage`, `make install-appimage`, `make uninstall-appimage`. Run
+`make help` to see the full list of targets.
 
 ### Verify the install
 

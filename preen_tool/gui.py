@@ -27,6 +27,7 @@ from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import __version__  # noqa: E402
 from .backend import (  # noqa: E402
+    appimages as appimages_backend,
     apps as apps_backend,
     backup as backup_backend,
     dashboard as dash_backend,
@@ -611,11 +612,13 @@ class MainWindow(Gtk.ApplicationWindow):
         self.log_buf.set_theme(self._app_theme or "dark")
         if self._style_error:
             self.log_buf.append("[error] Could not load the Preen stylesheet: {}\n".format(self._style_error))
+        self._setup_drag_drop()
 
         # ----- Pages (Dashboard first: it is the landing page) -----
         self._build_dashboard_page()
         self._build_install_page()
         self._build_manage_page()
+        self._build_appimages_page()
         self._build_optimize_page()
         self._build_customize_page()
         self._build_deepclean_page()
@@ -793,6 +796,7 @@ class MainWindow(Gtk.ApplicationWindow):
         "system-run-symbolic": "▶", "system-shutdown-symbolic": "⏻",
         "system-software-install-symbolic": "+", "media-memory-symbolic": "▥",
         "drive-harddisk-symbolic": "▣", "drive-multidisk-symbolic": "▣",
+        "package-x-generic-symbolic": "▣",
         "utilities-system-monitor-symbolic": "▥", "application-x-executable-symbolic": "◇",
     }
 
@@ -1057,6 +1061,7 @@ class MainWindow(Gtk.ApplicationWindow):
         ("Software", [
             ("install", "Install Apps", "system-software-install-symbolic", ""),
             ("manage", "Manage Apps", "application-x-executable-symbolic", ""),
+            ("appimages", "AppImages", "package-x-generic-symbolic", ""),
         ]),
         ("System", [
             ("deepclean", "Deep Clean", "user-trash-symbolic", ""),
@@ -1190,6 +1195,7 @@ class MainWindow(Gtk.ApplicationWindow):
         if not busy:
             self._update_install_counter()
             self._update_manage_counter()
+            self._update_appimage_counter()
             self._update_clean_counter()
             self._update_service_actions()
             self._on_swap_toggle(None)
@@ -1236,6 +1242,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.submit(self._read_settings, done=self._apply_settings)
         self.submit(apps_backend.get_status_label_map, done=self._apply_status)
         self.submit(self._scan_installed_worker, done=self._fill_manage_rows)
+        self.submit(self._scan_appimages_worker, done=self._fill_appimage_rows)
         self.submit(dash_backend.get_system_info, done=self._apply_stats)
         self.submit(deepclean_backend.scan_cleanable, done=self._apply_clean_scan)
         self.submit(services_backend.boot_info, done=self._apply_boot)
@@ -1531,7 +1538,7 @@ class MainWindow(Gtk.ApplicationWindow):
         catalog_label.get_style_context().add_class("eyebrow")
         list_tools.pack_start(catalog_label, True, True, 0)
         list_tools.pack_end(self._header_button("Clear", self.on_select_none,
-                                                 "Clear the application selection"), False, False, 0)
+                                                 "Clear the visible selection (everything when not searching)"), False, False, 0)
         list_tools.pack_end(self._header_button("Select all", self.on_select_all,
                                                  "Select every app matching the search"), False, False, 0)
         page.pack_start(list_tools, False, False, 0)
@@ -1541,6 +1548,10 @@ class MainWindow(Gtk.ApplicationWindow):
         self.install_empty.hide()
         self.install_list = Gtk.ListBox()
         self.install_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        # Clicking anywhere on a row toggles it — previously only the small
+        # checkbox reacted, which read as "selection is broken".
+        self.install_list.set_activate_on_single_click(True)
+        self.install_list.connect("row-activated", self._on_install_row_activated)
         self.install_list.set_filter_func(self._install_filter, None)
         for category, items in apps_backend.load_apps().items():
             header_row = Gtk.ListBoxRow()
@@ -1556,7 +1567,7 @@ class MainWindow(Gtk.ApplicationWindow):
             for item in items:
                 app_id = item["id"]
                 row = Gtk.ListBoxRow()
-                row.set_activatable(False)
+                row.set_activatable(True)
                 row.is_header = False
                 row.app_id = app_id
                 row.item = item
@@ -1786,6 +1797,12 @@ class MainWindow(Gtk.ApplicationWindow):
     def _selected_apps(self):
         return [app_id for app_id, row in self.app_rows.items() if row.chk.get_active()]
 
+    def _on_install_row_activated(self, _listbox, row):
+        chk = getattr(row, "chk", None)
+        if chk is not None:
+            chk.set_active(not chk.get_active())
+            self._update_install_counter()
+
     def on_select_all(self, _btn):
         query = self._install_query()
         for row in self.app_rows.values():
@@ -1794,8 +1811,12 @@ class MainWindow(Gtk.ApplicationWindow):
         self._update_install_counter()
 
     def on_select_none(self, _btn):
+        # Mirror of Select all: with a search active, only visible rows are
+        # cleared, so the two buttons can never disagree about their scope.
+        query = self._install_query()
         for row in self.app_rows.values():
-            row.chk.set_active(False)
+            if not query or query in row.search_text:
+                row.chk.set_active(False)
         self._update_install_counter()
 
     def on_refresh_status(self, _btn=None):
@@ -1895,6 +1916,19 @@ class MainWindow(Gtk.ApplicationWindow):
                                         icon="view-refresh-symbolic"), False, False, 0)
         page.pack_start(toolbar, False, False, 0)
 
+        list_tools = Gtk.Box(spacing=8)
+        manage_label = Gtk.Label(label="INSTALLED APPLICATIONS")
+        manage_label.set_xalign(0)
+        manage_label.get_style_context().add_class("eyebrow")
+        list_tools.pack_start(manage_label, True, True, 0)
+        list_tools.pack_end(self._header_button("Clear", self.on_manage_select_none,
+                                                "Clear the visible selection (everything when not searching)"),
+                             False, False, 0)
+        list_tools.pack_end(self._header_button("Select all", self.on_manage_select_all,
+                                                "Select every visible installed app (protected packages are skipped)"),
+                             False, False, 0)
+        page.pack_start(list_tools, False, False, 0)
+
         self._manage_scan_warnings = []
         self.manage_scan_notice = self._hint("")
         self.manage_scan_notice.get_style_context().add_class("status-warning")
@@ -1907,6 +1941,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self.manage_empty.hide()
         self.manage_listbox = Gtk.ListBox()
         self.manage_listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.manage_listbox.set_activate_on_single_click(True)
+        self.manage_listbox.connect("row-activated", self._on_manage_row_activated)
         self.manage_listbox.set_filter_func(self._manage_filter, None)
         scroller = Gtk.ScrolledWindow()
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -2005,7 +2041,7 @@ class MainWindow(Gtk.ApplicationWindow):
             self.manage_listbox.remove(row)
         for entry in sorted(entries, key=lambda e: (e["source"], e["name"].lower())):
             row = Gtk.ListBoxRow()
-            row.set_activatable(False)
+            row.set_activatable(True)
             row.entry = entry
             row.get_style_context().add_class("app-row")
             row.search_text = (entry["name"] + " " + entry["id"] + " " + entry["source"]).lower()
@@ -2051,6 +2087,31 @@ class MainWindow(Gtk.ApplicationWindow):
                 selected.append(row.entry)
         return selected
 
+    def _on_manage_row_activated(self, _listbox, row):
+        chk = getattr(row, "chk", None)
+        if chk is not None and chk.get_sensitive():
+            chk.set_active(not chk.get_active())
+            self._update_manage_counter()
+
+    def on_manage_select_all(self, _btn):
+        query = self.manage_search.get_text().strip().lower()
+        for row in self.manage_listbox.get_children():
+            chk = getattr(row, "chk", None)
+            if chk is None or not chk.get_sensitive():
+                continue
+            if not query or query in getattr(row, "search_text", ""):
+                chk.set_active(True)
+        self._update_manage_counter()
+
+    def on_manage_select_none(self, _btn):
+        query = self.manage_search.get_text().strip().lower()
+        for row in self.manage_listbox.get_children():
+            chk = getattr(row, "chk", None)
+            if chk is not None and chk.get_sensitive() and \
+                    (not query or query in getattr(row, "search_text", "")):
+                chk.set_active(False)
+        self._update_manage_counter()
+
     def on_uninstall_scanned(self, _btn):
         selected = self._selected_manage()
         if not selected:
@@ -2068,6 +2129,301 @@ class MainWindow(Gtk.ApplicationWindow):
             self._notify("Tick at least one installed app first.", "warning")
             return
         self.submit(apps_backend.update_installed, selected)
+
+    # ------------------------------------------------------------------
+    # AppImages page
+    # ------------------------------------------------------------------
+    def _build_appimages_page(self):
+        page = self._page(
+            "appimages", "AppImages", "AppImages",
+            "Install AppImage files you downloaded with a menu entry and icon. "
+            "Installing an AppImage that is already installed replaces it, which is how you update.")
+
+        toolbar = Gtk.Box(spacing=8)
+        self.appimage_search = Gtk.SearchEntry()
+        self.appimage_search.set_placeholder_text("Search AppImages")
+        self.appimage_search.set_hexpand(True)
+        self.appimage_search.connect("search-changed", self._on_appimage_search_changed)
+        toolbar.pack_start(self.appimage_search, True, True, 0)
+        toolbar.pack_start(self._button("Install from File…", self.on_pick_appimage,
+                                        "Choose an AppImage file to install"), False, False, 0)
+        toolbar.pack_start(self._button("Rescan", self.on_rescan_appimages,
+                                        "Scan Downloads and installed AppImages again",
+                                        icon="view-refresh-symbolic"), False, False, 0)
+        page.pack_start(toolbar, False, False, 0)
+
+        self.appimage_empty = self._hint(
+            "No AppImages found in Downloads. Drag a .AppImage onto the window "
+            "or use Install from File…")
+        self.appimage_empty.set_no_show_all(True)
+        self.appimage_empty.hide()
+        self.appimage_list = Gtk.ListBox()
+        self.appimage_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.appimage_list.set_activate_on_single_click(True)
+        self.appimage_list.connect("row-activated", self._on_appimage_row_activated)
+        self.appimage_list.set_filter_func(self._appimage_filter, None)
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.get_style_context().add_class("list-surface")
+        scroller.add(self.appimage_list)
+        page.pack_start(self.appimage_empty, False, False, 0)
+        page.pack_start(scroller, True, True, 0)
+
+        self.appimage_counter = self._counter("Nothing selected")
+        self.appimage_counter.set_xalign(0)
+        page.pack_start(self.appimage_counter, False, False, 0)
+        self.appimage_buttons = {
+            "install": self._button("Install Selected", self.on_appimage_install,
+                                    "Install the selected AppImages with a menu entry "
+                                    "(installing again updates an installed app)", primary=True),
+            "uninstall": self._button("Uninstall Selected", self.on_appimage_uninstall,
+                                      "Remove the selected AppImage installs", destructive=True),
+        }
+        actions = self._flow(*self.appimage_buttons.values())
+        actions.get_style_context().add_class("action-bar")
+        page.pack_start(actions, False, False, 0)
+        page.pack_start(self._hint(
+            "The AppImage file stays in Downloads; Preen installs a copy. Uninstalling deletes "
+            "the copy only when Preen installed it — external AppImage setups keep their files."),
+            False, False, 0)
+        self._update_appimage_counter()
+
+    @staticmethod
+    def _scan_appimages_worker(log=None):
+        warnings = []
+        downloads = appimages_backend.list_downloads(warnings, log)
+        installed = appimages_backend.list_installed(warnings, log)
+        return downloads, installed, warnings
+
+    def on_rescan_appimages(self, _btn=None):
+        self.submit(self._scan_appimages_worker, done=self._fill_appimage_rows)
+
+    def on_pick_appimage(self, _btn):
+        path = self._open_dialog("Choose an AppImage to install")
+        if not path:
+            return
+        self.submit(appimages_backend.install_appimages, [path],
+                    done=lambda _r: self.on_rescan_appimages())
+
+    def _appimage_filter(self, row, _data):
+        query = self.appimage_search.get_text().strip().lower()
+        if getattr(row, "is_header", False):
+            return not query
+        return not query or query in getattr(row, "search_text", "")
+
+    def _on_appimage_search_changed(self, _entry):
+        self.appimage_list.invalidate_filter()
+        query = self.appimage_search.get_text().strip()
+        visible = any(self._appimage_filter(row, None)
+                      for row in self.appimage_list.get_children()
+                      if not getattr(row, "is_header", False))
+        self.appimage_empty.set_visible(not visible)
+        if not visible:
+            self.appimage_empty.set_text(
+                "No AppImages match your search. Clear the search box to see them all."
+                if query else
+                "No AppImages found in Downloads. Drag a .AppImage onto the window "
+                "or use Install from File…")
+            self.appimage_empty.show()
+        else:
+            self.appimage_empty.hide()
+
+    def _fill_appimage_rows(self, result):
+        if isinstance(result, tuple) and len(result) == 3:
+            downloads, installed, _warnings = result
+        else:
+            downloads, installed = [], []
+        if not isinstance(downloads, list) or not isinstance(installed, list):
+            return
+        selected_keys = {
+            row.key for row in self.appimage_list.get_children()
+            if getattr(row, "chk", None) is not None and row.chk.get_active()
+        }
+        for row in list(self.appimage_list.get_children()):
+            self.appimage_list.remove(row)
+        for heading, rows in (("IN DOWNLOADS", downloads), ("INSTALLED", installed)):
+            if not rows:
+                continue
+            header = Gtk.ListBoxRow()
+            header.set_activatable(False)
+            header.set_selectable(False)
+            header.is_header = True
+            header.get_style_context().add_class("list-header")
+            heading_label = Gtk.Label(label=heading)
+            heading_label.set_xalign(0)
+            heading_label.get_style_context().add_class("settings-title")
+            header.add(heading_label)
+            self.appimage_list.add(header)
+            for item in rows:
+                self.appimage_list.add(
+                    self._build_appimage_row(item, item["id"] in selected_keys))
+        self.appimage_list.show_all()
+        self._update_appimage_counter()
+        self._on_appimage_search_changed(None)
+
+    def _build_appimage_row(self, item, selected):
+        row = Gtk.ListBoxRow()
+        row.set_activatable(True)
+        row.is_header = False
+        row.key = item["id"]
+        row.kind = item["kind"]
+        row.entry = item
+        row.get_style_context().add_class("app-row")
+        row.search_text = (item["name"] + " " + item.get("version", "") + " "
+                           + os.path.basename(item.get("path", ""))).lower()
+        line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        chk = Gtk.CheckButton()
+        chk.set_active(selected)
+        chk.set_tooltip_text("Select " + item["name"])
+        self._accessible_name(chk, "Select " + item["name"])
+        chk.connect("toggled", lambda _c: self._update_appimage_counter())
+        line.pack_start(chk, False, False, 0)
+
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        name = Gtk.Label(label=item["name"])
+        name.set_xalign(0)
+        name.set_ellipsize(Pango.EllipsizeMode.END)
+        name.get_style_context().add_class("settings-title")
+        text.pack_start(name, False, False, 0)
+        if item["kind"] == "download":
+            caption = "{} · {}".format(os.path.basename(item["path"]), item["size"])
+        else:
+            caption = item["path"]
+            if item.get("version"):
+                caption = "{} · v{}".format(caption, item["version"])
+        caption_label = Gtk.Label(label=caption)
+        caption_label.set_xalign(0)
+        caption_label.set_ellipsize(Pango.EllipsizeMode.END)
+        caption_label.set_tooltip_text(caption)
+        caption_label.get_style_context().add_class("hint-label")
+        text.pack_start(caption_label, False, False, 0)
+        line.pack_start(text, True, True, 0)
+
+        if item["kind"] == "download":
+            if item.get("installed"):
+                badge = Gtk.Label(label="Installed — install again to update")
+                badge.get_style_context().add_class("status-installed")
+                badge.set_tooltip_text("An AppImage with this name is already installed; "
+                                       "installing replaces it with this file")
+            else:
+                badge = Gtk.Label(label="Ready to install")
+                badge.get_style_context().add_class("dim-label")
+            line.pack_start(badge, False, False, 0)
+        else:
+            source = Gtk.Label(label="AppImage")
+            source.get_style_context().add_class("badge")
+            if not item.get("managed"):
+                source.set_tooltip_text("Installed outside Preen; only the menu entry is removed")
+            line.pack_start(source, False, False, 0)
+        row.add(line)
+        row.chk = chk
+        return row
+
+    def _selected_appimages(self):
+        selected = []
+        for row in self.appimage_list.get_children():
+            chk = getattr(row, "chk", None)
+            if chk is not None and chk.get_active():
+                selected.append(row.entry)
+        return selected
+
+    def _on_appimage_row_activated(self, _listbox, row):
+        chk = getattr(row, "chk", None)
+        if chk is not None:
+            chk.set_active(not chk.get_active())
+            self._update_appimage_counter()
+
+    def _update_appimage_counter(self):
+        selected = self._selected_appimages()
+        count = len(selected)
+        self.appimage_counter.set_text("{} selected".format(count) if count else "Nothing selected")
+        if not hasattr(self, "appimage_buttons"):
+            return
+        has_downloads = any(item["kind"] == "download" for item in selected)
+        has_installed = any(item["kind"] == "installed" for item in selected)
+        enabled = not self._busy
+        self.appimage_buttons["install"].set_sensitive(enabled and has_downloads)
+        self.appimage_buttons["uninstall"].set_sensitive(enabled and has_installed)
+
+    def on_appimage_install(self, _btn):
+        paths = [item["path"] for item in self._selected_appimages()
+                 if item["kind"] == "download"]
+        if not paths:
+            self._notify("Tick at least one AppImage in Downloads first.", "warning")
+            return
+        self.submit(appimages_backend.install_appimages, paths,
+                    done=lambda _r: self.on_rescan_appimages())
+
+    def on_appimage_uninstall(self, _btn):
+        entries = [item for item in self._selected_appimages()
+                   if item["kind"] == "installed"]
+        if not entries:
+            self._notify("Tick at least one installed AppImage first.", "warning")
+            return
+        if not self._confirm(
+                "Remove {} AppImage install(s)?".format(len(entries)),
+                "\n".join("• {}".format(e["name"]) for e in entries) +
+                "\n\nThe AppImage file is deleted only when Preen installed it."):
+            return
+        self.submit(appimages_backend.uninstall_appimages, [e["id"] for e in entries],
+                    done=lambda _r: self.on_rescan_appimages())
+
+    # ------------------------------------------------------------------
+    # Drag and drop (first DnD target in Preen)
+    # ------------------------------------------------------------------
+    def _setup_drag_drop(self):
+        """Accept .AppImage/.deb files dropped from a file manager."""
+        try:
+            targets = [Gtk.TargetEntry.new("text/uri-list", 0, 0)]
+            self.drag_dest_set(Gtk.DestDefaults.ALL, targets, Gdk.DragAction.COPY)
+            self.connect("drag-data-received", self._on_drag_data_received)
+        except Exception as exc:  # never let DnD setup break the window
+            log = getattr(self, "log_buf", None)
+            if log is not None:
+                log.append("[warning] drag-and-drop unavailable: {}\n".format(exc))
+
+    def _on_drag_data_received(self, _widget, _context, _x, _y, data, _info, _time):
+        uris = data.get_uris() if data is not None else []
+        self._handle_dropped_uris(uris)
+        return True
+
+    def _handle_dropped_uris(self, uris):
+        paths = []
+        for uri in uris or []:
+            try:
+                path = Gio.File.new_for_uri(uri).get_path()
+            except Exception:
+                path = None
+            if path:
+                paths.append(path)
+        self._handle_dropped_files(paths)
+        return False
+
+    def _handle_dropped_files(self, paths):
+        appimages, debs, ignored = [], [], []
+        for path in paths or []:
+            lower = path.lower()
+            if lower.endswith(".appimage"):
+                appimages.append(path)
+            elif lower.endswith(".deb"):
+                debs.append(path)
+            else:
+                ignored.append(os.path.basename(path))
+        if ignored:
+            self._notify("Dropped file(s) ignored: {}. Only .AppImage and .deb files are supported."
+                         .format(", ".join(ignored[:3])), "warning")
+        if appimages:
+            try:
+                self.stack.set_visible_child_name("appimages")
+            except Exception:
+                pass
+            self.submit(appimages_backend.install_appimages, appimages,
+                        done=lambda _r: self.on_rescan_appimages())
+        for path in debs:
+            if self._confirm("Install {}?".format(os.path.basename(path)),
+                             "Installs the package with apt-get (one polkit prompt)."):
+                self.submit(appimages_backend.install_deb, path,
+                            done=lambda _r: self.on_scan_installed())
 
     # ------------------------------------------------------------------
     # Optimize page
@@ -2553,6 +2909,12 @@ class MainWindow(Gtk.ApplicationWindow):
             chk.set_active(False)
         self._update_clean_counter()
 
+    @staticmethod
+    def _on_click_toggle_row(_eventbox, _event, chk):
+        """Row-click toggles the checkbox; the checkbox consumes its own clicks."""
+        chk.set_active(not chk.get_active())
+        return False
+
     def _selected_clean_items(self):
         return [item for chk, item in self.clean_checkbuttons.values()
                 if chk.get_active() and chk.get_sensitive()]
@@ -2636,7 +2998,15 @@ class MainWindow(Gtk.ApplicationWindow):
                                       else "This item could not be measured")
                 line.pack_start(text_box, True, True, 0)
                 line.pack_end(size, False, False, 0)
-                self.clean_rows.pack_start(line, False, False, 0)
+                if chk.get_sensitive():
+                    # A click anywhere on the row toggles it; clicks on the
+                    # checkbox itself are consumed by the checkbox first.
+                    clickable = Gtk.EventBox()
+                    clickable.add(line)
+                    clickable.connect("button-press-event", self._on_click_toggle_row, chk)
+                    self.clean_rows.pack_start(clickable, False, False, 0)
+                else:
+                    self.clean_rows.pack_start(line, False, False, 0)
                 self.clean_checkbuttons[item["key"]] = (chk, item)
         self.clean_rows.show_all()
         available = sum(1 for item in items if (item.get("size") or 0) > 0)
@@ -3195,11 +3565,13 @@ class MainWindow(Gtk.ApplicationWindow):
             "Quick start",
             "1. Turn on Simulate (top right) to preview actions safely.\n"
             "2. Dashboard shows live CPU, memory, disk and swap usage and which tools are available.\n"
-            "3. Install Apps: search, tick, then Install Selected. APT and Flatpak both work.\n"
-            "4. Deep Clean: scan first, review the sizes, then clean only what you ticked.\n"
-            "5. Optimize System: only the settings you changed are applied.\n"
-            "6. Services: inspect boot time and start, stop or restart systemd units.\n"
-            "7. Logs shows every command and its result, with a filter and Save Log for support.\n\n"
+            "3. Install Apps: search, tick (or click a row), then Install Selected. APT and Flatpak both work.\n"
+            "4. AppImages: drag a .AppImage onto the window, or install downloads from the AppImages page. "
+            "Installing again over an installed app updates it.\n"
+            "5. Deep Clean: scan first, review the sizes, then clean only what you ticked.\n"
+            "6. Optimize System: only the settings you changed are applied.\n"
+            "7. Services: inspect boot time and start, stop or restart systemd units.\n"
+            "8. Logs shows every command and its result, with a filter and Save Log for support.\n\n"
             "Full guide: docs/USER_GUIDE.md in the repository.",
             Gtk.MessageType.INFO)
 

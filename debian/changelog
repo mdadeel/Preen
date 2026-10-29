@@ -1,3 +1,16 @@
+preen (0.5.0) stable; urgency=medium
+
+  * New AppImages page: install AppImage downloads with a menu entry and
+    icon, reinstall over an installed app to update it, and uninstall
+    installs Preen created (external setups keep their files).
+  * Drag-and-drop: drop .AppImage files anywhere on the window to install
+    them, or a .deb to install it with one polkit prompt.
+  * Selection fixes: Manage Apps gains Select all/Clear; rows on Install,
+    Manage and Deep Clean toggle when clicked; Select all and Clear both
+    respect the active search.
+
+ -- Preen contributors <noreply@example.com>  Wed, 29 Oct 2026 12:00:00 +0000
+
 preen (0.4.0) stable; urgency=medium
 
   * macOS-inspired design pass: grouped sidebar sections, segmented source
