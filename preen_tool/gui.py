@@ -33,6 +33,7 @@ from .backend import (  # noqa: E402
     dashboard as dash_backend,
     deepclean as deepclean_backend,
     firewall as firewall_backend,
+    maintenance as maintenance_backend,
     performance as perf_backend,
     services as services_backend,
     settings as settings_backend,
@@ -1201,6 +1202,7 @@ class MainWindow(Gtk.ApplicationWindow):
             self._update_clean_counter()
             self._update_service_actions()
             self._sync_ufw_control()
+            self._sync_maintenance_control()
             self._on_swap_toggle(None)
         return False
 
@@ -1251,6 +1253,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.submit(services_backend.boot_info, done=self._apply_boot)
         self.submit(services_backend.list_services, done=self._apply_services)
         self.submit(backup_backend.list_snapshots, done=self._apply_snapshots)
+        self.submit(maintenance_backend.get_schedule, done=self._apply_maintenance_state)
         interval = self.settings.get("auto_refresh_seconds", 15)
         if interval:
             GLib.timeout_add_seconds(interval, self._periodic_refresh)
@@ -3051,6 +3054,30 @@ class MainWindow(Gtk.ApplicationWindow):
         page.pack_start(actions, False, False, 0)
         self._update_clean_counter()
 
+        maintenance_frame, maintenance = self._frame("Automatic maintenance", tight=True)
+        maintenance_row, self.chk_maintenance = self._toggle_row(
+            "Run cleanup automatically",
+            "The root-level cleanup tasks on a schedule: package cache, unused "
+            "packages, system journal and unused Flatpak runtimes")
+        self.chk_maintenance.connect("notify::active", self.on_toggle_maintenance)
+        self.chk_maintenance.set_sensitive(False)  # until the schedule read completes
+        maintenance.pack_start(maintenance_row, False, False, 0)
+        self.cmb_maintenance = Gtk.ComboBoxText()
+        self._accessible_name(self.cmb_maintenance, "Maintenance frequency")
+        for label in ("Daily", "Weekly", "Monthly"):
+            self.cmb_maintenance.append_text(label)
+        self.cmb_maintenance.set_active(1)  # Weekly
+        self.cmb_maintenance.set_tooltip_text("How often automatic maintenance runs")
+        self.cmb_maintenance.connect("changed", self.on_maintenance_frequency_changed)
+        maintenance.pack_start(self._value_row("Frequency", self.cmb_maintenance,
+                                               "How often automatic maintenance runs"),
+                               False, False, 0)
+        maintenance.pack_start(self._hint(
+            "Uses a systemd timer, applies after one administrator prompt and runs even "
+            "when Preen is closed. Simulate mode previews the change without touching the system."),
+            False, False, 0)
+        page.pack_start(maintenance_frame, False, False, 0)
+
     def on_clean_select_all(self, _btn=None):
         for chk, item in self.clean_checkbuttons.values():
             if chk.get_sensitive() and (item.get("size") or 0) > 0:
@@ -3217,6 +3244,69 @@ class MainWindow(Gtk.ApplicationWindow):
         difference = max(0, sum(before.values()) - sum(after[key] for key in before))
         self._notify("Cleanup completed. Selected items now measure {} less (estimated).".format(
             deepclean_backend.format_size(difference)), "info")
+
+    # ------------------------------------------------------------------
+    # Automatic maintenance (systemd timer)
+    # ------------------------------------------------------------------
+    MAINTENANCE_FREQUENCIES = ("daily", "weekly", "monthly")
+
+    def _maintenance_frequency(self):
+        index = self.cmb_maintenance.get_active()
+        if not isinstance(index, int) or not 0 <= index < len(self.MAINTENANCE_FREQUENCIES):
+            index = self.MAINTENANCE_FREQUENCIES.index("weekly")
+        return self.MAINTENANCE_FREQUENCIES[index]
+
+    def _apply_maintenance_state(self, schedule):
+        if not isinstance(schedule, dict):
+            return
+        self._maintenance_baseline = schedule
+        self.chk_maintenance.set_active(bool(schedule.get("enabled")))
+        self.chk_maintenance.set_sensitive(True)
+        frequency = schedule.get("frequency")
+        if frequency in self.MAINTENANCE_FREQUENCIES:
+            self.cmb_maintenance.set_active(self.MAINTENANCE_FREQUENCIES.index(frequency))
+        if schedule.get("installed") and schedule.get("calendar"):
+            self.cmb_maintenance.set_tooltip_text(
+                "Currently scheduled: {}".format(schedule["calendar"]))
+
+    def _sync_maintenance_control(self):
+        known = getattr(self, "_maintenance_baseline", None) is not None
+        self.chk_maintenance.set_sensitive(known and not self._busy)
+
+    def _refresh_maintenance_state(self):
+        self.submit(maintenance_backend.get_schedule, done=self._apply_maintenance_state)
+
+    def on_toggle_maintenance(self, switch, _param=None):
+        desired = switch.get_active()
+        baseline = getattr(self, "_maintenance_baseline", None)
+        if baseline is None:
+            switch.handler_block_by_func(self.on_toggle_maintenance)
+            switch.set_active(False)
+            switch.handler_unblock_by_func(self.on_toggle_maintenance)
+            return
+        if bool(baseline.get("enabled")) == desired:
+            return  # a programmatic sync or nothing to do
+        if desired and not self._confirm(
+                "Enable automatic maintenance?",
+                "Preen installs a systemd timer that runs the root-level cleanup tasks "
+                "on the chosen schedule. This applies immediately.",
+                required=False):
+            switch.handler_block_by_func(self.on_toggle_maintenance)
+            switch.set_active(bool(baseline.get("enabled")))
+            switch.handler_unblock_by_func(self.on_toggle_maintenance)
+            return
+        self.submit(maintenance_backend.set_schedule, desired, self._maintenance_frequency(),
+                    done=lambda _r: self._refresh_maintenance_state())
+
+    def on_maintenance_frequency_changed(self, _combo=None):
+        baseline = getattr(self, "_maintenance_baseline", None)
+        if baseline is None or not baseline.get("enabled") \
+                or not self.chk_maintenance.get_active():
+            return
+        if self._maintenance_frequency() == baseline.get("frequency"):
+            return  # the applied state re-selected this row; nothing to do
+        self.submit(maintenance_backend.set_schedule, True, self._maintenance_frequency(),
+                    done=lambda _r: self._refresh_maintenance_state())
 
     # ------------------------------------------------------------------
     # Services & Boot page

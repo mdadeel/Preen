@@ -270,6 +270,48 @@ class FakeTargetEntry:
         return object()
 
 
+class FakeSwitch:
+    """Standalone switch stub: get_active/set_active actually store state."""
+
+    def __init__(self, active=False):
+        self._active = active
+
+    def get_active(self):
+        return self._active
+
+    def set_active(self, value):
+        self._active = bool(value)
+
+    def handler_block_by_func(self, _func):
+        return None
+
+    def handler_unblock_by_func(self, _func):
+        return None
+
+
+class FakeComboBoxText(Widget):
+    """ComboBoxText fake that remembers the active row for get_active()."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._active = None
+        self._texts = []
+
+    def append_text(self, text):
+        self._texts.append(text)
+
+    def set_active(self, index):
+        self._active = index
+
+    def get_active(self):
+        return self._active
+
+    def get_active_text(self):
+        if isinstance(self._active, int) and 0 <= self._active < len(self._texts):
+            return self._texts[self._active]
+        return ""
+
+
 class FakeGtk:
     ApplicationWindow = Widget
     Application = Widget
@@ -277,7 +319,7 @@ class FakeGtk:
     Button = Widget
     ToggleButton = FakeToggleButton
     CheckButton = Widget
-    ComboBoxText = Widget
+    ComboBoxText = FakeComboBoxText
     Dialog = Widget
     FileChooserDialog = Widget
     Grid = Widget
@@ -1411,6 +1453,68 @@ class GuiRuntimeTest(unittest.TestCase):
         })
         self.assertTrue(window.chk_ufw.get_sensitive())
         self.assertFalse(window.chk_ufw.get_active())
+
+    def test_maintenance_card_applies_state_and_schedules(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_maintenance_state({"installed": False, "enabled": False,
+                                         "frequency": "", "calendar": ""})
+        self.assertTrue(window.chk_maintenance.get_sensitive())
+        self.assertFalse(window.chk_maintenance.get_active())
+        window._confirm = lambda *args, **kwargs: True
+        switch = FakeSwitch(active=True)
+        with mock.patch.object(window, "submit") as submit:
+            window.on_toggle_maintenance(switch, None)
+        self.assertEqual(submit.call_args[0][0], self.gui.maintenance_backend.set_schedule)
+        self.assertEqual(submit.call_args[0][1], True)
+        self.assertEqual(submit.call_args[0][2], "weekly")
+
+    def test_maintenance_toggle_reverts_when_confirm_declined(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_maintenance_state({"installed": False, "enabled": False,
+                                         "frequency": "", "calendar": ""})
+        self.assertFalse(window.chk_maintenance.get_active())
+        window._confirm = lambda *args, **kwargs: False
+        switch = FakeSwitch(active=True)  # user flipped it on
+        with mock.patch.object(window, "submit") as submit:
+            window.on_toggle_maintenance(switch, None)
+        self.assertFalse(submit.called)
+        self.assertFalse(switch.get_active())  # reverted to the applied state
+
+    def test_maintenance_disable_needs_no_confirm_and_schedules_removal(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_maintenance_state({"installed": True, "enabled": True,
+                                         "frequency": "weekly",
+                                         "calendar": "Sun *-*-* 12:00:00"})
+        switch = FakeSwitch(active=False)
+        with mock.patch.object(window, "submit") as submit:
+            window.on_toggle_maintenance(switch, None)
+        self.assertEqual(submit.call_args[0][1], False)
+
+    def test_maintenance_frequency_change_rewrites_timer_when_enabled(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_maintenance_state({"installed": True, "enabled": True,
+                                         "frequency": "weekly",
+                                         "calendar": "Sun *-*-* 12:00:00"})
+        window.cmb_maintenance.set_active(0)  # Daily
+        with mock.patch.object(window, "submit") as submit:
+            window.on_maintenance_frequency_changed(None)
+        self.assertEqual(submit.call_args[0][2], "daily")
+        # The applied state re-selects the row; that must not enqueue a rewrite.
+        window._apply_maintenance_state({"installed": True, "enabled": True,
+                                         "frequency": "daily",
+                                         "calendar": "*-*-* 12:00:00"})
+        with mock.patch.object(window, "submit") as submit:
+            window.on_maintenance_frequency_changed(None)
+        self.assertFalse(submit.called)
+
+    def test_maintenance_controls_disabled_while_busy(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._busy = True
+        window._sync_maintenance_control()
+        self.assertFalse(window.chk_maintenance.get_sensitive())
+        window._busy = False
+        window._sync_maintenance_control()
+        self.assertTrue(window.chk_maintenance.get_sensitive())
 
     def test_sidebar_search_filters_rows_and_hides_headers(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
