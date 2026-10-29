@@ -7,6 +7,7 @@
 set -euo pipefail
 
 DESKTOP_ID=io.github.mdadeel.Preen.desktop
+HANDLER_ID=io.github.mdadeel.Preen.appimage.desktop
 ICON_NAME=preen.png
 
 usage() {
@@ -62,7 +63,7 @@ if [ -d "$APP_DIR" ]; then
   echo "Removed $APP_DIR"
   REMOVED=1
 fi
-for f in "$APPS_DIR/$DESKTOP_ID" "$ICONS_DIR/$ICON_NAME"; do
+for f in "$APPS_DIR/$DESKTOP_ID" "$APPS_DIR/$HANDLER_ID" "$ICONS_DIR/$ICON_NAME"; do
   if [ -e "$f" ]; then
     rm -f "$f"
     echo "Removed $f"

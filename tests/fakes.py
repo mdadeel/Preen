@@ -53,13 +53,16 @@ elif name == "dpkg-query":
         out += "{}\t{}\t{}\n".format(pkg, pkg, status)
 elif name == "dpkg":
     if args and args[0] == "-S":
-        owners = state.get("owners", {})
-        for path in args[1:]:
-            owner = owners.get(path)
-            if owner:
-                out += "{}: {}\n".format(owner, path)
-            else:
-                code = 1
+        if state.get("dpkg_S_batch_fail") and len(args) > 2:
+            err, code = "dpkg: error: simulated batch ownership failure", 2
+        else:
+            owners = state.get("owners", {})
+            for path in args[1:]:
+                owner = owners.get(path)
+                if owner:
+                    out += "{}: {}\n".format(owner, path)
+                else:
+                    code = 1
     else:
         code = 1
 elif name == "gsettings":

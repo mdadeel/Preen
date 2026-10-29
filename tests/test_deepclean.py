@@ -173,7 +173,8 @@ class ScanContentsTest(unittest.TestCase):
         self.assertIn("pip_cache", deepclean.USER_CLEAN_INFO)
         keys = {item["key"] for item in deepclean.scan_cleanable()}
         self.assertEqual(
-            keys, {"apt_cache", "journal", "thumbnails", "pip_cache", "trash"})
+            keys, {"apt_cache", "journal", "old_kernels",
+                   "thumbnails", "pip_cache", "trash"})
 
     def test_pip_cache_is_grouped_with_other_user_cleans(self):
         actions = deepclean.build_clean_actions([

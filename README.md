@@ -31,9 +31,9 @@ reinstalling, and drag-and-drop `.AppImage` or `.deb` files onto the window.*
 | **Dashboard** | Review system information, resource usage and missing tools; open common maintenance pages. |
 | **Install Apps** | Search a curated catalogue, select APT or Flatpak, use presets and install or update apps. A source fallback is available where the catalogue provides one. |
 | **Manage Apps** | Search installed Flatpaks and graphical APT packages, select apps for removal and see protected package rows. |
-| **AppImages** | Install downloaded `.AppImage` files with a menu entry and icon; installing an installed app again updates it, and drag-and-drop also accepts `.deb` files. |
-| **Deep Clean** | Review selected cache, trash and journal cleanup targets with measured sizes or estimates before confirming deletion. |
-| **Optimize System** | Manage supported power profiles, animations, startup entries, swap and ZRAM settings when their system tools are available. |
+| **AppImages** | Install downloaded `.AppImage` files with a menu entry and icon; installing an installed app again updates it, drag-and-drop also accepts `.deb` files, and right-click integration offers Run / Install / Update from the file manager. |
+| **Deep Clean** | Review selected cache, trash, journal and old-kernel cleanup targets with measured sizes or estimates before confirming deletion. |
+| **Optimize System** | Manage supported power profiles, animations, startup entries, swap, ZRAM and a UFW firewall toggle when their system tools are available. |
 | **Services** | Inspect systemd services, filter the list and request supported service actions; stop, disable and restart require confirmation. |
 | **Backup & Restore** | Export and restore user configuration archives; use Timeshift where installed. |
 | **Customize Look** | Choose Preen's own light, dark or system appearance. Separate, confirmed controls can also change desktop text scaling, icon themes and GTK 3 corner styling. |
@@ -146,6 +146,10 @@ python3 -m preen_tool.app --doctor --json   # machine-readable report
 python3 -m preen_tool.app --check-catalog    # validate app and preset data
 python3 -m preen_tool.app --version
 python3 -m preen_tool.app --simulate        # start the GUI in Simulate mode
+
+preen --appimage-handler ~/Downloads/App.AppImage   # install/run/update dialog
+preen --appimage-run ~/Downloads/App.AppImage       # launch it detached, no window
+preen --deb-handler ./package.deb                   # install a .deb with one prompt
 ```
 
 Doctor reports and logs can contain local paths, app names and diagnostic

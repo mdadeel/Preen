@@ -32,6 +32,7 @@ from .backend import (  # noqa: E402
     backup as backup_backend,
     dashboard as dash_backend,
     deepclean as deepclean_backend,
+    firewall as firewall_backend,
     performance as perf_backend,
     services as services_backend,
     settings as settings_backend,
@@ -464,6 +465,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.app_rows = {}
         self.clean_checkbuttons = {}
         self.selected_service_row = None
+        self._downloads_pending = False
         self.baseline = {
             "animations_off": None, "swap": False, "zram": False,
             "power": None, "theme": None, "round": False, "scaling": None,
@@ -1198,6 +1200,7 @@ class MainWindow(Gtk.ApplicationWindow):
             self._update_appimage_counter()
             self._update_clean_counter()
             self._update_service_actions()
+            self._sync_ufw_control()
             self._on_swap_toggle(None)
         return False
 
@@ -2033,9 +2036,10 @@ class MainWindow(Gtk.ApplicationWindow):
         else:
             self.manage_scan_notice.hide()
         previously_selected = {
-            (row.entry["source"], row.entry["id"])
+            row.key
             for row in self.manage_listbox.get_children()
-            if getattr(row, "chk", None) is not None and row.chk.get_active()
+            if getattr(row, "chk", None) is not None and getattr(row, "key", None) is not None
+            and row.chk.get_active()
         }
         for row in list(self.manage_listbox.get_children()):
             self.manage_listbox.remove(row)
@@ -2043,6 +2047,7 @@ class MainWindow(Gtk.ApplicationWindow):
             row = Gtk.ListBoxRow()
             row.set_activatable(True)
             row.entry = entry
+            row.key = (entry["source"], entry["id"], entry.get("desktop", ""))
             row.get_style_context().add_class("app-row")
             row.search_text = (entry["name"] + " " + entry["id"] + " " + entry["source"]).lower()
             line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -2052,7 +2057,7 @@ class MainWindow(Gtk.ApplicationWindow):
             chk.set_tooltip_text("Essential desktop package, protected from removal" if protected
                                  else "Select " + entry["name"])
             self._accessible_name(chk, ("Protected " if protected else "Select ") + entry["name"])
-            chk.set_active(not protected and (entry["source"], entry["id"]) in previously_selected)
+            chk.set_active(not protected and row.key in previously_selected)
             chk.connect("toggled", lambda _c: self._update_manage_counter())
             line.pack_start(chk, False, False, 0)
             line.pack_start(self._app_icon(entry), False, False, 0)
@@ -2186,6 +2191,24 @@ class MainWindow(Gtk.ApplicationWindow):
             "The AppImage file stays in Downloads; Preen installs a copy. Uninstalling deletes "
             "the copy only when Preen installed it — external AppImage setups keep their files."),
             False, False, 0)
+
+        integration_frame, integration = self._frame("File manager integration", tight=True)
+        scripts_row, self.fm_scripts_switch = self._toggle_row(
+            "Right-click menu entries",
+            "Show 'Install with Preen' and 'Run with Preen' in the file manager")
+        # State from disk first, connect second: the initial sync must not
+        # enqueue a change.
+        self.fm_scripts_switch.set_active(appimages_backend.filemanager_scripts_installed())
+        self.fm_scripts_switch.connect("notify::active", self.on_toggle_fm_scripts)
+        integration.add(scripts_row)
+        self.fm_default_button = self._button(
+            "Set as default", self.on_set_default_appimage,
+            "Open .AppImage files with Preen when double-clicked")
+        integration.add(self._value_row(
+            "Open .AppImage files with Preen", self.fm_default_button,
+            "Double-click offers Install or Run; the right-click menu stays available"))
+        page.pack_start(integration_frame, False, False, 0)
+        self._setup_downloads_monitor()
         self._update_appimage_counter()
 
     @staticmethod
@@ -2368,6 +2391,50 @@ class MainWindow(Gtk.ApplicationWindow):
         self.submit(appimages_backend.uninstall_appimages, [e["id"] for e in entries],
                     done=lambda _r: self.on_rescan_appimages())
 
+    def on_toggle_fm_scripts(self, switch, _param=None):
+        self.submit(appimages_backend.set_filemanager_scripts, switch.get_active(),
+                    done=lambda _r: self._sync_fm_state())
+
+    def _sync_fm_state(self):
+        installed = appimages_backend.filemanager_scripts_installed()
+        if self.fm_scripts_switch.get_active() != installed:
+            self.fm_scripts_switch.set_active(installed)
+
+    def on_set_default_appimage(self, _btn):
+        self.submit(appimages_backend.set_default_appimage_handler)
+
+    def _setup_downloads_monitor(self):
+        """Watch Downloads so a freshly downloaded AppImage is noticed."""
+        try:
+            directory = appimages_backend.downloads_dir()
+            if not os.path.isdir(directory):
+                return
+            monitor = Gio.File.new_for_path(directory).monitor_directory(
+                Gio.FileMonitorFlags.NONE, None)
+            monitor.connect("changed", self._on_downloads_changed)
+            self._downloads_monitor = monitor  # keep it alive for the window
+        except Exception as exc:
+            self.log_buf.append("[warning] Downloads watch unavailable: {}\n".format(exc))
+
+    def _on_downloads_changed(self, _monitor, file, _other_file, event):
+        if event not in (Gio.FileMonitorEvent.CREATED, Gio.FileMonitorEvent.RENAMED):
+            return False
+        name = file.get_basename() if file is not None else ""
+        if not name.lower().endswith(".appimage"):
+            return False
+        # A download produces a storm of events; settle before reacting once.
+        if self._downloads_pending:
+            return False
+        self._downloads_pending = True
+        GLib.timeout_add_seconds(3, self._downloads_settled)
+        return False
+
+    def _downloads_settled(self):
+        self._downloads_pending = False
+        self.on_rescan_appimages()
+        self._notify("New AppImage in Downloads — review it on the AppImages page.", "info")
+        return False
+
     # ------------------------------------------------------------------
     # Drag and drop (first DnD target in Preen)
     # ------------------------------------------------------------------
@@ -2488,6 +2555,15 @@ class MainWindow(Gtk.ApplicationWindow):
         page.pack_start(power_frame, False, False, 0)
         self._on_swap_toggle(None)
 
+        security_frame, security = self._frame("Security", tight=True)
+        ufw_row, self.chk_ufw = self._toggle_row(
+            "Firewall (UFW)",
+            "Blocks unsolicited incoming connections. Applies immediately")
+        self.chk_ufw.connect("notify::active", self._on_ufw_toggle)
+        self.chk_ufw.set_sensitive(False)  # until the state read completes
+        security.pack_start(ufw_row, False, False, 0)
+        page.pack_start(security_frame, False, False, 0)
+
         page.pack_start(self._flow(
             self._button("Apply Changes", self.on_run_optimize,
                          "Apply only the settings you changed", primary=True,
@@ -2508,6 +2584,29 @@ class MainWindow(Gtk.ApplicationWindow):
         available = self.baseline.get("power") in perf_backend.POWER_PROFILES
         self.cmb_power.set_sensitive(available and not self._busy)
 
+    def _sync_ufw_control(self):
+        # Unknown state (ufw missing or unreadable) stays insensitive.
+        known = self.baseline.get("ufw") is not None
+        self.chk_ufw.set_sensitive(known and not self._busy)
+
+    def _on_ufw_toggle(self, switch, _param=None):
+        desired = switch.get_active()
+        current = self.baseline.get("ufw")
+        if current is None or bool(current) == desired:
+            return  # nothing to do, or a programmatic state sync
+        if not self._confirm(
+                "{} the firewall?".format("Enable" if desired else "Disable"),
+                "Enabling blocks unsolicited incoming connections; disabling "
+                "removes that protection. This applies immediately.",
+                required=False):
+            switch.set_active(bool(current))  # revert; the notify is a no-op
+            return
+        self.submit(firewall_backend.set_ufw, desired, done=self._ufw_done)
+
+    def _ufw_done(self, _result):
+        # Re-read the real state: the change may have failed or been simulated.
+        self.submit(self._read_optimize_settings, done=self._apply_optimize_settings)
+
     def _read_optimize_settings(self):
         animations = system_backend.are_animations_enabled()
         return {
@@ -2515,6 +2614,7 @@ class MainWindow(Gtk.ApplicationWindow):
             "swap": perf_backend.is_swapfile_active(),
             "zram": perf_backend.is_zram_active() or perf_backend.is_zram_configured(),
             "power": perf_backend.get_power_profile(),
+            "ufw": firewall_backend.ufw_enabled(),
         }
 
     def _read_appearance_setting(self):
@@ -2556,6 +2656,12 @@ class MainWindow(Gtk.ApplicationWindow):
             self.cmb_power.set_active(len(perf_backend.POWER_PROFILES))
         self._sync_power_control()
         self._on_swap_toggle(None)
+        ufw = info.get("ufw")
+        self.chk_ufw.set_active(bool(ufw))
+        self.chk_ufw.set_sensitive(ufw is not None)
+        self.chk_ufw.set_tooltip_text(
+            "UFW is not installed" if ufw is None else
+            "Firewall is currently " + ("active" if ufw else "inactive"))
 
     def _apply_theme_setting(self, mode):
         if mode not in settings_backend.VALID_APPEARANCE:
@@ -2945,7 +3051,7 @@ class MainWindow(Gtk.ApplicationWindow):
             self.clean_rows.remove(child)
         self.clean_checkbuttons = {}
         groups = (
-            ("SYSTEM PACKAGES & LOGS", {"apt_cache", "journal"}),
+            ("SYSTEM PACKAGES & LOGS", {"apt_cache", "journal", "old_kernels"}),
             ("REGENERABLE CACHES", {"thumbnails", "pip_cache"}),
             ("PERSONAL DATA", {"trash"}),
         )

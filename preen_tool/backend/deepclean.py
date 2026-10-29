@@ -11,7 +11,7 @@ import re
 import shutil
 from typing import Dict, List, Optional
 
-from . import utils
+from . import kernels, utils
 
 # The directories a clean action may touch, keyed by scan item. Nothing else
 # is ever deleted, new cleanables must be added here explicitly.
@@ -124,6 +124,11 @@ def scan_cleanable() -> List[dict]:
          # not a promise that this much space will actually be recovered.
          "size": max(0, journal_size - 100 * 1024 ** 2) if journal_size is not None else None,
          "root": True},
+        {"key": "old_kernels",
+         "label": "Old kernel packages",
+         "detail": "Kernel versions older than the running one and one spare. "
+                   "Never removes the running kernel.",
+         "size": kernels.reclaimable_bytes(), "root": True},
     ]
     items.extend(
         {
@@ -227,6 +232,8 @@ def build_clean_actions(selected: List[dict]) -> List[tuple]:
                 actions.append(("APT cache", clean_apt_cache, ()))
             elif item["key"] == "journal":
                 actions.append(("System journal", vacuum_journal, ()))
+            elif item["key"] == "old_kernels":
+                actions.append(("Old kernels", kernels.remove_old_kernels, ()))
         else:
             user_keys.append(item["key"])
     if user_keys:

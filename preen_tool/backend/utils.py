@@ -294,8 +294,30 @@ def shell_join(commands: Sequence[Sequence[str]]) -> str:
 # ---------------------------------------------------------------------------
 # Desktop entry parsing
 # ---------------------------------------------------------------------------
+def _pick_localized_name(names: Dict[str, str]) -> str:
+    """Best ``Name[locale]`` match for the current locale (empty if none)."""
+    if not names:
+        return ""
+    raw = (os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES")
+           or os.environ.get("LANG") or "")
+    tag = raw.split(".", 1)[0].split("@", 1)[0]
+    if not tag or tag in ("C", "POSIX"):
+        return ""
+    if tag in names:
+        return names[tag]
+    base = tag.split("_", 1)[0]
+    for candidate, value in names.items():
+        if candidate.split("_", 1)[0] == base:
+            return value
+    return ""
+
+
 def parse_desktop_file(path: str) -> Dict[str, object]:
-    """Read the fields we care about from the [Desktop Entry] group only."""
+    """Read the fields we care about from the [Desktop Entry] group only.
+
+    ``Name[<locale>]`` entries win over the unlocalised ``Name`` when one
+    matches the current locale, so users do not see raw file names.
+    """
     info: Dict[str, object] = {
         "name": os.path.basename(path),
         "type": "",
@@ -307,6 +329,7 @@ def parse_desktop_file(path: str) -> Dict[str, object]:
         "comment": "",
         "x_appimage_version": "",
     }
+    localized: Dict[str, str] = {}
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as handle:
             in_entry = False
@@ -322,6 +345,10 @@ def parse_desktop_file(path: str) -> Dict[str, object]:
                 value = value.strip()
                 if key == "Name":
                     info["name"] = value or info["name"]
+                elif key.startswith("Name[") and key.endswith("]"):
+                    tag = key[5:-1]
+                    if tag and value:
+                        localized[tag] = value
                 elif key == "Type":
                     info["type"] = value
                 elif key == "Exec":
@@ -340,6 +367,9 @@ def parse_desktop_file(path: str) -> Dict[str, object]:
                     info["autostart_enabled"] = value.lower() != "false"
     except OSError:
         pass
+    localized_name = _pick_localized_name(localized)
+    if localized_name:
+        info["name"] = localized_name
     return info
 
 

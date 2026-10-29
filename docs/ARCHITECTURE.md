@@ -24,12 +24,15 @@ preen --doctor ──► cli.py ──► backend/ (headless)
 
 | File | Responsibility |
 |---|---|
-| `app.py` | GTK-free launcher. Handles `--doctor`, `--check-catalog`, `--version`, `--simulate` and prints a friendly error when PyGObject is missing. |
+| `app.py` | GTK-free launcher. Handles `--doctor`, `--check-catalog`, `--version`, `--simulate`, the file-manager handlers (`--appimage-handler`, `--appimage-run`, `--deb-handler`) and prints a friendly error when PyGObject is missing. |
+| `handler.py` | Small single-file dialogs for the file-manager handlers: install, run, update or remove one AppImage; install one .deb. Never opens the main window. |
 | `cli.py` | Headless diagnostics, catalogue validation and the JSON report. |
 | `gui.py` | Ten GTK 3 screens, light/dark design tokens, dialogs, preferences, diagnostic log, the serial task queue and window drag-and-drop. |
 | `backend/utils.py` | `run_cmd`, `CommandResult`, `Report`, `Outcome`, `run_actions`, desktop-file parsing, `safe_tar_members`, `ensure_flathub`. |
 | `backend/apps.py` | Catalogue loading and validation, two-query installed-state detection, batched install/update/uninstall. |
-| `backend/appimages.py` | Downloads scanning, AppImage install/update/uninstall with desktop integration at user scope, and local .deb installs. |
+| `backend/appimages.py` | Downloads scanning, AppImage install/update/uninstall with desktop integration at user scope, local .deb installs, detached launching and file-manager right-click integration. |
+| `backend/kernels.py` | Installed-kernel inventory: dpkg grouping by version, running-kernel protection, old-kernel purge for Deep Clean. |
+| `backend/firewall.py` | UFW status parsing and the polkit-gated enable/disable toggle. |
 | `backend/deepclean.py` | Reclaimable-space scans, size formatting and simulate-gated cleaning. |
 | `backend/services.py` | systemd listing and actions, boot analysis, strict unit-name validation. |
 | `backend/settings.py` | Validated preferences in `~/.config/preen/settings.json` with legacy migration. |

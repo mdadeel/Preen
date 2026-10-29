@@ -4,6 +4,35 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-30
+
+Right-click integration for AppImage files, a Downloads watcher, old-kernel
+cleanup and a firewall toggle.
+
+### Added
+
+- **Run / Install with Preen** from the file manager: `.AppImage` files can
+  be opened with Preen, which offers Install for unknown apps and Run /
+  Update from this file / Remove for installed ones — all in a small dialog
+  instead of the main window. New CLI handlers: `preen --appimage-handler`,
+  `--appimage-run` (launch detached, no window) and `--deb-handler`.
+- An **AppImages → File manager integration** card installs optional
+  "Install with Preen" / "Run with Preen" right-click entries for the file
+  manager and can make Preen the default app for `.AppImage` files.
+- The AppImages page **watches the Downloads folder** and rescans with a
+  notice when a new AppImage finishes downloading.
+- **Deep Clean** can remove old kernel packages: the running kernel and one
+  spare are always protected, sizes are measured before anything is
+  selected, and the purge runs as one polkit command.
+- **Optimize System** gains a firewall (UFW) toggle that applies immediately
+  after confirmation; unavailable tooling greys the row out.
+
+### Fixed
+
+- The default-app association write ensures `~/.config` exists first —
+  `xdg-mime default` silently no-ops (exit 0, nothing written) when it
+  cannot create `mimeapps.list`.
+
 ## [0.5.0] - 2026-10-29
 
 [Release notes and source archives](https://github.com/mdadeel/Preen/releases/tag/v0.5.0)

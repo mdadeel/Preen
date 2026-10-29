@@ -32,7 +32,8 @@ chmod 755 "$PKG/usr/bin/preen"
 # --- Desktop entry + docs ---
 install -d "$PKG/usr/share/applications" "$PKG/usr/share/doc/preen" \
           "$PKG/usr/share/icons/hicolor/256x256/apps"
-install -m 644 data/preen.desktop data/io.github.mdadeel.Preen.desktop "$PKG/usr/share/applications/"
+install -m 644 data/preen.desktop data/io.github.mdadeel.Preen.desktop \
+          data/io.github.mdadeel.Preen.appimage.desktop "$PKG/usr/share/applications/"
 install -m 644 preen_tool/assets/preen.png "$PKG/usr/share/icons/hicolor/256x256/apps/preen.png"
 ./packaging/stage_docs.sh "$PKG/usr/share/doc/preen"
 install -m 644 debian/copyright "$PKG/usr/share/doc/preen/copyright"

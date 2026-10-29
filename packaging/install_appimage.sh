@@ -11,6 +11,7 @@
 set -euo pipefail
 
 DESKTOP_ID=io.github.mdadeel.Preen.desktop
+HANDLER_ID=io.github.mdadeel.Preen.appimage.desktop
 ICON_NAME=preen.png
 APPIMAGE_NAME=Preen.AppImage
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -109,6 +110,20 @@ if [ -n "$VERSION" ]; then
   printf 'X-AppImage-Version=%s\n' "$VERSION" >> "$DESKTOP_OUT"
 fi
 
+# File-manager handler: right-click an .AppImage → Install/Run with Preen.
+cat > "$EXTRACT_TMP/$HANDLER_ID" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Preen AppImage Installer
+Comment=Install or run AppImage files with Preen
+Exec=$EXEC_VALUE --appimage-handler %f
+Icon=preen
+Terminal=false
+NoDisplay=true
+StartupNotify=false
+MimeType=application/vnd.appimage;application/x-iso9660-appimage;
+EOF
+
 # --- install ------------------------------------------------------------------
 install -d "$APP_DIR" "$APPS_DIR" "$ICONS_DIR"
 rm -f "$APP_DIR"/Preen-*.AppImage  # stale versioned names from older installs
@@ -118,6 +133,7 @@ else
   install -m 755 "$APPIMAGE" "$INSTALLED_APPIMAGE"
 fi
 install -m 644 "$DESKTOP_OUT" "$APPS_DIR/$DESKTOP_ID"
+install -m 644 "$EXTRACT_TMP/$HANDLER_ID" "$APPS_DIR/$HANDLER_ID"
 if [ "$HAVE_ICON" -eq 1 ]; then
   install -m 644 "$SRC_ICON" "$ICONS_DIR/$ICON_NAME"
 fi

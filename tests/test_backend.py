@@ -6,6 +6,7 @@ Run with:  python3 -m unittest discover -s tests -v
 from __future__ import annotations
 
 import io
+import os
 import subprocess
 import sys
 import tarfile
@@ -158,6 +159,78 @@ class BackendTestCase(unittest.TestCase):
             entries = apps.list_installed_apt()
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["icon"], "demo-icon")
+
+    def test_desktop_search_dirs_skip_snapd_and_dedupe(self):
+        with mock.patch.dict(os.environ, {
+            "XDG_DATA_DIRS": "/var/lib/snapd/desktop:/usr/share:/usr/local/share:/usr/share",
+        }):
+            dirs = apps._desktop_search_dirs()
+        self.assertNotIn("/var/lib/snapd/desktop", dirs)
+        self.assertEqual(dirs[0], os.path.join(os.path.expanduser("~"), ".local", "share"))
+        self.assertIn("/usr/share", dirs)
+        self.assertEqual(len(dirs), len(set(dirs)))
+
+    def test_apt_scanner_scans_xdg_dirs_and_prefers_user_launcher(self):
+        sys_dir = self.root / "sysdata" / "applications"
+        user_dir = self.fake.home / ".local" / "share" / "applications"
+        sys_dir.mkdir(parents=True)
+        user_dir.mkdir(parents=True)
+        sys_launcher = sys_dir / "demo.desktop"
+        sys_launcher.write_text("[Desktop Entry]\nType=Application\nName=Demo\n", encoding="utf-8")
+        user_launcher = user_dir / "demo.desktop"
+        user_launcher.write_text("[Desktop Entry]\nType=Application\nName=My Demo\n", encoding="utf-8")
+        self.fake.update(owners={str(sys_launcher): "demo", str(user_launcher): "demo"})
+        with mock.patch.dict(os.environ, {"XDG_DATA_DIRS": str(sys_dir.parent)}):
+            entries = apps.list_installed_apt()
+        self.assertEqual([entry["name"] for entry in entries], ["My Demo"])
+        self.assertEqual(entries[0]["desktop"], "demo.desktop")
+        self.assertEqual(entries[0]["id"], "demo")
+
+    def test_apt_scanner_lists_each_launcher_of_a_package(self):
+        apps_dir = self.root / "data" / "applications"
+        apps_dir.mkdir(parents=True)
+        main = apps_dir / "suite-main.desktop"
+        main.write_text("[Desktop Entry]\nType=Application\nName=Suite\n", encoding="utf-8")
+        editor = apps_dir / "suite-editor.desktop"
+        editor.write_text("[Desktop Entry]\nType=Application\nName=Suite Editor\n", encoding="utf-8")
+        dup = apps_dir / "suite-copy.desktop"
+        dup.write_text("[Desktop Entry]\nType=Application\nName=Suite\n", encoding="utf-8")
+        hidden = apps_dir / "suite-hidden.desktop"
+        hidden.write_text("[Desktop Entry]\nType=Application\nName=Suite Hidden\nNoDisplay=true\n",
+                          encoding="utf-8")
+        self.fake.update(owners={str(path): "suite" for path in (main, editor, dup, hidden)})
+        with mock.patch.dict(os.environ, {"XDG_DATA_DIRS": str(apps_dir.parent)}):
+            entries = apps.list_installed_apt()
+        self.assertEqual(sorted(entry["name"] for entry in entries), ["Suite", "Suite Editor"])
+        self.assertEqual({entry["id"] for entry in entries}, {"suite"})
+
+    def test_apt_scanner_recovers_when_batch_ownership_query_fails(self):
+        apps_dir = self.root / "data" / "applications"
+        apps_dir.mkdir(parents=True)
+        good = apps_dir / "good.desktop"
+        good.write_text("[Desktop Entry]\nType=Application\nName=Good\n", encoding="utf-8")
+        other = apps_dir / "other.desktop"
+        other.write_text("[Desktop Entry]\nType=Application\nName=Other\n", encoding="utf-8")
+        self.fake.update(owners={str(good): "goodpkg"}, dpkg_S_batch_fail=True)
+        warnings: list = []
+        with mock.patch.dict(os.environ, {"XDG_DATA_DIRS": str(apps_dir.parent)}):
+            entries = apps.list_installed_apt(warnings=warnings, log=self.log)
+        self.assertEqual([entry["name"] for entry in entries], ["Good"])
+        self.assertTrue(any("exit 2" in warning for warning in warnings))
+
+    def test_parse_desktop_file_prefers_name_for_current_locale(self):
+        path = self.root / "loc.desktop"
+        path.write_text("[Desktop Entry]\nType=Application\nName=Backup\n"
+                        "Name[nl]=Reservekopie\nName[nl_BE]=Reservekopie (BE)\n",
+                        encoding="utf-8")
+        with mock.patch.dict(os.environ, {"LC_ALL": "nl_BE.UTF-8", "LANG": "en_US.UTF-8"}):
+            self.assertEqual(utils.parse_desktop_file(str(path))["name"], "Reservekopie (BE)")
+        with mock.patch.dict(os.environ, {"LC_ALL": "nl_NL.UTF-8"}):
+            self.assertEqual(utils.parse_desktop_file(str(path))["name"], "Reservekopie")
+        with mock.patch.dict(os.environ, {"LC_ALL": "C", "LANG": "C"}):
+            self.assertEqual(utils.parse_desktop_file(str(path))["name"], "Backup")
+        with mock.patch.dict(os.environ, {"LC_ALL": "fr_FR.UTF-8", "LANG": "fr_FR.UTF-8"}):
+            self.assertEqual(utils.parse_desktop_file(str(path))["name"], "Backup")
 
     # ------------------------------------------------------------------
     # Command runner

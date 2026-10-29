@@ -363,7 +363,13 @@ class GuiRuntimeTest(unittest.TestCase):
         repo.GLib = FakeGLib()
         repo.Gio = SimpleNamespace(
             SettingsSchemaSource=SimpleNamespace(get_default=lambda: None),
-            File=SimpleNamespace(new_for_uri=lambda uri: SimpleNamespace(get_path=lambda: None)),
+            FileMonitorEvent=SimpleNamespace(CREATED=1, RENAMED=2, CHANGED=3),
+            File=SimpleNamespace(
+                new_for_uri=lambda uri: SimpleNamespace(get_path=lambda: None),
+                new_for_path=lambda path: SimpleNamespace(
+                    monitor_directory=lambda *args: SimpleNamespace(
+                        connect=lambda *args: None)),
+            ),
         )
         repo.GdkPixbuf = SimpleNamespace(Pixbuf=FakePixbuf)
         repo.Gdk = SimpleNamespace(
@@ -418,6 +424,8 @@ class GuiRuntimeTest(unittest.TestCase):
         self.assertTrue(hasattr(window, "cmb_swap_size"))
         self.assertTrue(hasattr(window, "cmb_scaling"))
         self.assertTrue(hasattr(window, "appimage_list"))
+        self.assertTrue(hasattr(window, "fm_scripts_switch"))
+        self.assertTrue(hasattr(window, "chk_ufw"))
         self.assertTrue(window.icon_file.endswith("assets/preen.png"))
         self.assertTrue((self.gui.ASSETS_DIR / "preen.png").is_file())
         self.assertEqual(window.sim_switch.get_accessible().name, "Simulate")
@@ -1123,6 +1131,7 @@ class GuiRuntimeTest(unittest.TestCase):
             window.on_appimage_install,
             window.on_appimage_uninstall,
             window.on_pick_appimage,
+            window.on_set_default_appimage,
         ]
         for handler in handlers:
             with self.subTest(handler=handler.__name__):
@@ -1211,6 +1220,24 @@ class GuiRuntimeTest(unittest.TestCase):
         window._on_manage_row_activated(window.manage_listbox, rows["gnome-shell"])
         self.assertEqual(len(window._selected_manage()), 1)
 
+    def test_manage_selection_restore_distinguishes_launchers_of_one_package(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        entries = [
+            {"source": "apt", "id": "suite", "name": "Suite",
+             "desktop": "suite-main.desktop", "protected": False},
+            {"source": "apt", "id": "suite", "name": "Suite Editor",
+             "desktop": "suite-editor.desktop", "protected": False},
+        ]
+        window._fill_manage_rows(entries)
+        rows = {r.key[2]: r for r in window.manage_listbox.get_children()
+                if getattr(r, "key", None)}
+        rows["suite-main.desktop"].chk.set_active(True)
+        window._fill_manage_rows(entries)
+        rows = {r.key[2]: r for r in window.manage_listbox.get_children()
+                if getattr(r, "key", None)}
+        self.assertTrue(rows["suite-main.desktop"].chk.get_active())
+        self.assertFalse(rows["suite-editor.desktop"].chk.get_active())
+
     # -- AppImages page ----------------------------------------------------
     def _sandbox_stub(self, name="StubApp-1.2.3-x86_64.AppImage"):
         downloads = Path(os.environ["XDG_DATA_HOME"]).parent / "Downloads"
@@ -1288,6 +1315,60 @@ class GuiRuntimeTest(unittest.TestCase):
         window.appimage_search.set_text("")
         window._on_appimage_search_changed(None)
         self.assertFalse(window.appimage_empty.get_visible())
+
+    def test_filemanager_scripts_toggle_installs_and_removes(self):
+        from preen_tool.backend import appimages as appimages_backend
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        self.assertFalse(appimages_backend.filemanager_scripts_installed())
+        window.fm_scripts_switch.set_active(True)
+        with mock.patch.object(utils, "_simulate", False):
+            window.on_toggle_fm_scripts(window.fm_scripts_switch, None)
+        self.assertTrue(appimages_backend.filemanager_scripts_installed())
+        window.fm_scripts_switch.set_active(False)
+        with mock.patch.object(utils, "_simulate", False):
+            window.on_toggle_fm_scripts(window.fm_scripts_switch, None)
+        self.assertFalse(appimages_backend.filemanager_scripts_installed())
+
+    def test_downloads_monitor_notices_new_appimages(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        self.assertFalse(window._downloads_pending)
+        file = SimpleNamespace(get_basename=lambda: "Fresh-1.0.AppImage")
+        window._on_downloads_changed(None, file, None,
+                                     self.gui.Gio.FileMonitorEvent.CREATED)
+        self.assertTrue(window._downloads_pending)
+        self._sandbox_stub("Fresh-1.0.AppImage")
+        window._downloads_settled()
+        self.assertFalse(window._downloads_pending)
+        rows = [r for r in window.appimage_list.get_children()
+                if getattr(r, "kind", None) == "download"]
+        self.assertEqual(len(rows), 1)
+
+    def test_ignored_downloads_events_do_not_trigger(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        file = SimpleNamespace(get_basename=lambda: "readme.txt")
+        window._on_downloads_changed(None, file, None,
+                                     self.gui.Gio.FileMonitorEvent.CREATED)
+        self.assertFalse(window._downloads_pending)
+
+    def test_firewall_row_syncs_from_read_settings(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_optimize_settings({
+            "animations_off": False, "swap": False, "zram": False,
+            "power": None, "ufw": True,
+        })
+        self.assertTrue(window.chk_ufw.get_active())
+        self.assertTrue(window.chk_ufw.get_sensitive())
+        window._apply_optimize_settings({
+            "animations_off": False, "swap": False, "zram": False,
+            "power": None, "ufw": None,
+        })
+        self.assertFalse(window.chk_ufw.get_sensitive())
+        window._apply_optimize_settings({
+            "animations_off": False, "swap": False, "zram": False,
+            "power": None, "ufw": False,
+        })
+        self.assertTrue(window.chk_ufw.get_sensitive())
+        self.assertFalse(window.chk_ufw.get_active())
 
     def test_sidebar_search_filters_rows_and_hides_headers(self):
         window = self.gui.MainWindow(self.gui.PreenApp())

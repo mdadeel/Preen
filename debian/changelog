@@ -1,3 +1,19 @@
+preen (0.6.0) stable; urgency=medium
+
+  * Right-click integration: .AppImage files can be opened with Preen to
+    install, run, update or remove them; optional "Install with Preen" and
+    "Run with Preen" entries in the file manager menu; Preen can be set as
+    the default app for .AppImage files.
+  * New CLI handlers --appimage-handler, --appimage-run and --deb-handler
+    with small single-file dialogs instead of the main window.
+  * The AppImages page watches the Downloads folder and notices new
+    AppImages automatically.
+  * Deep Clean can remove old kernel packages (running kernel and one spare
+    are always protected).
+  * Optimize System gains a firewall (UFW) toggle that applies immediately.
+
+ -- Preen contributors <64582744+mdadeel@users.noreply.github.com>  Thu, 30 Oct 2026 12:00:00 +0600
+
 preen (0.5.0) stable; urgency=medium
 
   * New AppImages page: install AppImage downloads with a menu entry and

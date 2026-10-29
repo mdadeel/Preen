@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Preen AppImage Installer
+Comment=Install or run AppImage files with Preen
+Exec=preen --appimage-handler %f
+Icon=preen
+Terminal=false
+NoDisplay=true
+StartupNotify=false
+MimeType=application/vnd.appimage;application/x-iso9660-appimage;

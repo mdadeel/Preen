@@ -289,62 +289,116 @@ def list_installed_flatpak(warnings=None, log=None) -> List[Dict]:
     return items
 
 
+def _desktop_search_dirs() -> List[str]:
+    """XDG data dirs scanned for ``applications/*.desktop`` launchers.
+
+    ``/var/lib/snapd/desktop`` is skipped on purpose: its launchers are not
+    dpkg-owned and snap apps are listed separately by ``list_installed_snap``.
+    """
+    dirs = [os.path.join(os.path.expanduser("~"), ".local", "share")]
+    raw = os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
+    dirs.extend(part for part in raw.split(":") if part)
+    ordered: List[str] = []
+    seen: Set[str] = set()
+    for candidate in dirs:
+        candidate = os.path.normpath(candidate.rstrip("/"))
+        if not candidate or candidate in seen or candidate.startswith("/var/lib/snapd"):
+            continue
+        seen.add(candidate)
+        ordered.append(candidate)
+    return ordered
+
+
+def _scan_desktop_files() -> List[str]:
+    """Every known launcher path; user dirs override system duplicates."""
+    by_basename: Dict[str, str] = {}
+    for data_dir in _desktop_search_dirs():
+        for path in sorted(glob.glob(os.path.join(data_dir, "applications", "*.desktop"))):
+            by_basename.setdefault(os.path.basename(path), path)
+    return sorted(by_basename.values())
+
+
+def _parse_dpkg_owners(text: str) -> Dict[str, str]:
+    """Map desktop-file path -> owning package from ``dpkg -S`` output."""
+    owners: Dict[str, str] = {}
+    for line in text.splitlines():
+        if ": " not in line:
+            continue
+        owner_part, path = line.rsplit(": ", 1)
+        if not path.startswith("/") or owner_part.startswith(("diversion", "locally")):
+            continue
+        owner = owner_part.split(",")[0].strip()
+        pkg = owner.split(":")[0].strip()
+        if pkg:
+            owners[path] = pkg
+    return owners
+
+
+def _resolve_desktop_owners(desktop_files: List[str], warnings: Optional[List[str]],
+                            log) -> Dict[str, str]:
+    result = run_cmd(["dpkg", "-S"] + desktop_files, quiet=True)
+    if result.code in (0, 1):  # 1 = at least one path is not owned by a package
+        return _parse_dpkg_owners(result.out)
+    message = "APT application scan failed (exit {}): {}".format(
+        result.code, result.err or result.out or "no output")
+    if warnings is not None:
+        warnings.append(message)
+    if log:
+        log.append("[warning] " + message.rstrip() + "\n")
+    # A failed batch query used to hide every app. Retry per file so one odd
+    # path cannot blank the whole list.
+    owners: Dict[str, str] = {}
+    for path in desktop_files:
+        single = run_cmd(["dpkg", "-S", path], quiet=True)
+        if single.code == 0:
+            owners.update(_parse_dpkg_owners(single.out))
+    return owners
+
+
 def list_installed_apt(warnings=None, log=None) -> List[Dict]:
     """List graphical APT applications via their .desktop launchers.
 
-    One ``dpkg -S`` call resolves every launcher to its owning package. The
-    old glob+per-file approach misparsed multiarch owners and produced
-    thousands of library rows.
+    One batched ``dpkg -S`` call resolves every launcher to its owning
+    package, retrying per file if the batch errors out. Every visible
+    launcher becomes a row (a package shipping several apps shows all of
+    them); the entry keeps the owning package as its id so uninstall still
+    operates on the package.
     """
-    desktop_files = sorted(glob.glob("/usr/share/applications/*.desktop"))
     if not has_command("dpkg"):
         if warnings is not None:
             warnings.append("dpkg is not installed")
         if log:
             log.append("[warning] dpkg is not installed; graphical APT applications cannot be scanned.\n")
         return []
+    desktop_files = _scan_desktop_files()
     if not desktop_files:
         return []
 
-    owners: Dict[str, str] = {}
-    result = run_cmd(["dpkg", "-S"] + desktop_files, quiet=True)
-    if result.code not in (0, 1):
-        message = "APT application scan failed (exit {}): {}".format(
-            result.code, result.err or result.out or "no output")
-        if warnings is not None:
-            warnings.append(message)
-        if log:
-            log.append("[warning] " + message.rstrip() + "\n")
-    if result.code in (0, 1):  # 1 = at least one path is not owned by a package
-        for line in result.out.splitlines():
-            if ": " not in line:
-                continue
-            owner_part, path = line.rsplit(": ", 1)
-            if not path.startswith("/") or owner_part.startswith(("diversion", "locally")):
-                continue
-            owner = owner_part.split(",")[0].strip()
-            pkg = owner.split(":")[0].strip()
-            if pkg:
-                owners[path] = pkg
+    owners = _resolve_desktop_owners(desktop_files, warnings, log)
 
     items: List[Dict] = []
-    seen: Set[str] = set()
+    seen: Set[Tuple[str, str]] = set()
     for path in desktop_files:
         pkg = owners.get(path)
-        if not pkg or pkg in seen:
+        if not pkg:
             continue
         info = utils.parse_desktop_file(path)
         if str(info["type"]).lower() != "application" or info["no_display"] or info["hidden"]:
             continue
-        seen.add(pkg)
+        name = str(info["name"])
+        dedupe = (pkg, name.lower())
+        if dedupe in seen:
+            continue
+        seen.add(dedupe)
         items.append({
             "source": "apt",
             "id": pkg,
-            "name": str(info["name"]),
+            "name": name,
             "icon": str(info["icon"]),
+            "desktop": os.path.basename(path),
             "protected": is_protected(pkg),
         })
-    items.sort(key=lambda x: x["name"].lower())
+    items.sort(key=lambda x: (x["name"].lower(), x.get("desktop", "")))
     return items
 
 

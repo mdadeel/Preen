@@ -72,7 +72,8 @@ class GuiImportTest(unittest.TestCase):
                          "_build_appimages_page", "on_rescan_appimages",
                          "on_appimage_install", "on_appimage_uninstall",
                          "_handle_dropped_files", "on_manage_select_all",
-                         "on_manage_select_none"):
+                         "on_manage_select_none", "on_toggle_fm_scripts",
+                         "on_set_default_appimage", "_on_ufw_toggle"):
                 self.assertTrue(hasattr(gui.MainWindow, name), "missing " + name)
         sys.modules.pop("preen_tool.gui", None)
 
