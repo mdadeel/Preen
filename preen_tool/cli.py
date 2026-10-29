@@ -53,7 +53,8 @@ def collect_report() -> Dict:
     # same thing twice as a generic "X is missing" line.
     explained_by_notes = {
         "flatpak", "APT / dpkg", "gsettings", "pkexec (polkit)",
-        "power-profiles-daemon", "Timeshift",
+        "power-profiles-daemon", "Timeshift", "Snap (snapd)", "ubuntu-drivers",
+        "UFW firewall",
     }
     for row in _capability_rows():
         if row["status"] != "missing":

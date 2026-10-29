@@ -199,6 +199,9 @@ def capabilities() -> List[Dict[str, str]]:
         ("pkexec (polkit)", "pkexec", True),
         ("power-profiles-daemon", "powerprofilesctl", False),
         ("Timeshift", "timeshift", False),
+        ("Snap (snapd)", "snap", False),
+        ("ubuntu-drivers", "ubuntu-drivers", False),
+        ("UFW firewall", "ufw", False),
     ]
     result = []
     for label, key, required in checks:
@@ -238,6 +241,9 @@ def feature_warnings() -> List[str]:
         ("gsettings", "gsettings is unavailable, so theme, icon and animation options will not apply."),
         ("powerprofilesctl", "power-profiles-daemon is missing, so the power profile selector is disabled."),
         ("timeshift", "Timeshift is not installed, so snapshot buttons will report an error."),
+        ("snap", "snapd is not installed, so Snap apps cannot be listed or removed."),
+        ("ubuntu-drivers", "ubuntu-drivers is missing, so the Drivers page is unavailable."),
+        ("ufw", "ufw is not installed, so the firewall toggle is disabled."),
     ]
     for command, message in checks:
         if not has_command(command):

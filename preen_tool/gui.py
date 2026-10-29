@@ -32,6 +32,7 @@ from .backend import (  # noqa: E402
     backup as backup_backend,
     dashboard as dash_backend,
     deepclean as deepclean_backend,
+    drivers as drivers_backend,
     firewall as firewall_backend,
     maintenance as maintenance_backend,
     performance as perf_backend,
@@ -626,6 +627,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self._build_customize_page()
         self._build_deepclean_page()
         self._build_services_page()
+        self._build_drivers_page()
         self._build_backup_page()
         self._build_logs_page()
         self._populate_sidebar()
@@ -1070,6 +1072,7 @@ class MainWindow(Gtk.ApplicationWindow):
             ("deepclean", "Deep Clean", "user-trash-symbolic", ""),
             ("optimize", "Optimize System", "preferences-system-symbolic", ""),
             ("services", "Services", "system-run-symbolic", ""),
+            ("drivers", "Drivers", "computer-symbolic", ""),
             ("backup", "Backup & Restore", "document-save-symbolic", ""),
         ]),
         ("Personal", [
@@ -1204,6 +1207,7 @@ class MainWindow(Gtk.ApplicationWindow):
             self._sync_ufw_control()
             self._sync_maintenance_control()
             self._on_swap_toggle(None)
+            self._update_drivers_counter()
         return False
 
     def _finish(self, result, done):
@@ -1254,6 +1258,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.submit(services_backend.list_services, done=self._apply_services)
         self.submit(backup_backend.list_snapshots, done=self._apply_snapshots)
         self.submit(maintenance_backend.get_schedule, done=self._apply_maintenance_state)
+        self.submit(self._scan_drivers_worker, done=self._fill_drivers_rows)
         interval = self.settings.get("auto_refresh_seconds", 15)
         if interval:
             GLib.timeout_add_seconds(interval, self._periodic_refresh)
@@ -3488,6 +3493,210 @@ class MainWindow(Gtk.ApplicationWindow):
                 return
         self.submit(services_backend.set_service_state, unit, action,
                     done=lambda _r: self.on_refresh_services())
+
+    # ------------------------------------------------------------------
+    # Drivers page
+    # ------------------------------------------------------------------
+    def _build_drivers_page(self):
+        page = self._page(
+            "drivers", "Drivers", "Drivers",
+            "Devices detected by ubuntu-drivers with the driver packages that fit them. "
+            "Recommended packages are pre-marked; installing applies after one "
+            "administrator prompt.")
+
+        toolbar = Gtk.Box(spacing=8)
+        self.drivers_search = Gtk.SearchEntry()
+        self.drivers_search.set_placeholder_text("Search detected devices")
+        self.drivers_search.set_hexpand(True)
+        self.drivers_search.connect("search-changed", self._on_drivers_search_changed)
+        toolbar.pack_start(self.drivers_search, True, True, 0)
+        toolbar.pack_start(self._button("Rescan", self.on_rescan_drivers,
+                                        "Run ubuntu-drivers devices again",
+                                        icon="view-refresh-symbolic"), False, False, 0)
+        page.pack_start(toolbar, False, False, 0)
+
+        self.drivers_notice = self._hint("")
+        self.drivers_notice.get_style_context().add_class("status-warning")
+        self.drivers_notice.set_no_show_all(True)
+        self.drivers_notice.hide()
+        page.pack_start(self.drivers_notice, False, False, 0)
+
+        self.drivers_empty = self._hint("No devices needing extra drivers were detected.")
+        self.drivers_empty.set_no_show_all(True)
+        self.drivers_empty.hide()
+        self.drivers_list = Gtk.ListBox()
+        self.drivers_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.drivers_list.set_activate_on_single_click(True)
+        self.drivers_list.connect("row-activated", self._on_drivers_row_activated)
+        self.drivers_list.set_filter_func(self._drivers_filter, None)
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.get_style_context().add_class("list-surface")
+        scroller.add(self.drivers_list)
+        page.pack_start(self.drivers_empty, False, False, 0)
+        page.pack_start(scroller, True, True, 0)
+
+        self.drivers_counter = self._counter("No driver packages selected")
+        self.drivers_counter.set_xalign(0)
+        page.pack_start(self.drivers_counter, False, False, 0)
+        self.drivers_buttons = {
+            "install": self._button("Install Selected", self.on_install_drivers,
+                                    "Install the selected recommended driver packages",
+                                    primary=True),
+            "auto": self._button("Auto Install (recommended)", self.on_autoinstall_drivers,
+                                 "Let ubuntu-drivers install the recommended driver "
+                                 "for every device"),
+        }
+        actions = self._flow(*self.drivers_buttons.values())
+        actions.get_style_context().add_class("action-bar")
+        page.pack_start(actions, False, False, 0)
+        self._drivers_available = False
+        self._update_drivers_counter()
+
+    @staticmethod
+    def _scan_drivers_worker(log=None):
+        return drivers_backend.list_devices(log=log)
+
+    def on_rescan_drivers(self, _btn=None):
+        self.submit(self._scan_drivers_worker, done=self._fill_drivers_rows)
+
+    def _drivers_filter(self, row, _data):
+        query = self.drivers_search.get_text().strip().lower()
+        if not hasattr(row, "search_text"):
+            return True
+        return not query or query in row.search_text
+
+    def _on_drivers_search_changed(self, _entry):
+        self.drivers_list.invalidate_filter()
+        query = self.drivers_search.get_text().strip()
+        visible = any(self._drivers_filter(row, None)
+                      for row in self.drivers_list.get_children())
+        if visible:
+            self.drivers_empty.hide()
+            return
+        self.drivers_empty.set_text(
+            "No devices match your search. Clear the search box to see them all."
+            if query else
+            "ubuntu-drivers is not installed; install ubuntu-drivers-common to use this page."
+            if not self._drivers_available else
+            "No devices needing extra drivers were detected.")
+        self.drivers_empty.show()
+
+    def _on_drivers_row_activated(self, _listbox, row):
+        chk = getattr(row, "chk", None)
+        if chk is not None and chk.get_sensitive():
+            chk.set_active(not chk.get_active())
+
+    def _fill_drivers_rows(self, result):
+        if not isinstance(result, dict):
+            return
+        warnings = result.get("warnings") or []
+        devices = result.get("devices") or []
+        self._drivers_available = bool(result.get("available"))
+        if warnings:
+            self.drivers_notice.set_text("Driver detection reported problems. See Logs for details.")
+            self.drivers_notice.set_tooltip_text("\n".join(warnings))
+            self.drivers_notice.show()
+        else:
+            self.drivers_notice.hide()
+        previously_selected = {
+            row.key for row in self.drivers_list.get_children()
+            if getattr(row, "chk", None) is not None and getattr(row, "key", None) is not None
+            and row.chk.get_active()
+        }
+        for row in list(self.drivers_list.get_children()):
+            self.drivers_list.remove(row)
+        for device in devices:
+            packages = device.get("packages") or []
+            recommended = next((p for p in packages if p.get("recommended")), None)
+            names = ", ".join(p["name"] for p in packages) or "no driver packages offered"
+            row = Gtk.ListBoxRow()
+            row.set_activatable(True)
+            row.device = device
+            row.key = device.get("modalias") or device.get("model", "")
+            row.get_style_context().add_class("app-row")
+            row.search_text = " ".join(
+                [device.get("model", ""), device.get("vendor", ""), names]).lower()
+            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            chk = Gtk.CheckButton()
+            chk.set_sensitive(recommended is not None)
+            chk.set_tooltip_text(
+                "Select {}".format(recommended["name"]) if recommended else
+                "ubuntu-drivers offers no installable package for this device")
+            self._accessible_name(chk, "Install driver for " + device.get("model", "device"))
+            chk.set_active(bool(recommended) and row.key in previously_selected)
+            chk.connect("toggled", lambda _c: self._update_drivers_counter())
+            line.pack_start(chk, False, False, 0)
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+            title = Gtk.Label(label=device.get("model") or device.get("modalias") or "Device")
+            title.set_xalign(0)
+            title.get_style_context().add_class("settings-title")
+            text.pack_start(title, False, False, 0)
+            subtitle = Gtk.Label(label=" | ".join(
+                part for part in (device.get("vendor", ""), names) if part))
+            subtitle.set_xalign(0)
+            subtitle.set_ellipsize(Pango.EllipsizeMode.END)
+            subtitle.get_style_context().add_class("settings-sub")
+            text.pack_start(subtitle, False, False, 0)
+            line.pack_start(text, True, True, 0)
+            if recommended is not None:
+                badge = Gtk.Label(label="recommended: " + recommended["name"])
+                badge.get_style_context().add_class("badge")
+                line.pack_start(badge, False, False, 0)
+            row.add(line)
+            row.chk = chk
+            self.drivers_list.add(row)
+        self.drivers_list.show_all()
+        if not self._drivers_available:
+            self.drivers_empty.set_text(
+                "ubuntu-drivers is not installed; install ubuntu-drivers-common to use this page.")
+            self.drivers_empty.show()
+        elif not devices and not warnings:
+            self.drivers_empty.set_text("No devices needing extra drivers were detected.")
+            self.drivers_empty.show()
+        elif devices:
+            self.drivers_empty.hide()
+        self._update_drivers_counter()
+
+    def _selected_driver_packages(self):
+        picks = []
+        for row in self.drivers_list.get_children():
+            chk = getattr(row, "chk", None)
+            device = getattr(row, "device", None)
+            if chk is None or device is None or not chk.get_active() or not chk.get_sensitive():
+                continue
+            recommended = next((p["name"] for p in device.get("packages", [])
+                                if p.get("recommended")), None)
+            if recommended:
+                picks.append(recommended)
+        return picks
+
+    def _update_drivers_counter(self):
+        count = len(self._selected_driver_packages())
+        self.drivers_counter.set_text("{} selected".format(count) if count else "Nothing selected")
+        if hasattr(self, "drivers_buttons"):
+            self.drivers_buttons["install"].set_sensitive(not self._busy and count > 0)
+            self.drivers_buttons["auto"].set_sensitive(
+                not self._busy and getattr(self, "_drivers_available", False))
+
+    def on_install_drivers(self, _btn):
+        picks = self._selected_driver_packages()
+        if not picks:
+            self._notify("Tick at least one device with a recommended driver first.", "warning")
+            return
+        if not self._confirm("Install {} driver package(s)?".format(len(picks)),
+                             "\n".join("• " + name for name in picks)):
+            return
+        self.submit(drivers_backend.install_driver, picks,
+                    done=lambda _r: self.on_rescan_drivers())
+
+    def on_autoinstall_drivers(self, _btn):
+        if not self._confirm("Auto install recommended drivers?",
+                             "ubuntu-drivers picks the recommended driver for every device "
+                             "that needs one. This applies after one administrator prompt."):
+            return
+        self.submit(drivers_backend.autoinstall,
+                    done=lambda _r: self.on_rescan_drivers())
 
     # ------------------------------------------------------------------
     # Backup page

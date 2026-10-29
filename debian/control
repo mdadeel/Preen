@@ -11,7 +11,7 @@ Package: preen
 Architecture: all
 Depends: ${python3:Depends}, ${misc:Depends}, python3-gi, gir1.2-gtk-3.0, python3-psutil, flatpak, gsettings-desktop-schemas, polkitd | policykit-1
 Recommends: power-profiles-daemon, systemd-zram-generator
-Suggests: timeshift
+Suggests: timeshift, ufw, ubuntu-drivers-common
 Description: Preen — system setup and optimization for Linux
  Install and remove APT/Flatpak apps, clean up packages, tune power profiles,
  swap and ZRAM, and back up user configuration from a single GTK interface.

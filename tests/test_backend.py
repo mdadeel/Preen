@@ -899,6 +899,8 @@ class BackendTestCase(unittest.TestCase):
         self.assertTrue(any("Flatpak" in w for w in warnings))
         self.assertTrue(any("polkit" in w for w in warnings))
         self.assertTrue(any("Timeshift" in w for w in warnings))
+        self.assertTrue(any("Drivers page" in w for w in warnings))
+        self.assertTrue(any("firewall toggle" in w for w in warnings))
 
     def test_dashboard_works_without_psutil(self):
         with mock.patch.object(dashboard, "psutil", None):

@@ -456,10 +456,16 @@ class GuiRuntimeTest(unittest.TestCase):
                                           return_value={})
         updates_patch.start()
         self.addCleanup(updates_patch.stop)
+        # Same for the ubuntu-drivers scan the Drivers page queues at startup.
+        drivers_patch = mock.patch.object(
+            self.gui.drivers_backend, "list_devices",
+            return_value={"devices": [], "warnings": [], "available": False})
+        drivers_patch.start()
+        self.addCleanup(drivers_patch.stop)
 
     def test_window_builds_and_all_pages_exist(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
-        self.assertEqual(len(window.stack.get_children()), 10)
+        self.assertEqual(len(window.stack.get_children()), 11)
         self.assertIn("code", window.app_rows)
         self.assertTrue(window.log_buf.lines)
         # New 0.4.0 surfaces.
@@ -474,12 +480,15 @@ class GuiRuntimeTest(unittest.TestCase):
         self.assertTrue(hasattr(window, "appimage_list"))
         self.assertTrue(hasattr(window, "fm_scripts_switch"))
         self.assertTrue(hasattr(window, "chk_ufw"))
+        self.assertTrue(hasattr(window, "chk_maintenance"))
+        self.assertTrue(hasattr(window, "cmb_maintenance"))
+        self.assertTrue(hasattr(window, "drivers_list"))
         self.assertTrue(window.icon_file.endswith("assets/preen.png"))
         self.assertTrue((self.gui.ASSETS_DIR / "preen.png").is_file())
         self.assertEqual(window.sim_switch.get_accessible().name, "Simulate")
         self.assertEqual(window.cmb_theme.get_accessible().name, "Preen appearance")
         self.assertEqual(window.app_rows["org.mozilla.firefox"].chk.get_accessible().name, "Select Firefox")
-        # Four non-selectable section headers plus ten page rows.
+        # Four non-selectable section headers plus eleven page rows.
         section_rows = [r for r in window.sidebar_list.get_children()
                         if getattr(r, "page_name", False) is None]
         self.assertEqual(len(section_rows), 4)
@@ -1515,6 +1524,43 @@ class GuiRuntimeTest(unittest.TestCase):
         window._busy = False
         window._sync_maintenance_control()
         self.assertTrue(window.chk_maintenance.get_sensitive())
+
+    def test_drivers_page_lists_devices_and_installs_recommended(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._fill_drivers_rows({"available": True, "warnings": [], "devices": [
+            {"modalias": "pci:v000010DE", "vendor": "NVIDIA Corporation",
+             "model": "GP104 [GeForce GTX 1070]", "packages": [
+                 {"name": "nvidia-driver-535", "recommended": True,
+                  "note": "distro non-free recommended"},
+                 {"name": "xserver-xorg-video-nouveau", "recommended": False,
+                  "note": "distro free builtin"}]},
+            {"modalias": "cpu/microcode", "vendor": "Human", "model": "unknown modalias/cpu",
+             "packages": []},
+        ]})
+        rows = {r.key: r for r in window.drivers_list.get_children()
+                if getattr(r, "device", None)}
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(rows["pci:v000010DE"].chk.get_sensitive())
+        self.assertFalse(rows["cpu/microcode"].chk.get_sensitive())  # no package offered
+        window._on_drivers_row_activated(window.drivers_list, rows["pci:v000010DE"])
+        self.assertEqual(window._selected_driver_packages(), ["nvidia-driver-535"])
+        window._update_drivers_counter()  # the fake emits no toggled signal
+        self.assertIn("1 selected", window.drivers_counter.get_text())
+        window._confirm = lambda *args, **kwargs: True
+        with mock.patch.object(window, "submit") as submit:
+            window.on_install_drivers(None)
+        self.assertEqual(submit.call_args[0][0], self.gui.drivers_backend.install_driver)
+        self.assertEqual(submit.call_args[0][1], ["nvidia-driver-535"])
+
+    def test_drivers_page_reports_missing_tool_and_blocks_install(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._fill_drivers_rows({"available": False, "warnings": [], "devices": []})
+        self.assertFalse(window.drivers_buttons["install"].get_sensitive())
+        self.assertFalse(window.drivers_buttons["auto"].get_sensitive())
+        self.assertIn("ubuntu-drivers", window.drivers_empty.get_text())
+        with mock.patch.object(window, "submit") as submit:
+            window.on_install_drivers(None)
+        self.assertFalse(submit.called)  # nothing selectable, nothing submitted
 
     def test_sidebar_search_filters_rows_and_hides_headers(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
