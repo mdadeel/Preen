@@ -548,10 +548,21 @@ class GuiRuntimeTest(unittest.TestCase):
                    {"source": "apt", "id": "vlc", "name": "VLC"},
                    {"source": "apt", "id": "unknown", "name": "Unknown"}]
         with mock.patch.object(self.gui.apps_backend, "list_installed_flatpak", return_value=entries[:1]), \
-                mock.patch.object(self.gui.apps_backend, "list_installed_apt", return_value=entries[1:]):
+                mock.patch.object(self.gui.apps_backend, "list_installed_apt", return_value=entries[1:]), \
+                mock.patch.object(self.gui.apps_backend, "list_installed_snap", return_value=[]):
             scanned, warnings = self.gui.MainWindow._scan_installed_worker()
         self.assertEqual(warnings, [])
         self.assertEqual([item.get("icon_asset") for item in scanned], ["firefox", "vlcmediaplayer", None])
+
+    def test_manage_scan_includes_snap_rows_with_badge(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._fill_manage_rows([
+            {"source": "snap", "id": "firefox", "name": "firefox", "protected": False},
+            {"source": "snap", "id": "core22", "name": "core22", "protected": True},
+        ])
+        window.on_manage_select_all(None)
+        self.assertEqual(len(window._selected_manage()), 1)  # base snap protected
+        self.assertEqual(window._selected_manage()[0]["id"], "firefox")
 
     def test_snapshot_refresh_keeps_export_and_import_controls(self):
         window = self.gui.MainWindow(self.gui.PreenApp())

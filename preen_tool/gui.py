@@ -1905,7 +1905,7 @@ class MainWindow(Gtk.ApplicationWindow):
     def _build_manage_page(self):
         page = self._page(
             "manage", "Manage Apps", "Manage Apps",
-            "Review installed Flatpak and graphical APT applications. "
+            "Review installed Flatpak, Snap and graphical APT applications. "
             "Essential desktop packages are protected from removal.")
 
         toolbar = Gtk.Box(spacing=8)
@@ -1915,7 +1915,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.manage_search.connect("search-changed", self._on_manage_search_changed)
         toolbar.pack_start(self.manage_search, True, True, 0)
         toolbar.pack_start(self._button("Scan Installed", self.on_scan_installed,
-                                        "Re-scan Flatpak and graphical APT applications",
+                                        "Re-scan Flatpak, Snap and graphical APT applications",
                                         icon="view-refresh-symbolic"), False, False, 0)
         page.pack_start(toolbar, False, False, 0)
 
@@ -1975,7 +1975,8 @@ class MainWindow(Gtk.ApplicationWindow):
     def _scan_installed_worker(log=None):
         warnings = []
         entries = (apps_backend.list_installed_flatpak(warnings, log) +
-                   apps_backend.list_installed_apt(warnings, log))
+                   apps_backend.list_installed_apt(warnings, log) +
+                   apps_backend.list_installed_snap(warnings, log))
         marks = {}
         for item in apps_backend.all_apps().values():
             if item.get("icon_asset"):
@@ -2068,7 +2069,8 @@ class MainWindow(Gtk.ApplicationWindow):
             label.set_tooltip_text(entry["id"])
             label.get_style_context().add_class("settings-title")
             line.pack_start(label, True, True, 0)
-            source = Gtk.Label(label="APT" if entry["source"] == "apt" else "Flatpak")
+            source = Gtk.Label(label={"apt": "APT", "snap": "Snap"}.get(
+                entry["source"], "Flatpak"))
             source.get_style_context().add_class("badge")
             line.pack_start(source, False, False, 0)
             status = Gtk.Label(label="Protected" if protected else "Installed")

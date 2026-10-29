@@ -24,6 +24,8 @@ from preen_tool.backend import (  # noqa: E402
     apps,
     backup,
     dashboard,
+    drivers,
+    maintenance,
     performance,
     system,
     ui_customization,
@@ -461,6 +463,58 @@ class BackendTestCase(unittest.TestCase):
         self.assertEqual(len(flatpak_updates[0]["args"]), 5)
 
     # ------------------------------------------------------------------
+    # Snap support in Manage Apps
+    # ------------------------------------------------------------------
+    def test_snap_scanner_lists_apps_and_protects_base(self):
+        self.fake.update(snaps={
+            "firefox": {"version": "125.0", "notes": "-"},
+            "core22": {"version": "20240408", "notes": "base"},
+            "snapd": {"version": "2.63", "notes": "snapd"},
+            "oldapp": {"version": "1.0", "notes": "disabled"},
+        })
+        entries = apps.list_installed_snap()
+        by_id = {entry["id"]: entry for entry in entries}
+        self.assertEqual(set(by_id), {"firefox", "core22", "snapd"})
+        self.assertFalse(by_id["firefox"]["protected"])
+        self.assertTrue(by_id["core22"]["protected"])
+        self.assertTrue(by_id["snapd"]["protected"])
+        self.assertEqual(by_id["firefox"]["source"], "snap")
+        self.assertEqual(by_id["firefox"]["version"], "125.0")
+
+    def test_snap_scanner_is_silent_when_snapd_is_missing(self):
+        warnings: list = []
+        with mock.patch.object(apps, "has_command", return_value=False):
+            entries = apps.list_installed_snap(warnings=warnings)
+        self.assertEqual(entries, [])
+        self.assertEqual(warnings, [])
+
+    def test_snap_uninstall_runs_polkit_remove(self):
+        outcome = apps.uninstall_installed([{"source": "snap", "id": "firefox"}], log=self.log)
+        self.assertTrue(outcome.ok)
+        script = self.fake.mutating_commands()[-1]["args"][2]
+        self.assertIn("snap remove firefox", script)
+        self.assertIn("0 Flatpak app(s), 0 APT package(s) and 1 snap(s)", outcome.message)
+
+    def test_base_snaps_refuse_removal(self):
+        outcome = apps.uninstall_installed([{"source": "snap", "id": "core22"}], log=self.log)
+        self.assertFalse(outcome.ok)
+        self.assertEqual(self.fake.mutating_commands(), [])
+        self.assertIn("base snap", self.log.text())
+
+    def test_mixed_uninstall_batches_every_source(self):
+        outcome = apps.uninstall_installed([
+            {"source": "flatpak", "id": "com.spotify.Client"},
+            {"source": "apt", "id": "vlc"},
+            {"source": "snap", "id": "firefox"},
+        ], log=self.log)
+        self.assertTrue(outcome.ok)
+        scripts = [c["args"][2] for c in self.fake.mutating_commands() if c["cmd"] == "pkexec"]
+        self.assertTrue(any("apt-get remove -y vlc" in script for script in scripts))
+        self.assertTrue(any("snap remove firefox" in script for script in scripts))
+        self.assertTrue(any(c["cmd"] == "flatpak" and "uninstall" in c["args"]
+                            for c in self.fake.commands()))
+
+    # ------------------------------------------------------------------
     # Simulate mode - the big one
     # ------------------------------------------------------------------
     def test_simulate_mode_blocks_EVERY_mutating_action(self):
@@ -485,6 +539,9 @@ class BackendTestCase(unittest.TestCase):
             lambda: apps.update_all("apt", log=self.log),
             lambda: apps.uninstall_apps(["vlc"], "apt", log=self.log),
             lambda: apps.uninstall_installed([{"source": "apt", "id": "vlc"}], log=self.log),
+            lambda: apps.uninstall_installed([{"source": "snap", "id": "firefox"}], log=self.log),
+            lambda: maintenance.set_schedule(True, "weekly", log=self.log),
+            lambda: drivers.install_driver(["nvidia-driver-535"], log=self.log),
             lambda: system.run_cleanup(log=self.log),
             lambda: system.set_animations(False, log=self.log),
             lambda: system.set_startup_app(str(desktop), False, log=self.log),

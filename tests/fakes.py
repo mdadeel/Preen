@@ -89,6 +89,24 @@ elif name == "gsettings":
                 json.dump(state, handle)
     else:
         code = 1
+elif name == "snap":
+    sub = args[0] if args else ""
+    if sub == "list" and "--all" in args:
+        out = "Name  Version  Rev  Tracking  Publisher  Notes\n"
+        for snap_name, info in sorted(state.get("snaps", {}).items()):
+            info = info if isinstance(info, dict) else {}
+            out += "{}  {}  101  latest/stable  publisher  {}\n".format(
+                snap_name, info.get("version", "1.0"), info.get("notes", "-"))
+    elif sub == "refresh" and "--list" in args:
+        out = "Name  Version  Rev  Size  Publisher  Notes\n"
+        for snap_name, info in sorted(state.get("snap_updates", {}).items()):
+            out += "{}  {}  102  100MB  publisher  {}\n".format(
+                snap_name, info if isinstance(info, str) else info.get("version", "2.0"),
+                "latest/stable" if not isinstance(info, str) else "")
+    elif sub in ("refresh", "remove", "install"):
+        pass  # never actually mutate; the bash/pkexec fake logs those
+    else:
+        code = 1
 elif name == "swapon":
     out = "\n".join(state.get("swap", [])) + "\n"
 elif name == "powerprofilesctl":
@@ -114,7 +132,7 @@ sys.exit(code)
 
 COMMANDS = (
     "flatpak", "dpkg-query", "dpkg", "gsettings", "swapon",
-    "powerprofilesctl", "pkexec", "bash", "timeshift",
+    "powerprofilesctl", "pkexec", "bash", "timeshift", "snap",
     "timeshift-gtk", "timeshift-launcher", "failcmd",
 )
 
@@ -150,6 +168,8 @@ class FakeSystem:
             "flathub": True,
             "apt": {},
             "owners": {},
+            "snaps": {},
+            "snap_updates": {},
             "gsettings": {},
             "swap": [],
             "power": "balanced",

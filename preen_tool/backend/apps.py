@@ -35,7 +35,16 @@ PRESETS_JSON = os.path.join(CONFIG_DIR, "presets.json")
 
 FLATPAK_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 APT_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]*(:[a-z0-9]+)?$")
+SNAP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 FLATHUB_REPO = "flathub"
+
+# Base/platform snaps the desktop needs; they are never app rows the user
+# should remove, so they show as protected rather than being hidden.
+SNAP_BASE_SNAPS = frozenset({
+    "bare", "snapd", "core", "core18", "core20", "core22", "core24", "core26",
+    "gtk-common-themes", "gnome-42-2204", "gnome-44-2404", "gnome-46-2404",
+    "kde-5-27-02", "qt515-core22", "qt6-core22", "gtk-2-common-themes",
+})
 
 # Removing any of these can leave a Zorin/Ubuntu machine unbootable. Refuse
 # them even if the user selects them in "Manage Apps".
@@ -144,6 +153,10 @@ def as_list(value) -> List[str]:
 
 def is_protected(pkg: str) -> bool:
     return pkg.split(":")[0] in ESSENTIAL_APT_PACKAGES
+
+
+def is_protected_snap(name: str) -> bool:
+    return name in SNAP_BASE_SNAPS or name.startswith("snapd")
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +415,43 @@ def list_installed_apt(warnings=None, log=None) -> List[Dict]:
     return items
 
 
+def list_installed_snap(warnings=None, log=None) -> List[Dict]:
+    """List installed snap applications; base snaps appear as protected rows.
+
+    Silently absent when snapd is not installed: unlike Flatpak — Preen's
+    preferred source — many Zorin systems never use snaps, and a permanent
+    "not installed" banner would be noise.
+    """
+    if not has_command("snap"):
+        return []
+    result = run_cmd(["snap", "list", "--all"], quiet=True)
+    if not result.ok:
+        message = "Snap scan failed (exit {}): {}".format(
+            result.code, result.err or result.out or "no output")
+        if warnings is not None:
+            warnings.append(message)
+        if log:
+            log.append("[warning] " + message.rstrip() + "\n")
+        return []
+    items: List[Dict] = []
+    for line in result.out.splitlines()[1:]:
+        parts = [part for part in re.split(r"\s{2,}", line.strip()) if part]
+        if len(parts) < 4 or not SNAP_NAME_RE.match(parts[0]):
+            continue
+        notes = parts[5] if len(parts) > 5 else (parts[-1] if len(parts) == 5 else "")
+        if "disabled" in notes:
+            continue
+        items.append({
+            "source": "snap",
+            "id": parts[0],
+            "name": parts[0],
+            "version": parts[1],
+            "protected": is_protected_snap(parts[0]) or "base" in notes,
+        })
+    items.sort(key=lambda x: x["name"].lower())
+    return items
+
+
 # ---------------------------------------------------------------------------
 # Command construction helpers
 # ---------------------------------------------------------------------------
@@ -462,14 +512,20 @@ def _resolve_selection(app_ids: Iterable[str], source: str, mode: str
     return list(dict.fromkeys(flatpaks)), list(dict.fromkeys(apts)), notes
 
 
-def _validate_entries(entries: Iterable[Dict]) -> Tuple[List[str], List[str], List[str]]:
+def _validate_entries(entries: Iterable[Dict]
+                      ) -> Tuple[List[str], List[str], List[str], List[str]]:
     """Validate scanner rows before they become command arguments."""
-    flatpaks, apts, notes = [], [], []
+    flatpaks, apts, snaps, notes = [], [], [], []
     for entry in entries:
         source = entry.get("source")
         ident = str(entry.get("id", ""))
         if source == "flatpak" and FLATPAK_ID_RE.match(ident):
             flatpaks.append(ident)
+        elif source == "snap" and SNAP_NAME_RE.match(ident):
+            if is_protected_snap(ident):
+                notes.append("{} is a base snap and cannot be removed here".format(ident))
+            else:
+                snaps.append(ident)
         elif source == "apt" and APT_NAME_RE.match(ident):
             if is_protected(ident):
                 notes.append("{} is essential and cannot be removed here".format(ident))
@@ -477,11 +533,13 @@ def _validate_entries(entries: Iterable[Dict]) -> Tuple[List[str], List[str], Li
                 apts.append(ident)
         else:
             notes.append("ignored invalid entry {!r}".format(entry))
-    return list(dict.fromkeys(flatpaks)), list(dict.fromkeys(apts)), notes
+    return (list(dict.fromkeys(flatpaks)), list(dict.fromkeys(apts)),
+            list(dict.fromkeys(snaps)), notes)
 
 
 def _run_batches(report: Report, flatpaks: Sequence[str], apts: Sequence[str],
-                 action: str, *, ensure_remote: bool = False) -> None:
+                 action: str, *, ensure_remote: bool = False,
+                 snaps: Sequence[str] = ()) -> None:
     if flatpaks:
         remote_ready = not ensure_remote or ensure_flathub(log=report.log, mutate=True)
         if not remote_ready and not is_simulate():
@@ -510,6 +568,15 @@ def _run_batches(report: Report, flatpaks: Sequence[str], apts: Sequence[str],
                 ["apt-get", "install", "--only-upgrade", "-y"] + list(apts),
             ]
         script = _apt_script(*commands)
+        report.run(["bash", "-c", script], use_pkexec=True, mutate=True,
+                   timeout=utils.DEFAULT_TIMEOUT)
+
+    if snaps:
+        if action == "remove":
+            argv = ["snap", "remove"] + list(snaps)
+        else:
+            argv = ["snap", "refresh"] + list(snaps)
+        script = format_cmd(argv)
         report.run(["bash", "-c", script], use_pkexec=True, mutate=True,
                    timeout=utils.DEFAULT_TIMEOUT)
 
@@ -639,15 +706,16 @@ def _operate_installed(entries: List[Dict], action: str, log) -> Outcome:
     if not entries:
         return fail("No installed apps selected.")
     report = Report(log)
-    flatpaks, apts, notes = _validate_entries(entries)
+    flatpaks, apts, snaps, notes = _validate_entries(entries)
     for note in notes:
         report.note("[" + action + "] " + note)
-    if not flatpaks and not apts:
+    if not flatpaks and not apts and not snaps:
         return fail("Nothing safe to " + ("uninstall." if action == "remove" else "update."))
-    _run_batches(report, flatpaks, apts, action)
+    _run_batches(report, flatpaks, apts, action, snaps=snaps)
     invalidate_state()
     verb = "Uninstalled" if action == "remove" else "Updated"
     return report.finish(
-        "{} {} Flatpak app(s) and {} APT package(s).".format(verb, len(flatpaks), len(apts)),
+        "{} {} Flatpak app(s), {} APT package(s) and {} snap(s).".format(
+            verb, len(flatpaks), len(apts), len(snaps)),
         verb + " finished with errors",
     )
