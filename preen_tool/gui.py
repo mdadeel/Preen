@@ -2080,11 +2080,38 @@ class MainWindow(Gtk.ApplicationWindow):
             line.pack_start(status, False, False, 0)
             row.add(line)
             row.chk = chk
+            row.status_label = status
             self.manage_listbox.add(row)
         self.manage_listbox.show_all()
         self._update_manage_counter()
         self._on_manage_search_changed(None)
+        self._manage_count = len(entries)
         self._notice("Found {} installed app(s).".format(len(entries)))
+        self.submit(apps_backend.list_updates, done=self._apply_manage_updates)
+
+    def _apply_manage_updates(self, updates):
+        """Badge rows whose source reports an update (best-effort, read-only)."""
+        if not isinstance(updates, dict):
+            return
+        available = 0
+        for row in self.manage_listbox.get_children():
+            entry = getattr(row, "entry", None)
+            if not entry or entry.get("protected"):
+                continue
+            ids = updates.get(entry.get("source"))
+            if not ids or entry.get("id") not in ids:
+                continue
+            entry["updatable"] = True
+            available += 1
+            label = getattr(row, "status_label", None)
+            if label is not None:
+                label.set_text("Update available")
+                label.get_style_context().add_class("status-warning")
+                label.set_tooltip_text(
+                    "A newer version is available; select it and press Update Selected")
+        if available:
+            self._notice("Found {} installed app(s); {} update(s) available.".format(
+                getattr(self, "_manage_count", available), available))
 
     def _selected_manage(self):
         selected = []
@@ -2130,11 +2157,29 @@ class MainWindow(Gtk.ApplicationWindow):
         self.submit(apps_backend.uninstall_installed, selected,
                     done=lambda _r: self.on_scan_installed())
 
+    def _select_updatable_rows(self):
+        """Tick every row the update check flagged; returns the picked entries."""
+        picked = []
+        for row in self.manage_listbox.get_children():
+            entry = getattr(row, "entry", None)
+            chk = getattr(row, "chk", None)
+            if entry and entry.get("updatable") and not entry.get("protected") \
+                    and chk is not None and chk.get_sensitive():
+                chk.set_active(True)
+                picked.append(entry)
+        if picked:
+            self._update_manage_counter()
+        return picked
+
     def on_update_scanned(self, _btn):
         selected = self._selected_manage()
         if not selected:
-            self._notify("Tick at least one installed app first.", "warning")
-            return
+            # Nothing ticked: treat the button as "update everything flagged".
+            selected = self._select_updatable_rows()
+            if not selected:
+                self._notify("No updates found. Use Scan Installed to refresh the list first.",
+                             "warning")
+                return
         self.submit(apps_backend.update_installed, selected)
 
     # ------------------------------------------------------------------

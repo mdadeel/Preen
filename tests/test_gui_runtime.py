@@ -408,6 +408,12 @@ class GuiRuntimeTest(unittest.TestCase):
         })
         env_patch.start()
         self.addCleanup(env_patch.stop)
+        # The update check reaches apt/Flatpak/snap — default to "none found"
+        # so _fill_manage_rows never touches the real machine in tests.
+        updates_patch = mock.patch.object(self.gui.apps_backend, "list_updates",
+                                          return_value={})
+        updates_patch.start()
+        self.addCleanup(updates_patch.stop)
 
     def test_window_builds_and_all_pages_exist(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
@@ -563,6 +569,31 @@ class GuiRuntimeTest(unittest.TestCase):
         window.on_manage_select_all(None)
         self.assertEqual(len(window._selected_manage()), 1)  # base snap protected
         self.assertEqual(window._selected_manage()[0]["id"], "firefox")
+
+    def test_manage_update_badges_flag_rows_and_update_button_uses_them(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._fill_manage_rows([
+            {"source": "flatpak", "id": "com.spotify.Client", "name": "Spotify",
+             "protected": False},
+            {"source": "apt", "id": "vlc", "name": "VLC", "protected": False},
+            {"source": "apt", "id": "gnome-shell", "name": "GNOME Shell", "protected": True},
+        ])
+        window._apply_manage_updates({"apt": {"vlc", "gnome-shell"},
+                                      "flatpak": set(), "snap": set()})
+        rows = {row.entry["id"]: row for row in window.manage_listbox.get_children()
+                if getattr(row, "entry", None)}
+        self.assertEqual(rows["vlc"].status_label.get_text(), "Update available")
+        self.assertTrue(rows["vlc"].entry.get("updatable"))
+        self.assertEqual(rows["gnome-shell"].status_label.get_text(), "Protected")
+        self.assertFalse(rows["gnome-shell"].entry.get("updatable", False))
+        self.assertEqual(rows["com.spotify.Client"].status_label.get_text(), "Installed")
+        # Update with nothing ticked selects the flagged rows (never protected ones).
+        with mock.patch.object(window, "submit") as submit:
+            window.on_update_scanned(None)
+        self.assertTrue(submit.called)
+        picked = submit.call_args[0][1]
+        self.assertEqual([entry["id"] for entry in picked], ["vlc"])
+        self.assertTrue(rows["vlc"].chk.get_active())
 
     def test_snapshot_refresh_keeps_export_and_import_controls(self):
         window = self.gui.MainWindow(self.gui.PreenApp())

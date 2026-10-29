@@ -44,8 +44,20 @@ if name == "flatpak":
             out += ref + ("\t" + label if want_names else "") + "\n"
     elif sub == "remotes":
         out = "flathub\n" if state.get("flathub", True) else ""
+    elif sub == "remote-ls" and "--updates" in args:
+        if state.get("flatpak_remote_ls_fail"):
+            code = 1
+        else:
+            out = "".join(ref + "\n" for ref in state.get("flatpak_updates", []))
     elif sub in ("install", "uninstall", "update", "remote-add"):
         pass
+    else:
+        code = 1
+elif name == "apt":
+    if args and args[0] == "list" and "--upgradable" in args:
+        for row in state.get("apt_upgradable", []):
+            pkg = row if isinstance(row, str) else row.get("name", "")
+            out += "{}/noble 1.2-3 all [upgradable from: 1.2-2]\n".format(pkg)
     else:
         code = 1
 elif name == "dpkg-query":
@@ -131,7 +143,7 @@ sys.exit(code)
 '''
 
 COMMANDS = (
-    "flatpak", "dpkg-query", "dpkg", "gsettings", "swapon",
+    "flatpak", "dpkg-query", "dpkg", "apt", "gsettings", "swapon",
     "powerprofilesctl", "pkexec", "bash", "timeshift", "snap",
     "timeshift-gtk", "timeshift-launcher", "failcmd",
 )
@@ -170,6 +182,9 @@ class FakeSystem:
             "owners": {},
             "snaps": {},
             "snap_updates": {},
+            "flatpak_updates": [],
+            "apt_upgradable": [],
+            "flatpak_remote_ls_fail": False,
             "gsettings": {},
             "swap": [],
             "power": "balanced",

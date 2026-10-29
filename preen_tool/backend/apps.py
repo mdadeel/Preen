@@ -452,6 +452,70 @@ def list_installed_snap(warnings=None, log=None) -> List[Dict]:
     return items
 
 
+_UPDATABLE_TIMEOUT = 90  # seconds; Flatpak/snap checks reach the network
+
+
+def _upgradable_apt() -> Set[str]:
+    """Package names with an update available, from the cached apt index."""
+    result = run_cmd(["apt", "list", "--upgradable"], quiet=True)
+    if not result.ok:
+        return set()
+    names: Set[str] = set()
+    for line in result.out.splitlines():
+        # "pkg/oldstable 1.2-3 amd64 [upgradable from: 1.2-2]"
+        name = line.split("/", 1)[0].strip()
+        if "/" in line and name:
+            names.add(name)
+    return names
+
+
+def _upgradable_flatpak(warnings: Optional[List[str]]) -> Set[str]:
+    if not has_command("flatpak"):
+        return set()
+    result = run_cmd(["flatpak", "remote-ls", "--updates", "--columns=application"],
+                     quiet=True, timeout=_UPDATABLE_TIMEOUT)
+    if not result.ok:
+        if warnings is not None:
+            warnings.append("Flatpak update check failed (exit {})".format(result.code))
+        return set()
+    return {line.strip() for line in result.out.splitlines() if line.strip()}
+
+
+def _upgradable_snap(warnings: Optional[List[str]]) -> Set[str]:
+    if not has_command("snap"):
+        return set()
+    result = run_cmd(["snap", "refresh", "--list"], quiet=True,
+                     timeout=_UPDATABLE_TIMEOUT)
+    if not result.ok:
+        if warnings is not None:
+            warnings.append("Snap update check failed (exit {})".format(result.code))
+        return set()
+    names: Set[str] = set()
+    for line in result.out.splitlines()[1:]:
+        parts = [part for part in re.split(r"\s{2,}", line.strip()) if part]
+        if parts and SNAP_NAME_RE.match(parts[0]):
+            names.add(parts[0])
+    return names
+
+
+def list_updates(warnings=None, log=None) -> Dict[str, Set[str]]:
+    """Ids with updates available, keyed by source (apt uses package names).
+
+    APT reads the cached package index (no network). Flatpak and snap
+    contact their stores and may take a few seconds; failures downgrade to a
+    warning — the badge is best-effort, not a dependency.
+    """
+    warnings = warnings if warnings is not None else []
+    updates = {
+        "apt": _upgradable_apt(),
+        "flatpak": _upgradable_flatpak(warnings),
+        "snap": _upgradable_snap(warnings),
+    }
+    if warnings and log:
+        log.append("[warning] " + "; ".join(warnings) + "\n")
+    return updates
+
+
 # ---------------------------------------------------------------------------
 # Command construction helpers
 # ---------------------------------------------------------------------------

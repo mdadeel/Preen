@@ -514,6 +514,23 @@ class BackendTestCase(unittest.TestCase):
         self.assertTrue(any(c["cmd"] == "flatpak" and "uninstall" in c["args"]
                             for c in self.fake.commands()))
 
+    def test_list_updates_parses_all_three_sources(self):
+        self.fake.update(apt_upgradable=["vlc", "git"],
+                         flatpak_updates=["com.spotify.Client", "org.videolan.VLC"],
+                         snap_updates={"firefox": {"version": "126.0"}})
+        updates = apps.list_updates()
+        self.assertEqual(updates["apt"], {"vlc", "git"})
+        self.assertEqual(updates["flatpak"], {"com.spotify.Client", "org.videolan.VLC"})
+        self.assertEqual(updates["snap"], {"firefox"})
+
+    def test_list_updates_downgrades_failures_to_warnings(self):
+        self.fake.update(flatpak_remote_ls_fail=True)
+        warnings: list = []
+        updates = apps.list_updates(warnings=warnings)
+        self.assertEqual(updates["apt"], set())
+        self.assertEqual(updates["flatpak"], set())
+        self.assertTrue(any("Flatpak update check failed" in w for w in warnings))
+
     # ------------------------------------------------------------------
     # Simulate mode - the big one
     # ------------------------------------------------------------------
