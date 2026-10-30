@@ -4,6 +4,39 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-10-31
+
+Interface consistency and feedback fixes from a full design review.
+
+### Changed
+
+- **The header names the running task** (for example "Installing apps",
+  "Scanning devices") instead of a generic "Working…", so a slow scan no
+  longer reads as a frozen app.
+- **Navigation stays available while tasks run**: the sidebar, page search
+  boxes and the Dashboard's Open Logs button remain clickable; only task
+  buttons pause until the queue drains.
+- **The firewall toggle is staged**: like the other Optimize System rows,
+  UFW changes are applied with **Apply Changes**, and disabling the firewall
+  asks for confirmation there. It no longer applies on toggle.
+- **One look apply path**: the redundant "Apply Preen Appearance" button is
+  gone; **Apply Look Changes** applies the Preen theme together with any
+  staged desktop-wide options.
+- Rows that genuinely apply instantly (file manager right-click entries,
+  automatic maintenance) say so in their captions.
+
+### Fixed
+
+- Combobox dropdown menus, tooltips and the selected row of the Services
+  list are styled in Preen's own palette; they previously followed the
+  system theme, which put dark menu text on Preen's dark surfaces under
+  light system themes.
+- The light palette is generated from the same design tokens as the dark
+  one, so the two can no longer drift apart; two dead tokens were removed.
+- Keyboard shortcuts now exist: F5 (refresh the visible page), Ctrl+F
+  (jump to its search box), Ctrl+A (select all on Install, Manage and Deep
+  Clean), Escape (dismiss a notice banner).
+
 ## [0.7.0] - 2026-10-30
 
 Snap support, update badges, scheduled maintenance and a Drivers page.

@@ -1,3 +1,22 @@
+preen (0.7.1) stable; urgency=medium
+
+  * The header names the running task (for example "Installing apps" or
+    "Scanning devices") instead of a generic "Working..."; the sidebar,
+    search boxes and Open Logs stay usable while tasks run.
+  * The firewall (UFW) toggle is staged: changes apply with "Apply Changes"
+    and disabling the firewall warns there, instead of applying on toggle.
+  * One look apply path: "Apply Look Changes" applies the Preen theme with
+    any staged desktop-wide options; the redundant "Apply Preen Appearance"
+    button is gone. Instant-apply rows say so in their captions.
+  * Combobox menus, tooltips and the Services selected row use Preen's own
+    palette; both palettes are generated from one token source so light and
+    dark cannot drift apart.
+  * New keyboard shortcuts: F5 refreshes the visible page, Ctrl+F jumps to
+    its search box, Ctrl+A selects all on Install, Manage and Deep Clean,
+    and Escape dismisses a notice banner.
+
+ -- Md Moft <mdadeel125@gmail.com>  Sat, 31 Oct 2026 00:55:00 +0600
+
 preen (0.7.0) stable; urgency=medium
 
   * Manage Apps lists Snap apps alongside Flatpak and APT; base snaps are
