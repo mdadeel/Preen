@@ -66,6 +66,9 @@ ln -sf preen.png "$APPDIR/.DirIcon"
 
 # Build to a temporary path so a failed or stubbed tool cannot leave a stale
 # artifact looking like a successful build.
+# mktemp -d creates the AppDir root with mode 0700; appimagetool requires the
+# staged tree to be readable and executable by everyone it will run as.
+chmod 755 "$APPDIR"
 OUTPUT="$OUTPUT_DIR/Preen-${VERSION}-x86_64.AppImage"
 ARCH=x86_64 "$TOOL" --appimage-extract-and-run "$APPDIR" "$OUTPUT"
 if [ ! -s "$OUTPUT" ] || [ ! -x "$OUTPUT" ]; then
