@@ -48,23 +48,66 @@ APP_ID = "io.github.mdadeel.Preen"
 MAX_LOG_LINES = 4000
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 
-# GTK 3 design tokens. Keeping the palette and control states together makes
-# all pages (and native GTK dialogs) read as one application. No system theme
-# files are changed.
-_CSS = b"""
-@define-color preen_bg #202124;
-@define-color preen_sidebar #1b1c1e;
-@define-color preen_surface #282a2d;
-@define-color preen_elevated #303236;
-@define-color preen_text #f1f3f4;
-@define-color preen_muted #a5a9b0;
-@define-color preen_border #3b3e42;
-@define-color preen_accent #3584e4;
-/* White text on the base accent is only 3.77:1. Use a darker action fill. */
-@define-color preen_action #2463b5;
-@define-color preen_success #57a773;
-@define-color preen_warning #e5a84b;
-@define-color preen_error #e45b5b;
+# GTK 3 design tokens. Every colour is a named token with a dark and a light
+# value, so both palettes are rendered from one source and cannot drift apart.
+# Keeping the palette and control states together makes all pages (and native
+# GTK dialogs) read as one application. No system theme files are changed.
+_TOKENS = {
+    "preen_bg": ("#202124", "#f5f6f8"),
+    "preen_sidebar": ("#1b1c1e", "#eceff2"),
+    "preen_surface": ("#282a2d", "#ffffff"),
+    "preen_elevated": ("#303236", "#e8ebef"),
+    "preen_text": ("#f1f3f4", "#202124"),
+    "preen_muted": ("#a5a9b0", "#58616c"),
+    "preen_border": ("#3b3e42", "#ccd2d9"),
+    "preen_accent": ("#3584e4", "#3584e4"),
+    # White text on the base accent is only 3.77:1. Use a darker action fill.
+    "preen_action": ("#2463b5", "#2463b5"),
+    "preen_action_hover": ("#1f5faa", "#1f5faa"),
+    "preen_success": ("#57a773", "#237a48"),
+    "preen_warning": ("#e5a84b", "#8a5200"),
+    "preen_error": ("#e45b5b", "#bc3434"),
+    "preen_ok_text": ("#70c28a", "#1d713f"),
+    "preen_bad_text": ("#f08080", "#a52323"),
+    "preen_row_selected": ("#293747", "#dbeafb"),
+    "preen_button_hover": ("#3a3d42", "#d9dee5"),
+    "preen_button_active": ("#43464b", "#cbd1da"),
+    # The white thumb needs a track dark enough for contrast in both modes.
+    "preen_switch_track": ("#7a8088", "#7a8088"),
+    "preen_scroll": ("#62666c", "#8a929b"),
+    "preen_info_banner": ("#263a50", "#e2eefc"),
+    "preen_warning_banner": ("#473a26", "#fff2d8"),
+    "preen_error_banner": ("#4b2e30", "#fce8e6"),
+    "preen_log_info": ("#b8c5d4", "#344054"),
+    "preen_log_simulate": ("#7db5f5", "#145db1"),
+}
+
+_CSS_TEMPLATE = b"""
+@define-color preen_bg __PREEN_BG__;
+@define-color preen_sidebar __PREEN_SIDEBAR__;
+@define-color preen_surface __PREEN_SURFACE__;
+@define-color preen_elevated __PREEN_ELEVATED__;
+@define-color preen_text __PREEN_TEXT__;
+@define-color preen_muted __PREEN_MUTED__;
+@define-color preen_border __PREEN_BORDER__;
+@define-color preen_accent __PREEN_ACCENT__;
+@define-color preen_action __PREEN_ACTION__;
+@define-color preen_action_hover __PREEN_ACTION_HOVER__;
+@define-color preen_success __PREEN_SUCCESS__;
+@define-color preen_warning __PREEN_WARNING__;
+@define-color preen_error __PREEN_ERROR__;
+@define-color preen_ok_text __PREEN_OK_TEXT__;
+@define-color preen_bad_text __PREEN_BAD_TEXT__;
+@define-color preen_row_selected __PREEN_ROW_SELECTED__;
+@define-color preen_button_hover __PREEN_BUTTON_HOVER__;
+@define-color preen_button_active __PREEN_BUTTON_ACTIVE__;
+@define-color preen_switch_track __PREEN_SWITCH_TRACK__;
+@define-color preen_scroll __PREEN_SCROLL__;
+@define-color preen_info_banner __PREEN_INFO_BANNER__;
+@define-color preen_warning_banner __PREEN_WARNING_BANNER__;
+@define-color preen_error_banner __PREEN_ERROR_BANNER__;
+@define-color preen_log_info __PREEN_LOG_INFO__;
+@define-color preen_log_simulate __PREEN_LOG_SIMULATE__;
 
 * { font-family: Cantarell, Inter, Ubuntu, sans-serif; }
 window, dialog { background-color: @preen_bg; color: @preen_text; }
@@ -130,11 +173,15 @@ headerbar button.titlebutton {
 .page-row image { color: @preen_muted; }
 .page-row:hover:not(:selected) { background-color: @preen_surface; }
 .page-row:selected {
-    background-color: #293747;
+    background-color: @preen_row_selected;
     border-left-color: @preen_accent;
 }
 .page-row:selected label { color: @preen_text; font-weight: 600; }
 .page-row:selected image { color: @preen_accent; }
+/* Content lists with single selection (Services) share the sidebar selection. */
+row:selected { background-color: @preen_row_selected; }
+row:selected label { color: @preen_text; }
+row:selected image { color: @preen_accent; }
 .sidebar-footer { border-top: 1px solid @preen_border; padding: 12px 4px 0; }
 .sidebar-version { color: @preen_muted; font-size: 0.8em; }
 
@@ -193,8 +240,8 @@ progressbar progress {
 .warning-line { color: @preen_warning; }
 
 .badge, .chip, .chip-muted { color: @preen_muted; font-size: 0.86em; }
-.badge-ok, .chip-ok, .status-installed { color: #70c28a; }
-.badge-bad, .chip-bad, .status-error { color: #f08080; }
+.badge-ok, .chip-ok, .status-installed { color: @preen_ok_text; }
+.badge-bad, .chip-bad, .status-error { color: @preen_bad_text; }
 .status-warning { color: @preen_warning; }
 .segmented { background-color: @preen_sidebar; border: 1px solid @preen_border; border-radius: 7px; padding: 2px; }
 .segmented button { background: transparent; border: 1px solid transparent; border-radius: 5px; box-shadow: none; padding: 5px 12px; }
@@ -211,17 +258,17 @@ button {
     box-shadow: none;
     padding: 7px 12px;
 }
-button:hover { background-color: #3a3d42; }
-button:active { background-color: #43464b; }
+button:hover { background-color: @preen_button_hover; }
+button:active { background-color: @preen_button_active; }
 button:disabled { color: @preen_muted; background-color: @preen_surface; border-color: @preen_border; }
 button:disabled label, button:disabled image { color: @preen_muted; }
 button.suggested-action { background-color: @preen_action; color: #ffffff; border-color: @preen_accent; font-weight: 600; }
 button.suggested-action label, button.suggested-action image { color: #ffffff; }
-button.suggested-action:hover { background-color: #1f5faa; }
+button.suggested-action:hover { background-color: @preen_action_hover; }
 button.suggested-action:disabled { background-color: @preen_elevated; color: @preen_muted; border-color: @preen_border; }
 button.suggested-action:disabled label, button.suggested-action:disabled image { color: @preen_muted; }
-button.destructive-action { color: #f08080; background-color: @preen_surface; border-color: alpha(@preen_error, 0.55); }
-button.destructive-action label, button.destructive-action image { color: #f08080; }
+button.destructive-action { color: @preen_bad_text; background-color: @preen_surface; border-color: alpha(@preen_error, 0.55); }
+button.destructive-action label, button.destructive-action image { color: @preen_bad_text; }
 button.destructive-action:hover { background-color: alpha(@preen_error, 0.17); }
 button.destructive-action:disabled { color: @preen_muted; border-color: @preen_border; }
 button.destructive-action:disabled label, button.destructive-action:disabled image { color: @preen_muted; }
@@ -250,12 +297,12 @@ check:checked { -gtk-icon-source: url("__PREEN_CHECK_ICON__"); }
 check:indeterminate { -gtk-icon-source: url("__PREEN_MIXED_ICON__"); }
 radio { border-radius: 50%; }
 radio:checked { -gtk-icon-source: url("__PREEN_RADIO_ICON__"); }
-switch { background-image: none; background-color: #7a8088; border: 1px solid #7a8088; border-radius: 999px; min-height: 20px; }
+switch { background-image: none; background-color: @preen_switch_track; border: 1px solid @preen_switch_track; border-radius: 999px; min-height: 20px; }
 switch:checked { background-color: @preen_accent; border-color: @preen_accent; }
 switch slider { background-image: none; background-color: #ffffff; border-radius: 999px; min-width: 18px; min-height: 18px; }
 separator { background-color: @preen_border; }
 scrollbar { background: transparent; border: none; }
-scrollbar slider { background-color: #62666c; border-radius: 8px; min-width: 6px; min-height: 6px; border: none; }
+scrollbar slider { background-color: @preen_scroll; border-radius: 8px; min-width: 6px; min-height: 6px; border: none; }
 scrollbar trough { background: transparent; border: none; }
 
 .app-row { padding: 9px 12px; border-bottom: 1px solid @preen_border; }
@@ -274,36 +321,56 @@ scrollbar trough { background: transparent; border: none; }
 textview, textview text { background-color: @preen_sidebar; color: @preen_text; }
 .log-surface { background-color: @preen_sidebar; border: 1px solid @preen_border; border-radius: 9px; padding: 8px; }
 infobar { border-radius: 7px; margin: 8px 24px 0; padding: 3px 8px; }
-.info-banner { background-color: #263a50; }
-.warning-banner { background-color: #473a26; }
-.error-banner { background-color: #4b2e30; }
+.info-banner { background-color: @preen_info_banner; }
+.warning-banner { background-color: @preen_warning_banner; }
+.error-banner { background-color: @preen_error_banner; }
 popover, menu { background-color: @preen_elevated; border: 1px solid @preen_border; border-radius: 8px; }
+/* Combobox popups are menus; style their items or a light system theme puts
+   dark text on this dark surface. */
+menuitem { color: @preen_text; min-height: 22px; padding: 5px 10px; }
+menuitem:hover { background-color: @preen_row_selected; }
+menuitem:disabled, menuitem label:disabled { color: @preen_muted; }
+tooltip {
+    background-color: @preen_elevated;
+    color: @preen_text;
+    border: 1px solid @preen_border;
+    border-radius: 6px;
+    padding: 4px 8px;
+}
+tooltip label { color: @preen_text; }
 dialog > box { padding: 8px; }
 """
 
-# Resolve indicator assets to absolute file URIs so CSS works from any cwd and
-# when Preen is installed as a wheel, .deb or AppImage.
-for _control in ("check", "mixed", "radio"):
-    _marker = "__PREEN_{}_ICON__".format(_control.upper()).encode("ascii")
-    _CSS = _CSS.replace(_marker, (ASSETS_DIR / "controls" / (_control + ".png")).as_uri().encode("ascii"))
+def _build_css(mode: str) -> bytes:
+    """Render the stylesheet for one palette, with bundled control icons."""
+    index = 0 if mode == "dark" else 1
+    css = _CSS_TEMPLATE
+    for name, values in _TOKENS.items():
+        css = css.replace(("__" + name.upper() + "__").encode("ascii"),
+                          values[index].encode("ascii"))
+    # Resolve indicator assets to absolute file URIs so CSS works from any cwd
+    # and when Preen is installed as a wheel, .deb or AppImage.
+    for control in ("check", "mixed", "radio"):
+        marker = "__PREEN_{}_ICON__".format(control.upper()).encode("ascii")
+        css = css.replace(marker, (ASSETS_DIR / "controls" / (control + ".png")).as_uri().encode("ascii"))
+    return css
 
-# Keep the required dark design intact, while providing a high-contrast light
-# counterpart for the same native GTK controls. No desktop theme files change.
-_LIGHT_CSS = _CSS
-for _dark, _light in (
-    (b"#202124", b"#f5f6f8"), (b"#1b1c1e", b"#eceff2"),
-    (b"#282a2d", b"#ffffff"), (b"#303236", b"#e8ebef"),
-    (b"#f1f3f4", b"#202124"), (b"#a5a9b0", b"#58616c"),
-    (b"#3b3e42", b"#ccd2d9"), (b"#57a773", b"#237a48"),
-    (b"#70c28a", b"#1d713f"),
-    (b"#e5a84b", b"#8a5200"), (b"#e45b5b", b"#bc3434"),
-    (b"#293747", b"#dbeafb"), (b"#3a3d42", b"#d9dee5"),
-    (b"#43464b", b"#cbd1da"), (b"#34475c", b"#dbe4f0"),
-    (b"#8d9bab", b"#66717e"), (b"#f08080", b"#a52323"),
-    (b"#62666c", b"#8a929b"), (b"#263a50", b"#e2eefc"),
-    (b"#473a26", b"#fff2d8"), (b"#4b2e30", b"#fce8e6"),
-):
-    _LIGHT_CSS = _LIGHT_CSS.replace(_dark, _light)
+
+_CSS = _build_css("dark")
+_LIGHT_CSS = _build_css("light")
+
+
+def _log_colors(mode: str) -> dict:
+    """Severity colours for the log view, derived from the same tokens."""
+    index = 0 if mode == "dark" else 1
+    return {
+        "info": _TOKENS["preen_log_info"][index],
+        "notice": _TOKENS["preen_muted"][index],
+        "warning": _TOKENS["preen_warning"][index],
+        "error": _TOKENS["preen_error"][index],
+        "success": _TOKENS["preen_ok_text"][index],
+        "simulate": _TOKENS["preen_log_simulate"][index],
+    }
 
 
 def _escape_markup(text: str) -> str:
@@ -312,15 +379,6 @@ def _escape_markup(text: str) -> str:
 
 class LogBuffer:
     """Thread-safe diagnostic log, with a filtered, severity-coloured view."""
-
-    _COLORS = {
-        "info": "#b8c5d4", "notice": "#a5a9b0", "warning": "#e5a84b",
-        "error": "#e45b5b", "success": "#70c28a", "simulate": "#7db5f5",
-    }
-    _LIGHT_COLORS = {
-        "info": "#344054", "notice": "#58616c", "warning": "#8a5200",
-        "error": "#a52323", "success": "#176b39", "simulate": "#145db1",
-    }
 
     def __init__(self, textbuffer: Gtk.TextBuffer, textview: Gtk.TextView):
         self.buf = textbuffer
@@ -336,14 +394,13 @@ class LogBuffer:
         create_tag = getattr(self.buf, "create_tag", None)
         self._tags_available = callable(create_tag)
         if self._tags_available:
-            for name, color in self._COLORS.items():
+            for name, color in _log_colors("dark").items():
                 create_tag("log-" + name, foreground=color)
 
     def set_theme(self, mode):
         if self._tags_available:
-            colors = self._LIGHT_COLORS if mode == "light" else self._COLORS
             table = self.buf.get_tag_table()
-            for name, color in colors.items():
+            for name, color in _log_colors(mode).items():
                 tag = table.lookup("log-" + name)
                 if tag is not None:
                     tag.set_property("foreground", color)
@@ -459,6 +516,7 @@ class MainWindow(Gtk.ApplicationWindow):
             self.set_position(window_position)
         self._busy = False
         self._busy_lock = threading.Lock()
+        self._current_task_name = None
         # FIFO task queue. The old runner rejected every submit() while a
         # task was running, which silently dropped the startup reads (boot
         # info, service list, cleanable scan and preferences never loaded).
@@ -631,6 +689,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self._build_backup_page()
         self._build_logs_page()
         self._populate_sidebar()
+        self._install_accelerators()
         if self._style_error:
             self._notify("Preen's appearance could not be loaded. See Logs for details.",
                          "error", log=False)
@@ -884,7 +943,9 @@ class MainWindow(Gtk.ApplicationWindow):
         return chip
 
     def _button(self, label, callback, tooltip=None, primary=False, destructive=False,
-                icon=None, flat=False):
+                icon=None, flat=False, lock=True):
+        """Build a button. ``lock=False`` marks navigation-only buttons that
+        stay clickable while a task runs in the queue."""
         if icon:
             button = Gtk.Button()
             inner = Gtk.Box(spacing=7)
@@ -904,6 +965,7 @@ class MainWindow(Gtk.ApplicationWindow):
             context.add_class("destructive-action")
         if flat:
             context.add_class("flat")
+        button.preen_lock = lock
         self.action_widgets.append(button)
         return button
 
@@ -1056,6 +1118,70 @@ class MainWindow(Gtk.ApplicationWindow):
         return flow
 
     # ------------------------------------------------------------------
+    # Keyboard accelerators
+    # ------------------------------------------------------------------
+    def _install_accelerators(self):
+        """Window shortcuts: F5 refresh, Ctrl+F search, Ctrl+A select all,
+        Escape dismiss a notice. Guarded because minimal GTK builds and the
+        test doubles ship neither Gio.SimpleAction nor accel registration."""
+        self._page_refresh_actions = {
+            "dashboard": self._refresh_stats, "install": self.on_refresh_status,
+            "manage": self.on_scan_installed, "appimages": self.on_rescan_appimages,
+            "optimize": self._refresh_optimize_settings,
+            "customize": self._refresh_look_settings,
+            "deepclean": self.on_scan_cleanable, "services": self.on_refresh_services,
+            "drivers": self.on_rescan_drivers, "backup": self.on_refresh_snapshots,
+        }
+        self._page_find_actions = {
+            "install": self.install_search, "manage": self.manage_search,
+            "appimages": self.appimage_search, "services": self.services_search,
+            "drivers": self.drivers_search, "logs": self.log_filter,
+        }
+        self._page_select_all_actions = {
+            "install": self.on_select_all, "manage": self.on_manage_select_all,
+            "deepclean": self.on_clean_select_all,
+        }
+        simple_action = getattr(Gio, "SimpleAction", None)
+        app = self.get_application()
+        set_accels = getattr(app, "set_accels_for_action", None) if app is not None else None
+        for name, accels, handler in (
+            ("refresh-page", ("F5", "<Primary>r"), self._accel_refresh),
+            ("find", ("<Primary>f",), self._accel_find),
+            ("select-all", ("<Primary>a",), self._accel_select_all),
+            ("dismiss-notice", ("Escape",), self._accel_dismiss),
+        ):
+            if simple_action is not None:
+                action = simple_action.new(name, None)
+                action.connect("activate", lambda _a, _p, callback=handler: callback())
+                self.add_action(action)  # GtkApplicationWindow exposes it as win.<name>
+            if callable(set_accels):
+                set_accels("win." + name, list(accels))
+
+    def _accel_refresh(self):
+        handler = self._page_refresh_actions.get(self.stack.get_visible_child_name())
+        if handler is not None:
+            handler()
+
+    def _accel_find(self):
+        entry = self._page_find_actions.get(self.stack.get_visible_child_name())
+        if entry is None:
+            entry = self.sidebar_search
+        entry.grab_focus()
+
+    def _accel_select_all(self):
+        # Inside a text entry, Ctrl+A keeps GTK's native select-text behaviour.
+        focus = self.get_focus()
+        if focus is not None and isinstance(focus, Gtk.Entry):
+            return
+        handler = self._page_select_all_actions.get(self.stack.get_visible_child_name())
+        if handler is not None:
+            handler(None)
+
+    def _accel_dismiss(self):
+        if self._banner_level is not None:
+            self._dismiss_banner()
+
+    # ------------------------------------------------------------------
     # Sidebar navigation
     # ------------------------------------------------------------------
     # Stable page IDs are shared with preferences and the stack.
@@ -1148,13 +1274,15 @@ class MainWindow(Gtk.ApplicationWindow):
     # ------------------------------------------------------------------
     # Task runner
     # ------------------------------------------------------------------
-    def submit(self, func, *args, done=None):
+    def submit(self, func, *args, done=None, name=None):
         """Queue a backend function for a worker thread.
 
         Tasks run one at a time in FIFO order instead of being rejected while
         another task is running; ``done`` always runs on the UI thread.
+        ``name`` is shown in the header while the task runs, so a slow scan
+        never reads as a frozen app.
         """
-        self._queue.append((func, args, done))
+        self._queue.append((func, args, done, name))
         self._pump_queue()
         return True
 
@@ -1162,8 +1290,9 @@ class MainWindow(Gtk.ApplicationWindow):
         with self._busy_lock:
             if self._busy or not self._queue:
                 return
-            func, args, done = self._queue.popleft()
+            func, args, done, name = self._queue.popleft()
             self._busy = True
+            self._current_task_name = name
         # submit() is called on the GTK thread; disable immediately so a
         # double click cannot enqueue a second command before an idle event.
         self._set_busy_ui(True)
@@ -1184,7 +1313,8 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _set_busy_ui(self, busy):
         self.spinner.start() if busy else self.spinner.stop()
-        self.status_label.set_text("Working…" if busy else "Ready")
+        self.status_label.set_text(
+            (self._current_task_name or "Working…") if busy else "Ready")
         if busy:
             self.busy_box.set_no_show_all(False)
             self.busy_box.show_all()
@@ -1194,7 +1324,10 @@ class MainWindow(Gtk.ApplicationWindow):
         # Simulation cannot be switched off halfway through a queued batch.
         self.sim_switch.set_sensitive(not busy and not self._simulation_forced)
         for widget in self.action_widgets:
-            widget.set_sensitive(not busy)
+            # Navigation-only buttons (lock=False) stay usable during tasks:
+            # reading the Logs page never conflicts with a queued command.
+            if getattr(widget, "preen_lock", True):
+                widget.set_sensitive(not busy)
         for button in self._segmented_buttons(self.install_source):
             button.set_sensitive(not busy)
         self._sync_power_control()
@@ -1248,17 +1381,27 @@ class MainWindow(Gtk.ApplicationWindow):
         # Read appearance first so a light desktop does not wait behind large
         # package and service scans before Preen adopts the correct palette.
         # The FIFO queue runs the rest one at a time without dropping any.
-        self.submit(self._read_settings, done=self._apply_settings)
-        self.submit(apps_backend.get_status_label_map, done=self._apply_status)
-        self.submit(self._scan_installed_worker, done=self._fill_manage_rows)
-        self.submit(self._scan_appimages_worker, done=self._fill_appimage_rows)
-        self.submit(dash_backend.get_system_info, done=self._apply_stats)
-        self.submit(deepclean_backend.scan_cleanable, done=self._apply_clean_scan)
-        self.submit(services_backend.boot_info, done=self._apply_boot)
-        self.submit(services_backend.list_services, done=self._apply_services)
-        self.submit(backup_backend.list_snapshots, done=self._apply_snapshots)
-        self.submit(maintenance_backend.get_schedule, done=self._apply_maintenance_state)
-        self.submit(self._scan_drivers_worker, done=self._fill_drivers_rows)
+        self.submit(self._read_settings, done=self._apply_settings, name="Reading preferences")
+        self.submit(apps_backend.get_status_label_map, done=self._apply_status,
+                    name="Checking app status")
+        self.submit(self._scan_installed_worker, done=self._fill_manage_rows,
+                    name="Scanning installed apps")
+        self.submit(self._scan_appimages_worker, done=self._fill_appimage_rows,
+                    name="Scanning AppImages")
+        self.submit(dash_backend.get_system_info, done=self._apply_stats,
+                    name="Reading system usage")
+        self.submit(deepclean_backend.scan_cleanable, done=self._apply_clean_scan,
+                    name="Scanning cleanup items")
+        self.submit(services_backend.boot_info, done=self._apply_boot,
+                    name="Measuring boot time")
+        self.submit(services_backend.list_services, done=self._apply_services,
+                    name="Listing services")
+        self.submit(backup_backend.list_snapshots, done=self._apply_snapshots,
+                    name="Listing snapshots")
+        self.submit(maintenance_backend.get_schedule, done=self._apply_maintenance_state,
+                    name="Reading maintenance schedule")
+        self.submit(self._scan_drivers_worker, done=self._fill_drivers_rows,
+                    name="Scanning devices")
         interval = self.settings.get("auto_refresh_seconds", 15)
         if interval:
             GLib.timeout_add_seconds(interval, self._periodic_refresh)
@@ -1267,7 +1410,8 @@ class MainWindow(Gtk.ApplicationWindow):
         with self._busy_lock:
             busy = self._busy
         if not busy:
-            self.submit(dash_backend.get_system_info, done=self._apply_stats)
+            self.submit(dash_backend.get_system_info, done=self._apply_stats,
+                        name="Reading system usage")
         return True
 
     # ------------------------------------------------------------------
@@ -1473,11 +1617,12 @@ class MainWindow(Gtk.ApplicationWindow):
             self._button("Run Cleanup", self.on_dashboard_cleanup,
                          "APT autoremove/autoclean and unused Flatpak runtimes"),
             self._button("Open Logs", self.on_open_logs_page,
-                         "Review commands and diagnostic messages"),
+                         "Review commands and diagnostic messages", lock=False),
         ), False, False, 0)
 
     def _refresh_stats(self, _btn=None):
-        self.submit(dash_backend.get_system_info, done=self._apply_stats)
+        self.submit(dash_backend.get_system_info, done=self._apply_stats,
+                    name="Reading system usage")
 
     def _apply_stats(self, info):
         if not isinstance(info, dict):
@@ -1515,7 +1660,7 @@ class MainWindow(Gtk.ApplicationWindow):
     def on_dashboard_cleanup(self, _btn):
         if self._confirm("Run system cleanup?",
                          "Runs apt autoremove/autoclean and removes unused Flatpak runtimes."):
-            self.submit(system_backend.run_cleanup)
+            self.submit(system_backend.run_cleanup, name="Running system cleanup")
 
     # ------------------------------------------------------------------
     # Install page
@@ -1832,7 +1977,8 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def on_refresh_status(self, _btn=None):
         apps_backend.invalidate_state()
-        self.submit(apps_backend.get_status_label_map, done=self._apply_status)
+        self.submit(apps_backend.get_status_label_map, done=self._apply_status,
+                    name="Checking app status")
 
     def _apply_status(self, result):
         if not isinstance(result, dict):
@@ -1880,13 +2026,13 @@ class MainWindow(Gtk.ApplicationWindow):
         app_ids = self._require_selection()
         if app_ids:
             self.submit(apps_backend.install_apps, app_ids, self._source(),
-                        done=lambda _r: self.on_refresh_status())
+                        done=lambda _r: self.on_refresh_status(), name="Installing apps")
 
     def on_update_selected(self, _btn):
         app_ids = self._require_selection()
         if app_ids:
             self.submit(apps_backend.update_apps, app_ids, self._source(),
-                        done=lambda _r: self.on_refresh_status())
+                        done=lambda _r: self.on_refresh_status(), name="Updating apps")
 
     def on_uninstall_selected(self, _btn):
         app_ids = self._require_selection()
@@ -1896,7 +2042,7 @@ class MainWindow(Gtk.ApplicationWindow):
                              "Removes the installed APT/Flatpak packages for the selected apps."):
             return
         self.submit(apps_backend.uninstall_apps, app_ids, self._source(),
-                    done=lambda _r: self.on_refresh_status())
+                    done=lambda _r: self.on_refresh_status(), name="Uninstalling apps")
 
     def on_update_all(self, _btn):
         source = self._source()
@@ -1905,7 +2051,7 @@ class MainWindow(Gtk.ApplicationWindow):
                              required=False):
             return
         self.submit(apps_backend.update_all, source,
-                    done=lambda _r: self.on_refresh_status())
+                    done=lambda _r: self.on_refresh_status(), name="Updating all packages")
 
     # ------------------------------------------------------------------
     # Manage page
@@ -2021,7 +2167,8 @@ class MainWindow(Gtk.ApplicationWindow):
             self.manage_empty.hide()
 
     def on_scan_installed(self, _btn=None):
-        self.submit(self._scan_installed_worker, done=self._fill_manage_rows)
+        self.submit(self._scan_installed_worker, done=self._fill_manage_rows,
+                    name="Scanning installed apps")
 
     def _update_manage_counter(self):
         count = len(self._selected_manage())
@@ -2095,7 +2242,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self._on_manage_search_changed(None)
         self._manage_count = len(entries)
         self._notice("Found {} installed app(s).".format(len(entries)))
-        self.submit(apps_backend.list_updates, done=self._apply_manage_updates)
+        self.submit(apps_backend.list_updates, done=self._apply_manage_updates,
+                    name="Checking for updates")
 
     def _apply_manage_updates(self, updates):
         """Badge rows whose source reports an update (best-effort, read-only)."""
@@ -2163,7 +2311,7 @@ class MainWindow(Gtk.ApplicationWindow):
                              "\n".join("• {} ({})".format(e["name"], e["source"]) for e in selected)):
             return
         self.submit(apps_backend.uninstall_installed, selected,
-                    done=lambda _r: self.on_scan_installed())
+                    done=lambda _r: self.on_scan_installed(), name="Uninstalling apps")
 
     def _select_updatable_rows(self):
         """Tick every row the update check flagged; returns the picked entries."""
@@ -2188,7 +2336,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 self._notify("No updates found. Use Scan Installed to refresh the list first.",
                              "warning")
                 return
-        self.submit(apps_backend.update_installed, selected)
+        self.submit(apps_backend.update_installed, selected, name="Updating apps")
 
     # ------------------------------------------------------------------
     # AppImages page
@@ -2250,7 +2398,8 @@ class MainWindow(Gtk.ApplicationWindow):
         integration_frame, integration = self._frame("File manager integration", tight=True)
         scripts_row, self.fm_scripts_switch = self._toggle_row(
             "Right-click menu entries",
-            "Show 'Install with Preen' and 'Run with Preen' in the file manager")
+            "Show 'Install with Preen' and 'Run with Preen' in the file manager "
+            "(applies immediately)")
         # State from disk first, connect second: the initial sync must not
         # enqueue a change.
         self.fm_scripts_switch.set_active(appimages_backend.filemanager_scripts_installed())
@@ -2274,14 +2423,15 @@ class MainWindow(Gtk.ApplicationWindow):
         return downloads, installed, warnings
 
     def on_rescan_appimages(self, _btn=None):
-        self.submit(self._scan_appimages_worker, done=self._fill_appimage_rows)
+        self.submit(self._scan_appimages_worker, done=self._fill_appimage_rows,
+                    name="Scanning AppImages")
 
     def on_pick_appimage(self, _btn):
         path = self._open_dialog("Choose an AppImage to install")
         if not path:
             return
         self.submit(appimages_backend.install_appimages, [path],
-                    done=lambda _r: self.on_rescan_appimages())
+                    done=lambda _r: self.on_rescan_appimages(), name="Installing AppImage")
 
     def _appimage_filter(self, row, _data):
         query = self.appimage_search.get_text().strip().lower()
@@ -2430,7 +2580,7 @@ class MainWindow(Gtk.ApplicationWindow):
             self._notify("Tick at least one AppImage in Downloads first.", "warning")
             return
         self.submit(appimages_backend.install_appimages, paths,
-                    done=lambda _r: self.on_rescan_appimages())
+                    done=lambda _r: self.on_rescan_appimages(), name="Installing AppImage")
 
     def on_appimage_uninstall(self, _btn):
         entries = [item for item in self._selected_appimages()
@@ -2444,11 +2594,11 @@ class MainWindow(Gtk.ApplicationWindow):
                 "\n\nThe AppImage file is deleted only when Preen installed it."):
             return
         self.submit(appimages_backend.uninstall_appimages, [e["id"] for e in entries],
-                    done=lambda _r: self.on_rescan_appimages())
+                    done=lambda _r: self.on_rescan_appimages(), name="Uninstalling AppImages")
 
     def on_toggle_fm_scripts(self, switch, _param=None):
         self.submit(appimages_backend.set_filemanager_scripts, switch.get_active(),
-                    done=lambda _r: self._sync_fm_state())
+                    done=lambda _r: self._sync_fm_state(), name="Updating file manager menu")
 
     def _sync_fm_state(self):
         installed = appimages_backend.filemanager_scripts_installed()
@@ -2456,7 +2606,8 @@ class MainWindow(Gtk.ApplicationWindow):
             self.fm_scripts_switch.set_active(installed)
 
     def on_set_default_appimage(self, _btn):
-        self.submit(appimages_backend.set_default_appimage_handler)
+        self.submit(appimages_backend.set_default_appimage_handler,
+                    name="Setting default AppImage handler")
 
     def _setup_downloads_monitor(self):
         """Watch Downloads so a freshly downloaded AppImage is noticed."""
@@ -2540,12 +2691,12 @@ class MainWindow(Gtk.ApplicationWindow):
             except Exception:
                 pass
             self.submit(appimages_backend.install_appimages, appimages,
-                        done=lambda _r: self.on_rescan_appimages())
+                        done=lambda _r: self.on_rescan_appimages(), name="Installing AppImage")
         for path in debs:
             if self._confirm("Install {}?".format(os.path.basename(path)),
                              "Installs the package with apt-get (one polkit prompt)."):
                 self.submit(appimages_backend.install_deb, path,
-                            done=lambda _r: self.on_scan_installed())
+                            done=lambda _r: self.on_scan_installed(), name="Installing package")
 
     # ------------------------------------------------------------------
     # Optimize page
@@ -2613,8 +2764,7 @@ class MainWindow(Gtk.ApplicationWindow):
         security_frame, security = self._frame("Security", tight=True)
         ufw_row, self.chk_ufw = self._toggle_row(
             "Firewall (UFW)",
-            "Blocks unsolicited incoming connections. Applies immediately")
-        self.chk_ufw.connect("notify::active", self._on_ufw_toggle)
+            "Blocks unsolicited incoming connections")
         self.chk_ufw.set_sensitive(False)  # until the state read completes
         security.pack_start(ufw_row, False, False, 0)
         page.pack_start(security_frame, False, False, 0)
@@ -2643,24 +2793,6 @@ class MainWindow(Gtk.ApplicationWindow):
         # Unknown state (ufw missing or unreadable) stays insensitive.
         known = self.baseline.get("ufw") is not None
         self.chk_ufw.set_sensitive(known and not self._busy)
-
-    def _on_ufw_toggle(self, switch, _param=None):
-        desired = switch.get_active()
-        current = self.baseline.get("ufw")
-        if current is None or bool(current) == desired:
-            return  # nothing to do, or a programmatic state sync
-        if not self._confirm(
-                "{} the firewall?".format("Enable" if desired else "Disable"),
-                "Enabling blocks unsolicited incoming connections; disabling "
-                "removes that protection. This applies immediately.",
-                required=False):
-            switch.set_active(bool(current))  # revert; the notify is a no-op
-            return
-        self.submit(firewall_backend.set_ufw, desired, done=self._ufw_done)
-
-    def _ufw_done(self, _result):
-        # Re-read the real state: the change may have failed or been simulated.
-        self.submit(self._read_optimize_settings, done=self._apply_optimize_settings)
 
     def _read_optimize_settings(self):
         animations = system_backend.are_animations_enabled()
@@ -2780,16 +2912,19 @@ class MainWindow(Gtk.ApplicationWindow):
             self.health_box.set_no_show_all(True)
 
     def _refresh_settings(self, *_args):
-        self.submit(self._read_settings, done=self._apply_settings)
+        self.submit(self._read_settings, done=self._apply_settings, name="Reading settings")
 
     def _refresh_optimize_settings(self, *_args):
-        self.submit(self._read_optimize_settings, done=self._apply_optimize_settings)
+        self.submit(self._read_optimize_settings, done=self._apply_optimize_settings,
+                    name="Reading current settings")
 
     def _refresh_look_settings(self, *_args):
-        self.submit(self._read_look_settings, done=self._apply_look_settings)
+        self.submit(self._read_look_settings, done=self._apply_look_settings,
+                    name="Reading look settings")
 
     def _refresh_theme_setting(self, *_args):
-        self.submit(self._read_appearance_setting, done=self._apply_appearance_setting)
+        self.submit(self._read_appearance_setting, done=self._apply_appearance_setting,
+                    name="Reading appearance settings")
 
     def on_run_optimize(self, _btn):
         opts = {
@@ -2799,6 +2934,7 @@ class MainWindow(Gtk.ApplicationWindow):
             "swap_size": self._swap_size(),
             "zram": self.chk_zram.get_active(),
             "power": self.cmb_power.get_active_text(),
+            "ufw": self.chk_ufw.get_active(),
         }
         actions = []
         if opts["cleanup"]:
@@ -2816,6 +2952,9 @@ class MainWindow(Gtk.ApplicationWindow):
                             (opts["swap_size"],) if opts["swap"] else ()))
         if opts["zram"] != self.baseline.get("zram"):
             actions.append(("ZRAM", perf_backend.enable_zram if opts["zram"] else perf_backend.disable_zram, ()))
+        ufw_baseline = self.baseline.get("ufw")
+        if ufw_baseline is not None and opts["ufw"] != bool(ufw_baseline):
+            actions.append(("Firewall (UFW)", firewall_backend.set_ufw, (opts["ufw"],)))
         if not actions:
             self._notify("Nothing to apply. Your settings already match.", "info")
             return
@@ -2826,12 +2965,17 @@ class MainWindow(Gtk.ApplicationWindow):
             risks.append("The active /swapfile will be disabled and permanently removed.")
         if not opts["zram"] and self.baseline.get("zram"):
             risks.append("Preen-managed ZRAM will be stopped and its configuration removed.")
+        if ufw_baseline and not opts["ufw"]:
+            risks.append("The firewall will be disabled; unsolicited incoming connections "
+                         "will no longer be blocked.")
         if risks and not self._confirm("Apply system changes?", "\n".join(risks)):
             return
-        self.submit(utils.run_actions, actions, done=lambda _r: self._refresh_optimize_settings())
+        self.submit(utils.run_actions, actions, done=lambda _r: self._refresh_optimize_settings(),
+                    name="Applying system settings")
 
     def on_manage_startup(self, _btn):
-        self.submit(system_backend.list_startup_apps, done=self._show_startup_dialog)
+        self.submit(system_backend.list_startup_apps, done=self._show_startup_dialog,
+                    name="Listing startup apps")
 
     def _show_startup_dialog(self, items):
         if items is None:
@@ -2876,7 +3020,7 @@ class MainWindow(Gtk.ApplicationWindow):
             return
         actions = [("Startup: " + item["name"], system_backend.set_startup_app,
                     (item["path"], enabled)) for enabled, item in changes]
-        self.submit(utils.run_actions, actions)
+        self.submit(utils.run_actions, actions, name="Updating startup apps")
 
     # ------------------------------------------------------------------
     # Customize page
@@ -2898,13 +3042,6 @@ class MainWindow(Gtk.ApplicationWindow):
         theme.pack_start(self._value_row("Appearance", self.cmb_theme,
                                          "Preen only · Follow system reads, but never changes, GNOME"),
                          False, False, 0)
-        apply_theme_row = Gtk.Box()
-        apply_theme_row.get_style_context().add_class("settings-row")
-        apply_theme_row.pack_start(
-            self._button("Apply Preen Appearance", self.on_apply_theme,
-                         "Change only Preen's appearance", icon="object-select-symbolic", flat=True),
-            False, False, 0)
-        theme.pack_start(apply_theme_row, False, False, 0)
         page.pack_start(theme_frame, False, False, 0)
 
         extras_frame, extras = self._frame("Desktop-wide options", tight=True)
@@ -2955,14 +3092,6 @@ class MainWindow(Gtk.ApplicationWindow):
         modes = settings_backend.VALID_APPEARANCE
         return modes[index] if 0 <= index < len(modes) else None
 
-    def on_apply_theme(self, _btn):
-        mode = self._theme_mode()
-        if mode is None:
-            self._notify("Choose a Preen appearance first.", "warning")
-            return
-        self.submit(ui_backend.apply_theme_mode, mode,
-                    done=lambda _r: self._refresh_theme_setting())
-
     def on_apply_look(self, _btn):
         mode = self._theme_mode()
         actions = []
@@ -2986,7 +3115,8 @@ class MainWindow(Gtk.ApplicationWindow):
                 "The rounded-corner rule changes GTK 3 user CSS; text size changes GNOME scaling."
                 .format(", ".join(desktop_changes))):
             return
-        self.submit(utils.run_actions, actions, done=lambda _r: self._refresh_look_settings())
+        self.submit(utils.run_actions, actions, done=lambda _r: self._refresh_look_settings(),
+                    name="Applying look changes")
 
     def on_install_icon(self, _btn):
         dialog = Gtk.FileChooserDialog(title="Select icon pack", parent=self,
@@ -3000,7 +3130,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 "Install and activate a desktop icon pack?",
                 "This installs the archive in ~/.icons and changes the GNOME icon theme "
                 "for other applications, not just Preen."):
-            self.submit(ui_backend.install_icon_pack, path)
+            self.submit(ui_backend.install_icon_pack, path, name="Installing icon pack")
 
     # ------------------------------------------------------------------
     # Deep Clean page
@@ -3207,7 +3337,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self._update_clean_counter()
 
     def on_scan_cleanable(self, _btn=None):
-        self.submit(deepclean_backend.scan_cleanable, done=self._apply_clean_scan)
+        self.submit(deepclean_backend.scan_cleanable, done=self._apply_clean_scan,
+                    name="Scanning cleanup items")
 
     def on_clean_selected(self, _btn):
         selected = self._selected_clean_items()
@@ -3236,7 +3367,7 @@ class MainWindow(Gtk.ApplicationWindow):
             else:
                 self.on_scan_cleanable()
 
-        self.submit(utils.run_actions, actions, done=finished)
+        self.submit(utils.run_actions, actions, done=finished, name="Cleaning selected items")
 
     def _after_clean_scan(self, items, before):
         if not isinstance(items, list):
@@ -3279,7 +3410,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self.chk_maintenance.set_sensitive(known and not self._busy)
 
     def _refresh_maintenance_state(self):
-        self.submit(maintenance_backend.get_schedule, done=self._apply_maintenance_state)
+        self.submit(maintenance_backend.get_schedule, done=self._apply_maintenance_state,
+                    name="Reading maintenance schedule")
 
     def on_toggle_maintenance(self, switch, _param=None):
         desired = switch.get_active()
@@ -3301,7 +3433,8 @@ class MainWindow(Gtk.ApplicationWindow):
             switch.handler_unblock_by_func(self.on_toggle_maintenance)
             return
         self.submit(maintenance_backend.set_schedule, desired, self._maintenance_frequency(),
-                    done=lambda _r: self._refresh_maintenance_state())
+                    done=lambda _r: self._refresh_maintenance_state(),
+                    name="Updating maintenance schedule")
 
     def on_maintenance_frequency_changed(self, _combo=None):
         baseline = getattr(self, "_maintenance_baseline", None)
@@ -3311,7 +3444,8 @@ class MainWindow(Gtk.ApplicationWindow):
         if self._maintenance_frequency() == baseline.get("frequency"):
             return  # the applied state re-selected this row; nothing to do
         self.submit(maintenance_backend.set_schedule, True, self._maintenance_frequency(),
-                    done=lambda _r: self._refresh_maintenance_state())
+                    done=lambda _r: self._refresh_maintenance_state(),
+                    name="Updating maintenance schedule")
 
     # ------------------------------------------------------------------
     # Services & Boot page
@@ -3477,8 +3611,10 @@ class MainWindow(Gtk.ApplicationWindow):
         self.boot_blame.show_all()
 
     def on_refresh_services(self, _btn=None):
-        self.submit(services_backend.list_services, done=self._apply_services)
-        self.submit(services_backend.boot_info, done=self._apply_boot)
+        self.submit(services_backend.list_services, done=self._apply_services,
+                    name="Listing services")
+        self.submit(services_backend.boot_info, done=self._apply_boot,
+                    name="Measuring boot time")
 
     def on_service_action(self, action):
         row = getattr(self, "selected_service_row", None)
@@ -3492,7 +3628,8 @@ class MainWindow(Gtk.ApplicationWindow):
                                  "you rely on (sound, network, desktop)."):
                 return
         self.submit(services_backend.set_service_state, unit, action,
-                    done=lambda _r: self.on_refresh_services())
+                    done=lambda _r: self.on_refresh_services(),
+                    name="Changing service state")
 
     # ------------------------------------------------------------------
     # Drivers page
@@ -3558,7 +3695,8 @@ class MainWindow(Gtk.ApplicationWindow):
         return drivers_backend.list_devices(log=log)
 
     def on_rescan_drivers(self, _btn=None):
-        self.submit(self._scan_drivers_worker, done=self._fill_drivers_rows)
+        self.submit(self._scan_drivers_worker, done=self._fill_drivers_rows,
+                    name="Scanning devices")
 
     def _drivers_filter(self, row, _data):
         query = self.drivers_search.get_text().strip().lower()
@@ -3688,7 +3826,7 @@ class MainWindow(Gtk.ApplicationWindow):
                              "\n".join("• " + name for name in picks)):
             return
         self.submit(drivers_backend.install_driver, picks,
-                    done=lambda _r: self.on_rescan_drivers())
+                    done=lambda _r: self.on_rescan_drivers(), name="Installing drivers")
 
     def on_autoinstall_drivers(self, _btn):
         if not self._confirm("Auto install recommended drivers?",
@@ -3696,7 +3834,7 @@ class MainWindow(Gtk.ApplicationWindow):
                              "that needs one. This applies after one administrator prompt."):
             return
         self.submit(drivers_backend.autoinstall,
-                    done=lambda _r: self.on_rescan_drivers())
+                    done=lambda _r: self.on_rescan_drivers(), name="Auto-installing drivers")
 
     # ------------------------------------------------------------------
     # Backup page
@@ -3749,7 +3887,8 @@ class MainWindow(Gtk.ApplicationWindow):
             self.log_buf.append("[simulate] would request administrator access to list Timeshift snapshots\n")
             self._notify("Snapshot list was not refreshed in Simulate mode.", "info")
             return
-        self.submit(backup_backend.list_snapshots, True, done=self._apply_snapshots)
+        self.submit(backup_backend.list_snapshots, True, done=self._apply_snapshots,
+                    name="Listing snapshots")
 
     def _apply_snapshots(self, snapshots):
         for row in list(self.snapshot_listbox.get_children()):
@@ -3791,10 +3930,10 @@ class MainWindow(Gtk.ApplicationWindow):
             if isinstance(result, utils.Outcome) and result.ok and not utils.is_simulate():
                 self._notify("Snapshot requested. Use Refresh List to update the list.", "info")
         # Never trigger a second, automatic polkit prompt after creating one.
-        self.submit(backup_backend.timeshift_snapshot, done=finished)
+        self.submit(backup_backend.timeshift_snapshot, done=finished, name="Creating snapshot")
 
     def on_open_timeshift(self, _btn):
-        self.submit(backup_backend.open_timeshift_gui)
+        self.submit(backup_backend.open_timeshift_gui, name="Opening Timeshift")
 
     def _save_dialog(self, title, name):
         dialog = Gtk.FileChooserDialog(title=title, parent=self,
@@ -3821,7 +3960,7 @@ class MainWindow(Gtk.ApplicationWindow):
     def on_export_config(self, _btn):
         path = self._save_dialog("Save settings archive", "preen-config-backup.tar.xz")
         if path:
-            self.submit(backup_backend.export_configs, path)
+            self.submit(backup_backend.export_configs, path, name="Exporting settings")
 
     def on_import_config(self, _btn):
         path = self._open_dialog("Open settings archive")
@@ -3829,7 +3968,8 @@ class MainWindow(Gtk.ApplicationWindow):
             # Reading and decompressing large archives can take a long time;
             # inspect in the FIFO worker, then ask for confirmation on GTK.
             self.submit(backup_backend.inspect_archive, path,
-                        done=lambda result: self._confirm_config_import(path, result))
+                        done=lambda result: self._confirm_config_import(path, result),
+                        name="Inspecting settings archive")
 
     def _confirm_config_import(self, path, result):
         if not isinstance(result, tuple) or len(result) != 2:
@@ -3846,7 +3986,7 @@ class MainWindow(Gtk.ApplicationWindow):
         if self._confirm("Restore settings?", message):
             # The backend revalidates after confirmation in case either the
             # archive or destination changed while the dialog was open.
-            self.submit(backup_backend.import_configs, path)
+            self.submit(backup_backend.import_configs, path, name="Restoring settings")
 
     # ------------------------------------------------------------------
     # Logs page
@@ -4024,6 +4164,8 @@ class MainWindow(Gtk.ApplicationWindow):
             "6. Optimize System: only the settings you changed are applied.\n"
             "7. Services: inspect boot time and start, stop or restart systemd units.\n"
             "8. Logs shows every command and its result, with a filter and Save Log for support.\n\n"
+            "Keyboard: F5 refreshes the visible page, Ctrl+F jumps to its search box, "
+            "Ctrl+A selects all on list pages, Escape dismisses a notice.\n\n"
             "Full guide: docs/USER_GUIDE.md in the repository.",
             Gtk.MessageType.INFO)
 

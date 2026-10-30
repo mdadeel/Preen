@@ -312,6 +312,20 @@ class FakeComboBoxText(Widget):
         return ""
 
 
+class FakeStack(Widget):
+    """Stack fake that remembers the visible page for accelerator dispatch."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._visible_child_name = None
+
+    def set_visible_child_name(self, name):
+        self._visible_child_name = name
+
+    def get_visible_child_name(self):
+        return self._visible_child_name
+
+
 class FakeGtk:
     ApplicationWindow = Widget
     Application = Widget
@@ -334,7 +348,7 @@ class FakeGtk:
     ScrolledWindow = Widget
     SearchEntry = Widget
     Separator = Widget
-    Stack = Widget
+    Stack = FakeStack
     StackSidebar = Widget
     Switch = Widget
     TextView = Widget
@@ -547,6 +561,83 @@ class GuiRuntimeTest(unittest.TestCase):
         self.assertGreaterEqual(contrast("#a52323", light["preen_elevated"]), 4.5)
         self.assertGreaterEqual(contrast("#70c28a", dark["preen_elevated"]), 4.5)
         self.assertGreaterEqual(contrast("#1d713f", light["preen_elevated"]), 4.5)
+
+    def test_popups_selection_and_tooltips_are_styled_in_both_palettes(self):
+        def tokens(css):
+            return set(re.findall(r"@define-color (preen_\w+)", css.decode()))
+        self.assertEqual(tokens(self.gui._CSS), tokens(self.gui._LIGHT_CSS))
+        for needle in (b"menuitem:hover", b"tooltip {", b"row:selected"):
+            self.assertIn(needle, self.gui._CSS)
+            self.assertIn(needle, self.gui._LIGHT_CSS)
+
+    def test_busy_status_names_the_task_and_navigation_stays_live(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        nav = window._button("Nav", lambda _b: None, lock=False)
+        locked = window._button("Act", lambda _b: None)
+        seen = {}
+
+        def done(_result):
+            seen["status"] = window.status_label.get_text()
+            seen["nav"] = nav.get_sensitive()
+            seen["locked"] = locked.get_sensitive()
+
+        window.submit(lambda: utils.ok("done"), done=done, name="Installing apps")
+        self.assertEqual(seen["status"], "Installing apps")
+        self.assertTrue(seen["nav"])    # navigation-only button stays clickable
+        self.assertFalse(seen["locked"])
+        seen2 = {}
+        window.submit(lambda: seen2.update(status=window.status_label.get_text()))
+        self.assertEqual(seen2["status"], "Working…")
+
+    def test_ufw_change_is_staged_until_apply(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_optimize_settings({"animations_off": False, "swap": False,
+                                         "zram": False, "power": None, "ufw": False})
+        self.assertTrue(window.chk_ufw.get_sensitive())
+        with mock.patch.object(window, "submit") as submit:
+            window.chk_ufw.set_active(True)
+            self.assertFalse(submit.called)  # toggling stages, it does not apply
+            window.on_run_optimize(None)
+        actions = submit.call_args.args[1]
+        self.assertIn(("Firewall (UFW)", self.gui.firewall_backend.set_ufw, (True,)), actions)
+
+        window._apply_optimize_settings({"animations_off": False, "swap": False,
+                                         "zram": False, "power": None, "ufw": True})
+        window.chk_ufw.set_active(False)
+        with mock.patch.object(window, "submit") as submit, \
+                mock.patch.object(window, "_confirm", return_value=True) as confirm:
+            window.on_run_optimize(None)
+        self.assertIn(("Firewall (UFW)", self.gui.firewall_backend.set_ufw, (False,)),
+                      submit.call_args.args[1])
+        self.assertTrue(confirm.called)  # disabling the firewall warns first
+
+    def test_accelerators_dispatch_to_the_visible_page(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window.stack.set_visible_child_name("services")
+        with mock.patch.object(window, "submit") as submit:
+            window._accel_refresh()
+        self.assertIs(submit.call_args_list[0].args[0], self.gui.services_backend.list_services)
+        window.stack.set_visible_child_name("dashboard")
+        with mock.patch.object(window, "submit") as submit:
+            window._accel_refresh()
+        self.assertIs(submit.call_args.args[0], self.gui.dash_backend.get_system_info)
+
+    def test_select_all_accelerator_ticks_visible_rows(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window.stack.set_visible_child_name("manage")
+        window._fill_manage_rows([
+            {"source": "apt", "id": "vlc", "name": "VLC", "protected": False},
+            {"source": "apt", "id": "gnome-shell", "name": "GNOME Shell", "protected": True},
+        ])
+        window._accel_select_all()
+        self.assertEqual(len(window._selected_manage()), 1)  # protected row skipped
+
+    def test_escape_accelerator_dismisses_the_notice(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._notify("Heads up", "warning")
+        self.assertEqual(window._banner_level, "warning")
+        window._accel_dismiss()
+        self.assertIsNone(window._banner_level)
 
     def test_control_indicators_and_missing_symbolic_icons_have_fallbacks(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
@@ -799,7 +890,7 @@ class GuiRuntimeTest(unittest.TestCase):
             confirm.assert_called_once()
             self.assertIs(submit.call_args.args[0], self.gui.backup_backend.import_configs)
 
-    def test_theme_changes_palette_without_discarding_other_staged_settings(self):
+    def test_look_changes_apply_theme_and_desktop_options_in_one_batch(self):
         settings_backend.set_value("appearance_mode", "light")
         window = self.gui.MainWindow(self.gui.PreenApp())
         window._apply_settings({"animations_off": False, "swap": False, "zram": False,
@@ -807,21 +898,20 @@ class GuiRuntimeTest(unittest.TestCase):
                                 "scaling": 1.0, "warnings": []})
         self.assertEqual(window._app_theme, "light")
         self.assertEqual(window._css_provider.css, self.gui._LIGHT_CSS)
-        window.chk_animations.set_active(True)
         window.chk_round.set_active(True)
         window.cmb_scaling.set_active(2)
         window.cmb_theme.set_active(2)
-        with mock.patch.object(utils, "_simulate", False), \
-                mock.patch.object(self.gui.ui_backend, "get_theme_mode", return_value="light"):
-            window.on_apply_theme(None)
-        self.assertEqual(settings_backend.get("appearance_mode"), "dark")
-        self.assertEqual(window._app_theme, "dark")
-        self.assertEqual(window._css_provider.css, self.gui._CSS)
-        self.assertTrue(window.chk_animations.get_active())
-        self.assertTrue(window.chk_round.get_active())
-        self.assertEqual(window.cmb_scaling.get_active(), 2)
-        self.assertEqual(window.baseline["scaling"], 1.0)
-        self.assertFalse(window.baseline["round"])
+        # One apply path: the theme and the staged desktop options travel together.
+        with mock.patch.object(window, "submit") as submit, \
+                mock.patch.object(window, "_confirm", return_value=True) as confirm:
+            window.on_apply_look(None)
+        actions = submit.call_args.args[1]
+        self.assertEqual(actions[0][0], "Theme")
+        self.assertEqual(actions[0][2], ("dark",))
+        self.assertIn(("Rounded corners", self.gui.ui_backend.set_rounded_corners, (True,)), actions)
+        self.assertIn(("Text size", self.gui.ui_backend.set_text_scaling, (1.25,)), actions)
+        # Desktop-wide changes ask once; a theme-only change never would.
+        confirm.assert_called_once()
 
     def test_snapshot_refresh_requests_authorization_only_on_explicit_click(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
@@ -908,7 +998,7 @@ class GuiRuntimeTest(unittest.TestCase):
         window._apply_theme_setting("light")
         window.cmb_theme.set_active(2)
         with mock.patch.object(self.gui.ui_backend, "get_theme_mode", return_value="dark"):
-            window.on_apply_theme(None)
+            window.on_apply_look(None)
         self.assertEqual(settings_backend.get("appearance_mode"), "light")
         self.assertEqual(window._app_theme, "light")
         self.assertEqual(window.cmb_theme.get_active_text(), "Light")
@@ -1194,7 +1284,6 @@ class GuiRuntimeTest(unittest.TestCase):
             window.on_uninstall_scanned,
             window.on_run_optimize,
             window.on_manage_startup,
-            window.on_apply_theme,
             window.on_apply_look,
             window.on_install_icon,
             window.on_snapshot,

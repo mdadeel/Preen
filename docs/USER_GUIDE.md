@@ -92,6 +92,13 @@ page** at the top of the sidebar to filter by name. Section headers hide
 while a search is active and return when you clear it. On smaller windows,
 scroll the sidebar and page content to reach additional controls.
 
+While a task runs, the header shows its name (for example "Installing apps")
+and action buttons pause until it finishes; you can keep navigating, reading
+Logs and using search boxes. Keyboard shortcuts: **F5** refreshes the visible
+page, **Ctrl+F** jumps to its search box (or the sidebar page filter),
+**Ctrl+A** selects everything on the Install, Manage and Deep Clean lists,
+and **Escape** dismisses a notice banner.
+
 ### Dashboard
 
 - A hero card with your operating system, kernel, uptime, power profile and
@@ -165,9 +172,10 @@ previewed without touching the system while Simulate is on.
   remove unused Flatpak runtimes, disable GNOME animations, and manage
   startup applications through a dedicated dialog.
 - **Security:** a **Firewall (UFW)** toggle. Enabling blocks unsolicited
-  incoming connections (this can affect file sharing or SSH) and applies
-  immediately after confirmation. The row is disabled when ufw is missing
-  or its state cannot be read.
+  incoming connections (this can affect file sharing or SSH). Like the other
+  Optimize System rows, the change is staged and applied with **Apply
+  Changes**; disabling the firewall asks for confirmation there. The row is
+  disabled when ufw is missing or its state cannot be read.
 - **Memory and power:** create or remove a swapfile with a selectable size
   (1, 2, 4 or 8 GB), enable ZRAM, and choose a power profile. The profile
   and animation controls are disabled if their current state cannot be read.
@@ -202,8 +210,8 @@ previewed without touching the system while Simulate is on.
 
 ### Customize Look
 
-- Under **Preen appearance**, choose **Follow system**, **Light** or **Dark**
-  and select **Apply Preen Appearance**. This changes Preen only; it does not
+- Under **Preen appearance**, choose **Follow system**, **Light** or **Dark**,
+  then press **Apply Look Changes**. This changes Preen only; it does not
   change GNOME's colour scheme or GTK theme. Your choice is saved in Preen's
   preferences. Follow system reads GNOME appearance where available and uses
   dark if no desktop appearance has been detected. Explicit Light/Dark choices stay fixed when
@@ -220,8 +228,8 @@ previewed without touching the system while Simulate is on.
   theme across GNOME after confirmation. Unsafe entries are refused. If a
   theme of the same name exists, the previous contents are kept under
   `~/.icons/.preen-backups/`.
-- Applying only Preen appearance preserves staged text-size, rounded-corner and
-  optimization changes. Reloading the look does not reset Optimize System.
+- Applying the look does not reset Optimize System, and optimizing does not
+  reset the look; each page stages and applies its own changes.
   App lists use installed icons where available, bundled marks for some
   catalogue entries, and generic initials when no matching icon is available.
 
