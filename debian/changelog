@@ -1,3 +1,23 @@
+preen (0.7.2) stable; urgency=medium
+
+  * Export Settings measures ~/.config first and warns when the archive will
+    contain credential folders such as browser profiles or account tokens.
+  * Manage Apps: explicit "Update Flagged (N)" button; "Update Selected" no
+    longer silently updates everything when nothing is ticked.
+  * Driver installs confirm with reboot and display-impact warnings.
+  * Optimize System: cleanup is a confirmed "Run Cleanup Now..." action and
+    can no longer ride along inside staged Apply; Apply buttons show the
+    number and names of staged changes before anything runs.
+  * AppImages carry per-row Install/Update/Remove actions.
+  * Services: actions are enabled only for valid unit states, failed units
+    list first, boot blame rows show proportional bars.
+  * Dashboard suggestions are computed from measured data; stat bars change
+    colour under resource pressure.
+  * One Refresh verb across all pages; Appearance joins Preferences;
+    Simulate defaults on for first runs.
+
+ -- Preen contributors <64582744+mdadeel@users.noreply.github.com>  Sat, 07 Nov 2026 12:00:00 +0000
+
 preen (0.7.1) stable; urgency=medium
 
   * The header names the running task (for example "Installing apps" or
