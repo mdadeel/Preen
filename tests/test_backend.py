@@ -761,6 +761,25 @@ class BackendTestCase(unittest.TestCase):
         self.assertTrue(backup.import_configs(str(archive), log=self.log).ok)
         self.assertEqual((self.config_dir / "settings.ini").read_text(encoding="utf-8"), "original\n")
 
+    def test_summarize_config_counts_files_and_flags_sensitive_folders(self):
+        """The export preview must mirror the export filter and name credentials."""
+        (self.config_dir / "settings.ini").write_text("x" * 10, encoding="utf-8")
+        cache = self.config_dir / "SomeApp" / "Cache"
+        cache.mkdir(parents=True)
+        (cache / "blob.bin").write_text("y" * 20, encoding="utf-8")
+        (self.config_dir / "SomeApp" / "prefs.json").write_text("z" * 5, encoding="utf-8")
+        chrome = self.config_dir / "google-chrome" / "Default"
+        chrome.mkdir(parents=True)
+        (chrome / "Cookies").write_text("w" * 3, encoding="utf-8")
+        summary = backup.summarize_config(log=self.log)
+        self.assertIsInstance(summary, dict)
+        # The cached blob is excluded exactly as export_configs excludes it.
+        self.assertEqual(summary["count"], 3)
+        self.assertEqual(summary["bytes"], 10 + 5 + 3)
+        self.assertEqual(summary["dir_count"], 2)
+        self.assertIn("SomeApp", summary["largest_dirs"])
+        self.assertIn("Chrome saved logins and sessions", summary["sensitive"])
+
     def test_config_import_refuses_traversal_links_and_absolute_paths(self):
         malicious = self.root / "evil.tar"
         self._make_archive(malicious, [

@@ -231,6 +231,9 @@ progressbar progress {
     border-radius: 4px;
     min-height: 4px;
 }
+/* Resource pressure: the fill changes colour long before a human reads 92%. */
+progressbar.stat-warning progress { background-color: @preen_warning; }
+progressbar.stat-critical progress { background-color: @preen_error; }
 .summary-value { font-size: 1.8em; font-weight: 700; }
 .summary-caption { color: @preen_muted; font-size: 0.9em; }
 .action-list { background-color: @preen_surface; border: 1px solid @preen_border; border-radius: 9px; }
@@ -702,8 +705,22 @@ class MainWindow(Gtk.ApplicationWindow):
         self.stack.set_visible_child_name(self.settings.get("page_on_startup", "dashboard"))
         self.log_buf.append("[info] {} {} ready. Simulate is {}.\n".format(
             APP_NAME, __version__, "ON" if utils.is_simulate() else "OFF"))
+        if not self.settings.get("onboarded"):
+            self._show_welcome()
         self._watch_desktop_appearance()
         self._start_initial_tasks()
+
+    def _show_welcome(self):
+        """First launch: make the safety model visible on the very first screen."""
+        tail = ("Actions are previewed in Logs until you switch Simulate off "
+                "(top right)." if utils.is_simulate() else
+                "Turn on Simulate (top right) to preview any action before it runs.")
+        self._notify("Welcome to Preen — system setup, cleaning and tuning. " + tail, "info")
+        try:
+            settings_backend.update({"onboarded": True})
+            self.settings = settings_backend.load()
+        except Exception:
+            pass  # a read-only config directory must not break the first run
 
     # ------------------------------------------------------------------
     # Small UI factories
@@ -950,10 +967,13 @@ class MainWindow(Gtk.ApplicationWindow):
             button = Gtk.Button()
             inner = Gtk.Box(spacing=7)
             inner.pack_start(self._icon(icon), False, False, 0)
-            inner.pack_start(Gtk.Label(label=label), False, False, 0)
+            label_widget = Gtk.Label(label=label)
+            inner.pack_start(label_widget, False, False, 0)
             button.add(inner)
+            button.preen_label = label_widget
         else:
             button = Gtk.Button(label=label)
+            button.preen_label = button.get_child()
         self._accessible_name(button, label)
         button.connect("clicked", callback)
         if tooltip:
@@ -968,6 +988,15 @@ class MainWindow(Gtk.ApplicationWindow):
         button.preen_lock = lock
         self.action_widgets.append(button)
         return button
+
+    @staticmethod
+    def _set_button_text(button, text):
+        """Retitle a button built by _button, icon included or not."""
+        label_widget = getattr(button, "preen_label", None)
+        if label_widget is not None:
+            label_widget.set_text(text)
+        else:
+            button.set_label(text)
 
     def _section(self, title, subtitle=None):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
@@ -1334,7 +1363,6 @@ class MainWindow(Gtk.ApplicationWindow):
         if not busy:
             self._update_install_counter()
             self._update_manage_counter()
-            self._update_appimage_counter()
             self._update_clean_counter()
             self._update_service_actions()
             self._sync_ufw_control()
@@ -1567,32 +1595,14 @@ class MainWindow(Gtk.ApplicationWindow):
         section.set_xalign(0)
         section.get_style_context().add_class("card-title")
         page.pack_start(section, False, False, 0)
-        action_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        action_list.get_style_context().add_class("action-list")
-        for icon, title, detail, target in (
-            ("user-trash-symbolic", "Review cleanup opportunities", "See what can be safely cleaned", "deepclean"),
-            ("application-x-executable-symbolic", "Manage installed applications", "Review software and protected packages", "manage"),
-            ("preferences-system-symbolic", "Optimize system settings", "Review power, memory and desktop settings", "optimize"),
-        ):
-            button = Gtk.Button()
-            button.set_tooltip_text(detail)
-            button.connect("clicked", lambda _button, name=target: self.stack.set_visible_child_name(name))
-            line = Gtk.Box(spacing=12)
-            glyph = self._icon(icon, 18)
-            glyph.get_style_context().add_class("action-icon")
-            line.pack_start(glyph, False, False, 0)
-            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-            name_label = Gtk.Label(label=title)
-            name_label.set_xalign(0)
-            name_label.get_style_context().add_class("settings-title")
-            description = self._hint(detail)
-            text.pack_start(name_label, False, False, 0)
-            text.pack_start(description, False, False, 0)
-            line.pack_start(text, True, True, 0)
-            line.pack_end(self._icon("go-next-symbolic", 14), False, False, 0)
-            button.add(line)
-            action_list.pack_start(button, False, False, 0)
-        page.pack_start(action_list, False, False, 0)
+        self.suggestion_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.suggestion_list.get_style_context().add_class("action-list")
+        page.pack_start(self.suggestion_list, False, False, 0)
+        # Measured counters fill this card as the startup scans land; until
+        # then it shows the generic entry points.
+        self.suggestion_data = {"clean_bytes": 0, "clean_items": 0,
+                                "updates": 0, "failed_services": 0}
+        self._rebuild_suggestions()
 
         # Missing tools are shown in context, not as a permanent empty card.
         self.health_box = Gtk.Box(spacing=10)
@@ -1612,7 +1622,7 @@ class MainWindow(Gtk.ApplicationWindow):
         page.pack_start(self.health_box, False, False, 0)
 
         page.pack_start(self._flow(
-            self._button("Refresh Status", self._refresh_stats,
+            self._button("Refresh", self._refresh_stats,
                          "Re-read system information", icon="view-refresh-symbolic"),
             self._button("Run Cleanup", self.on_dashboard_cleanup,
                          "APT autoremove/autoclean and unused Flatpak runtimes"),
@@ -1623,6 +1633,68 @@ class MainWindow(Gtk.ApplicationWindow):
     def _refresh_stats(self, _btn=None):
         self.submit(dash_backend.get_system_info, done=self._apply_stats,
                     name="Reading system usage")
+
+    def _suggestion_entries(self):
+        """Next steps computed from what the scans actually measured."""
+        data = self.suggestion_data
+        entries = []
+        if data["clean_bytes"] > 0:
+            entries.append((
+                "user-trash-symbolic",
+                "Reclaim up to {} of space".format(
+                    deepclean_backend.format_size(data["clean_bytes"])),
+                "{} cleanup item(s) with measurable space".format(data["clean_items"]),
+                "deepclean"))
+        if data["updates"] > 0:
+            entries.append((
+                "application-x-executable-symbolic",
+                "Update {} installed app{}".format(
+                    data["updates"], "" if data["updates"] == 1 else "s"),
+                "Newer versions were detected for apps in the catalogue",
+                "manage"))
+        if data["failed_services"] > 0:
+            entries.append((
+                "dialog-warning-symbolic",
+                "Review {} failed service{}".format(
+                    data["failed_services"], "" if data["failed_services"] == 1 else "s"),
+                "systemd reports these units as failed",
+                "services"))
+        if not entries:
+            entries = [
+                ("user-trash-symbolic", "Look for cleanable files",
+                 "Scan caches, logs and trash for reclaimable space", "deepclean"),
+                ("application-x-executable-symbolic", "Review installed applications",
+                 "See what is installed and which packages are protected", "manage"),
+                ("preferences-system-symbolic", "Tune power, memory and desktop",
+                 "Only the settings you change are applied", "optimize"),
+            ]
+        return entries[:4]
+
+    def _rebuild_suggestions(self):
+        if not hasattr(self, "suggestion_list"):
+            return
+        for child in list(self.suggestion_list.get_children()):
+            self.suggestion_list.remove(child)
+        for icon, title, detail, target in self._suggestion_entries():
+            button = Gtk.Button()
+            button.set_tooltip_text(detail)
+            button.connect("clicked", lambda _button, name=target: self.stack.set_visible_child_name(name))
+            line = Gtk.Box(spacing=12)
+            glyph = self._icon(icon, 18)
+            glyph.get_style_context().add_class("action-icon")
+            line.pack_start(glyph, False, False, 0)
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            name_label = Gtk.Label(label=title)
+            name_label.set_xalign(0)
+            name_label.get_style_context().add_class("settings-title")
+            description = self._hint(detail)
+            text.pack_start(name_label, False, False, 0)
+            text.pack_start(description, False, False, 0)
+            line.pack_start(text, True, True, 0)
+            line.pack_end(self._icon("go-next-symbolic", 14), False, False, 0)
+            button.add(line)
+            self.suggestion_list.pack_start(button, False, False, 0)
+        self.suggestion_list.show_all()
 
     def _apply_stats(self, info):
         if not isinstance(info, dict):
@@ -1644,8 +1716,17 @@ class MainWindow(Gtk.ApplicationWindow):
             except (TypeError, ValueError):
                 value, fraction, available = "—", 0.0, False
             self.stat_bars[key][0].set_text(value)
-            self.stat_bars[key][1].set_fraction(fraction)
-            self.stat_bars[key][1].set_visible(available)
+            bar = self.stat_bars[key][1]
+            bar.set_fraction(fraction)
+            bar.set_visible(available)
+            context = bar.get_style_context()
+            for old in ("stat-warning", "stat-critical"):
+                context.remove_class(old)
+            if available:
+                if fraction > 0.92:
+                    context.add_class("stat-critical")
+                elif fraction > 0.80:
+                    context.add_class("stat-warning")
             if key == "cpu":
                 cores = info.get("cpu_cores")
                 detail = "{} logical cores".format(cores) if cores and cores != "Unavailable" else "Details unavailable"
@@ -1773,7 +1854,7 @@ class MainWindow(Gtk.ApplicationWindow):
         page.pack_start(self.install_empty, False, False, 0)
         page.pack_start(scroller, True, True, 0)
 
-        self.install_counter = self._counter("No apps selected")
+        self.install_counter = self._counter("No selection")
         self.install_counter.set_xalign(0)
         preset_row = Gtk.Box(spacing=8)
         preset_row.pack_start(self.install_counter, True, True, 0)
@@ -1798,7 +1879,7 @@ class MainWindow(Gtk.ApplicationWindow):
                                        "Update every package from the preferred source"),
             "uninstall": self._button("Uninstall Selected", self.on_uninstall_selected,
                                       "Uninstall the selected installed apps", destructive=True),
-            "refresh": self._button("Refresh Status", self.on_refresh_status,
+            "refresh": self._button("Refresh", self.on_refresh_status,
                                     "Re-check which apps are installed"),
         }
         actions = self._flow(*self.install_buttons.values())
@@ -1927,7 +2008,7 @@ class MainWindow(Gtk.ApplicationWindow):
     def _update_install_counter(self):
         selected = self._selected_apps()
         count = len(selected)
-        self.install_counter.set_text("{} selected".format(count) if count else "No apps selected")
+        self.install_counter.set_text("{} selected".format(count) if count else "No selection")
         if not hasattr(self, "install_buttons"):
             return
         enabled = not self._busy
@@ -2002,6 +2083,10 @@ class MainWindow(Gtk.ApplicationWindow):
             for old in ("dim-label", "status-installed", "status-warning", "status-error"):
                 context.remove_class(old)
             context.add_class(css_class)
+        self.suggestion_data["updates"] = sum(
+            1 for row in self.app_rows.values()
+            if getattr(row, "status_kind", "") == "update available")
+        self._rebuild_suggestions()
         self._update_install_counter()
 
     def on_apply_preset(self, _btn):
@@ -2018,7 +2103,7 @@ class MainWindow(Gtk.ApplicationWindow):
     def _require_selection(self):
         app_ids = self._selected_apps()
         if not app_ids:
-            self._notify("Tick at least one app first.", "warning")
+            self._notify("Select at least one app first.", "warning")
             return None
         return app_ids
 
@@ -2068,7 +2153,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.manage_search.set_hexpand(True)
         self.manage_search.connect("search-changed", self._on_manage_search_changed)
         toolbar.pack_start(self.manage_search, True, True, 0)
-        toolbar.pack_start(self._button("Scan Installed", self.on_scan_installed,
+        toolbar.pack_start(self._button("Refresh", self.on_scan_installed,
                                         "Re-scan Flatpak, Snap and graphical APT applications",
                                         icon="view-refresh-symbolic"), False, False, 0)
         page.pack_start(toolbar, False, False, 0)
@@ -2108,15 +2193,21 @@ class MainWindow(Gtk.ApplicationWindow):
         page.pack_start(self.manage_empty, False, False, 0)
         page.pack_start(scroller, True, True, 0)
 
-        self.manage_counter = self._counter("Nothing selected")
+        self.manage_counter = self._counter("No selection")
         self.manage_counter.set_xalign(0)
         page.pack_start(self.manage_counter, False, False, 0)
+        self._flagged_updates = 0
         self.manage_buttons = {
             "update": self._button("Update Selected", self.on_update_scanned,
                                    "Update the selected installed apps", primary=True),
+            "update_flagged": self._button("Update Flagged", self.on_update_flagged,
+                                           "Update every app marked 'Update available' "
+                                           "(the number shows how many were found)",
+                                           icon="folder-download-symbolic"),
             "uninstall": self._button("Uninstall Selected", self.on_uninstall_scanned,
                                       "Remove the selected installed apps", destructive=True),
         }
+        self.manage_buttons["update_flagged"].set_sensitive(False)  # until updates are checked
         actions = self._flow(*self.manage_buttons.values())
         actions.get_style_context().add_class("action-bar")
         page.pack_start(actions, False, False, 0)
@@ -2172,10 +2263,15 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _update_manage_counter(self):
         count = len(self._selected_manage())
-        self.manage_counter.set_text("{} selected".format(count) if count else "Nothing selected")
+        self.manage_counter.set_text("{} selected".format(count) if count else "No selection")
         if hasattr(self, "manage_buttons"):
-            for button in self.manage_buttons.values():
-                button.set_sensitive(not self._busy and count > 0)
+            for action in ("update", "uninstall"):
+                self.manage_buttons[action].set_sensitive(not self._busy and count > 0)
+            # Update Flagged follows its own signal: how many updates were
+            # found, not how many rows are ticked.
+            flagged = getattr(self, "_flagged_updates", 0)
+            self.manage_buttons["update_flagged"].set_sensitive(
+                not self._busy and flagged > 0)
 
     def _fill_manage_rows(self, result):
         if isinstance(result, tuple) and len(result) == 2:
@@ -2185,6 +2281,10 @@ class MainWindow(Gtk.ApplicationWindow):
         if not isinstance(entries, list):
             return
         self._manage_scan_warnings = warnings
+        # A fresh scan invalidates the previous update check.
+        self._flagged_updates = 0
+        if hasattr(self, "manage_buttons"):
+            self.manage_buttons["update_flagged"].set_label("Update Flagged")
         if warnings:
             self.manage_scan_notice.set_text("Some sources could not be scanned. See Logs for details.")
             self.manage_scan_notice.set_tooltip_text("\n".join(warnings))
@@ -2246,7 +2346,11 @@ class MainWindow(Gtk.ApplicationWindow):
                     name="Checking for updates")
 
     def _apply_manage_updates(self, updates):
-        """Badge rows whose source reports an update (best-effort, read-only)."""
+        """Badge rows whose source reports an update (best-effort, read-only).
+
+        The count lives on the Update Flagged button itself, so it survives
+        the next queued task overwriting the header notice.
+        """
         if not isinstance(updates, dict):
             return
         available = 0
@@ -2265,9 +2369,11 @@ class MainWindow(Gtk.ApplicationWindow):
                 label.get_style_context().add_class("status-warning")
                 label.set_tooltip_text(
                     "A newer version is available; select it and press Update Selected")
-        if available:
-            self._notice("Found {} installed app(s); {} update(s) available.".format(
-                getattr(self, "_manage_count", available), available))
+        self._flagged_updates = available
+        if hasattr(self, "manage_buttons"):
+            self.manage_buttons["update_flagged"].set_label(
+                "Update Flagged ({})".format(available) if available else "Update Flagged")
+        self._update_manage_counter()
 
     def _selected_manage(self):
         selected = []
@@ -2305,7 +2411,7 @@ class MainWindow(Gtk.ApplicationWindow):
     def on_uninstall_scanned(self, _btn):
         selected = self._selected_manage()
         if not selected:
-            self._notify("Tick at least one installed app first.", "warning")
+            self._notify("Select at least one installed app first.", "warning")
             return
         if not self._confirm("Uninstall {} package(s)?".format(len(selected)),
                              "\n".join("• {} ({})".format(e["name"], e["source"]) for e in selected)):
@@ -2330,12 +2436,18 @@ class MainWindow(Gtk.ApplicationWindow):
     def on_update_scanned(self, _btn):
         selected = self._selected_manage()
         if not selected:
-            # Nothing ticked: treat the button as "update everything flagged".
-            selected = self._select_updatable_rows()
-            if not selected:
-                self._notify("No updates found. Use Scan Installed to refresh the list first.",
-                             "warning")
-                return
+            # Never guess: a button that quietly does something else when
+            # nothing is ticked is how users lose trust.
+            self._notify("Select at least one app to update, or use Update Flagged.",
+                         "warning")
+            return
+        self.submit(apps_backend.update_installed, selected, name="Updating apps")
+
+    def on_update_flagged(self, _btn):
+        selected = self._select_updatable_rows()
+        if not selected:
+            self._notify("No updates were found. Use Refresh to re-check first.", "warning")
+            return
         self.submit(apps_backend.update_installed, selected, name="Updating apps")
 
     # ------------------------------------------------------------------
@@ -2355,7 +2467,7 @@ class MainWindow(Gtk.ApplicationWindow):
         toolbar.pack_start(self.appimage_search, True, True, 0)
         toolbar.pack_start(self._button("Install from File…", self.on_pick_appimage,
                                         "Choose an AppImage file to install"), False, False, 0)
-        toolbar.pack_start(self._button("Rescan", self.on_rescan_appimages,
+        toolbar.pack_start(self._button("Refresh", self.on_rescan_appimages,
                                         "Scan Downloads and installed AppImages again",
                                         icon="view-refresh-symbolic"), False, False, 0)
         page.pack_start(toolbar, False, False, 0)
@@ -2376,23 +2488,11 @@ class MainWindow(Gtk.ApplicationWindow):
         scroller.add(self.appimage_list)
         page.pack_start(self.appimage_empty, False, False, 0)
         page.pack_start(scroller, True, True, 0)
-
-        self.appimage_counter = self._counter("Nothing selected")
-        self.appimage_counter.set_xalign(0)
-        page.pack_start(self.appimage_counter, False, False, 0)
-        self.appimage_buttons = {
-            "install": self._button("Install Selected", self.on_appimage_install,
-                                    "Install the selected AppImages with a menu entry "
-                                    "(installing again updates an installed app)", primary=True),
-            "uninstall": self._button("Uninstall Selected", self.on_appimage_uninstall,
-                                      "Remove the selected AppImage installs", destructive=True),
-        }
-        actions = self._flow(*self.appimage_buttons.values())
-        actions.get_style_context().add_class("action-bar")
-        page.pack_start(actions, False, False, 0)
         page.pack_start(self._hint(
-            "The AppImage file stays in Downloads; Preen installs a copy. Uninstalling deletes "
-            "the copy only when Preen installed it — external AppImage setups keep their files."),
+            "Each row carries its own action: install (or update) a download, remove an "
+            "installed entry. The AppImage file stays in Downloads; Preen installs a copy. "
+            "Uninstalling deletes the copy only when Preen installed it — external AppImage "
+            "setups keep their files."),
             False, False, 0)
 
         integration_frame, integration = self._frame("File manager integration", tight=True)
@@ -2463,10 +2563,6 @@ class MainWindow(Gtk.ApplicationWindow):
             downloads, installed = [], []
         if not isinstance(downloads, list) or not isinstance(installed, list):
             return
-        selected_keys = {
-            row.key for row in self.appimage_list.get_children()
-            if getattr(row, "chk", None) is not None and row.chk.get_active()
-        }
         for row in list(self.appimage_list.get_children()):
             self.appimage_list.remove(row)
         for heading, rows in (("IN DOWNLOADS", downloads), ("INSTALLED", installed)):
@@ -2483,15 +2579,13 @@ class MainWindow(Gtk.ApplicationWindow):
             header.add(heading_label)
             self.appimage_list.add(header)
             for item in rows:
-                self.appimage_list.add(
-                    self._build_appimage_row(item, item["id"] in selected_keys))
+                self.appimage_list.add(self._build_appimage_row(item))
         self.appimage_list.show_all()
-        self._update_appimage_counter()
         self._on_appimage_search_changed(None)
 
-    def _build_appimage_row(self, item, selected):
+    def _build_appimage_row(self, item):
         row = Gtk.ListBoxRow()
-        row.set_activatable(True)
+        row.set_activatable(item["kind"] == "download")  # a click installs; removal is deliberate
         row.is_header = False
         row.key = item["id"]
         row.kind = item["kind"]
@@ -2500,12 +2594,6 @@ class MainWindow(Gtk.ApplicationWindow):
         row.search_text = (item["name"] + " " + item.get("version", "") + " "
                            + os.path.basename(item.get("path", ""))).lower()
         line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        chk = Gtk.CheckButton()
-        chk.set_active(selected)
-        chk.set_tooltip_text("Select " + item["name"])
-        self._accessible_name(chk, "Select " + item["name"])
-        chk.connect("toggled", lambda _c: self._update_appimage_counter())
-        line.pack_start(chk, False, False, 0)
 
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         name = Gtk.Label(label=item["name"])
@@ -2533,9 +2621,13 @@ class MainWindow(Gtk.ApplicationWindow):
                 badge.get_style_context().add_class("status-installed")
                 badge.set_tooltip_text("An AppImage with this name is already installed; "
                                        "installing replaces it with this file")
+                button = self._button("Update", self._on_appimage_row_clicked,
+                                      "Reinstall to replace the installed version with this file")
             else:
                 badge = Gtk.Label(label="Ready to install")
                 badge.get_style_context().add_class("dim-label")
+                button = self._button("Install", self._on_appimage_row_clicked,
+                                      "Install with a menu entry and icon", primary=True)
             line.pack_start(badge, False, False, 0)
         else:
             source = Gtk.Label(label="AppImage")
@@ -2543,58 +2635,41 @@ class MainWindow(Gtk.ApplicationWindow):
             if not item.get("managed"):
                 source.set_tooltip_text("Installed outside Preen; only the menu entry is removed")
             line.pack_start(source, False, False, 0)
+            button = self._button("Remove", self._on_appimage_row_clicked,
+                                  "Remove the menu entry (deletes the file only when "
+                                  "Preen installed it)", destructive=True)
+        button.preen_appimage_item = item
+        line.pack_start(button, False, False, 0)
         row.add(line)
-        row.chk = chk
+        row.action_button = button
         return row
 
-    def _selected_appimages(self):
-        selected = []
-        for row in self.appimage_list.get_children():
-            chk = getattr(row, "chk", None)
-            if chk is not None and chk.get_active():
-                selected.append(row.entry)
-        return selected
+    def _on_appimage_row_clicked(self, button):
+        item = getattr(button, "preen_appimage_item", None)
+        if item is not None:
+            self._on_appimage_row_action(item)
 
     def _on_appimage_row_activated(self, _listbox, row):
-        chk = getattr(row, "chk", None)
-        if chk is not None:
-            chk.set_active(not chk.get_active())
-            self._update_appimage_counter()
+        item = getattr(row, "entry", None)
+        if getattr(row, "kind", None) == "download" and item is not None:
+            self._on_appimage_row_action(item)
 
-    def _update_appimage_counter(self):
-        selected = self._selected_appimages()
-        count = len(selected)
-        self.appimage_counter.set_text("{} selected".format(count) if count else "Nothing selected")
-        if not hasattr(self, "appimage_buttons"):
+    def _on_appimage_row_action(self, item):
+        """One row, one action: install/update a download, remove an install."""
+        if item["kind"] == "download":
+            self.submit(appimages_backend.install_appimages, [item["path"]],
+                        done=lambda _r: self.on_rescan_appimages(), name="Installing AppImage")
             return
-        has_downloads = any(item["kind"] == "download" for item in selected)
-        has_installed = any(item["kind"] == "installed" for item in selected)
-        enabled = not self._busy
-        self.appimage_buttons["install"].set_sensitive(enabled and has_downloads)
-        self.appimage_buttons["uninstall"].set_sensitive(enabled and has_installed)
-
-    def on_appimage_install(self, _btn):
-        paths = [item["path"] for item in self._selected_appimages()
-                 if item["kind"] == "download"]
-        if not paths:
-            self._notify("Tick at least one AppImage in Downloads first.", "warning")
+        if item.get("managed"):
+            detail = ("The menu entry is removed and the installed copy is deleted; the "
+                      ".AppImage file in Downloads is kept.")
+        else:
+            detail = ("This AppImage was installed outside Preen, so only the menu entry "
+                      "is removed and the file is kept.")
+        if not self._confirm("Remove {}?".format(item["name"]), detail):
             return
-        self.submit(appimages_backend.install_appimages, paths,
-                    done=lambda _r: self.on_rescan_appimages(), name="Installing AppImage")
-
-    def on_appimage_uninstall(self, _btn):
-        entries = [item for item in self._selected_appimages()
-                   if item["kind"] == "installed"]
-        if not entries:
-            self._notify("Tick at least one installed AppImage first.", "warning")
-            return
-        if not self._confirm(
-                "Remove {} AppImage install(s)?".format(len(entries)),
-                "\n".join("• {}".format(e["name"]) for e in entries) +
-                "\n\nThe AppImage file is deleted only when Preen installed it."):
-            return
-        self.submit(appimages_backend.uninstall_appimages, [e["id"] for e in entries],
-                    done=lambda _r: self.on_rescan_appimages(), name="Uninstalling AppImages")
+        self.submit(appimages_backend.uninstall_appimages, [item["id"]],
+                    done=lambda _r: self.on_rescan_appimages(), name="Uninstalling AppImage")
 
     def on_toggle_fm_scripts(self, switch, _param=None):
         self.submit(appimages_backend.set_filemanager_scripts, switch.get_active(),
@@ -2704,17 +2779,21 @@ class MainWindow(Gtk.ApplicationWindow):
     def _build_optimize_page(self):
         page = self._page(
             "optimize", "Optimize System", "Optimize System",
-            "Only the settings you change are applied. Cleaning up and changing swap or ZRAM "
-            "needs your password via polkit.", icon="speedometer-symbolic")
+            "Only the settings you change are applied. Cleanup, swap, ZRAM and firewall "
+            "changes need your password via polkit.", icon="speedometer-symbolic")
 
         cleanup_frame, cleanup = self._frame("Cleanup & desktop behaviour", tight=True)
-        cleanup_row, self.chk_cleanup = self._toggle_row(
-            "Remove unused packages",
-            "APT autoremove and autoclean, plus unused Flatpak runtimes")
+        cleanup_button_row = Gtk.Box()
+        cleanup_button_row.get_style_context().add_class("settings-row")
+        cleanup_button_row.pack_start(
+            self._button("Run Cleanup Now…", self.on_run_cleanup,
+                         "APT autoremove and autoclean, plus unused Flatpak runtimes "
+                         "(asks before running)", icon="user-trash-symbolic", flat=True),
+            False, False, 0)
+        cleanup.pack_start(cleanup_button_row, False, False, 0)
         animations_row, self.chk_animations = self._toggle_row(
             "Disable GNOME animations",
             "Fewer transitions and window effects on supported desktops")
-        cleanup.pack_start(cleanup_row, False, False, 0)
         cleanup.pack_start(animations_row, False, False, 0)
         startup_row = Gtk.Box()
         startup_row.get_style_context().add_class("settings-row")
@@ -2769,16 +2848,22 @@ class MainWindow(Gtk.ApplicationWindow):
         security.pack_start(ufw_row, False, False, 0)
         page.pack_start(security_frame, False, False, 0)
 
-        page.pack_start(self._flow(
-            self._button("Apply Changes", self.on_run_optimize,
-                         "Apply only the settings you changed", primary=True,
-                         icon="object-select-symbolic"),
-            self._button("Reload Current Settings", self._refresh_optimize_settings,
-                         "Re-read the current optimization settings"),
-        ), False, False, 0)
+        self.optimize_summary = self._hint("No pending changes — Apply will do nothing.")
+        page.pack_start(self.optimize_summary, False, False, 0)
+        self.optimize_apply = self._button("Apply Changes", self.on_run_optimize,
+                                           "Apply only the settings you changed", primary=True,
+                                           icon="object-select-symbolic")
+        self.optimize_reload = self._button("Refresh", self._refresh_optimize_settings,
+                                            "Re-read the current optimization settings")
+        page.pack_start(self._flow(self.optimize_apply, self.optimize_reload), False, False, 0)
         page.pack_start(self._hint(
             "Current settings are detected automatically. If nothing changed, nothing runs."),
             False, False, 0)
+        for switch in (self.chk_animations, self.chk_swap, self.chk_zram, self.chk_ufw):
+            switch.connect("notify::active", self._on_optimize_staged_changed)
+        self.cmb_power.connect("changed", self._on_optimize_staged_changed)
+        self.cmb_swap_size.connect("changed", self._on_optimize_staged_changed)
+        self._update_optimize_summary()
 
     def _on_swap_toggle(self, _switch, _param=None):
         # The size combo only matters while a swapfile is being enabled.
@@ -2849,6 +2934,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.chk_ufw.set_tooltip_text(
             "UFW is not installed" if ufw is None else
             "Firewall is currently " + ("active" if ufw else "inactive"))
+        self._update_optimize_summary()
 
     def _apply_theme_setting(self, mode):
         if mode not in settings_backend.VALID_APPEARANCE:
@@ -2885,12 +2971,13 @@ class MainWindow(Gtk.ApplicationWindow):
             index = len(self.SCALING_OPTIONS)
         self.cmb_scaling.set_active(index)
         self.cmb_scaling.set_sensitive(current is not None)
+        self._update_look_summary()
 
     def _apply_settings(self, info):
         if not isinstance(info, dict):
             return
         self._apply_optimize_settings({key: info.get(key) for key in
-                                       ("animations_off", "swap", "zram", "power")})
+                                       ("animations_off", "swap", "zram", "power", "ufw")})
         self._apply_look_settings({key: info.get(key) for key in
                                    ("theme", "desktop_theme", "round", "scaling")})
         warnings = info.get("warnings") or []
@@ -2926,46 +3013,73 @@ class MainWindow(Gtk.ApplicationWindow):
         self.submit(self._read_appearance_setting, done=self._apply_appearance_setting,
                     name="Reading appearance settings")
 
-    def on_run_optimize(self, _btn):
-        opts = {
-            "cleanup": self.chk_cleanup.get_active(),
-            "animations_off": self.chk_animations.get_active(),
-            "swap": self.chk_swap.get_active(),
-            "swap_size": self._swap_size(),
-            "zram": self.chk_zram.get_active(),
-            "power": self.cmb_power.get_active_text(),
-            "ufw": self.chk_ufw.get_active(),
-        }
+    def _staged_optimize_actions(self):
+        """The (label, func, args) list Apply would run right now.
+
+        Empty means the staged toggles already match the detected system
+        state. Shared by the Apply handler and the live summary line, so the
+        button can never promise something different from what runs.
+        """
         actions = []
-        if opts["cleanup"]:
-            actions.append(("System cleanup", system_backend.run_cleanup, ()))
+        animations = self.chk_animations.get_active()
         if (self.baseline.get("animations_off") is not None and
-                opts["animations_off"] != self.baseline["animations_off"]):
+                animations != self.baseline["animations_off"]):
             actions.append(("GNOME animations", system_backend.set_animations,
-                            (not opts["animations_off"],)))
+                            (not animations,)))
+        power = self.cmb_power.get_active_text()
         if (self.baseline.get("power") in perf_backend.POWER_PROFILES
-                and opts["power"] in perf_backend.POWER_PROFILES
-                and opts["power"] != self.baseline["power"]):
-            actions.append(("Power profile", perf_backend.set_power_profile, (opts["power"],)))
-        if opts["swap"] != self.baseline.get("swap"):
-            actions.append(("Swapfile", perf_backend.enable_swapfile if opts["swap"] else perf_backend.disable_swapfile,
-                            (opts["swap_size"],) if opts["swap"] else ()))
-        if opts["zram"] != self.baseline.get("zram"):
-            actions.append(("ZRAM", perf_backend.enable_zram if opts["zram"] else perf_backend.disable_zram, ()))
+                and power in perf_backend.POWER_PROFILES
+                and power != self.baseline["power"]):
+            actions.append(("Power profile", perf_backend.set_power_profile, (power,)))
+        swap = self.chk_swap.get_active()
+        if swap != self.baseline.get("swap"):
+            actions.append(("Swapfile", perf_backend.enable_swapfile if swap else perf_backend.disable_swapfile,
+                            (self._swap_size(),) if swap else ()))
+        zram = self.chk_zram.get_active()
+        if zram != self.baseline.get("zram"):
+            actions.append(("ZRAM", perf_backend.enable_zram if zram else perf_backend.disable_zram, ()))
         ufw_baseline = self.baseline.get("ufw")
-        if ufw_baseline is not None and opts["ufw"] != bool(ufw_baseline):
-            actions.append(("Firewall (UFW)", firewall_backend.set_ufw, (opts["ufw"],)))
+        ufw = self.chk_ufw.get_active()
+        if ufw_baseline is not None and ufw != bool(ufw_baseline):
+            actions.append(("Firewall (UFW)", firewall_backend.set_ufw, (ufw,)))
+        return actions
+
+    def _on_optimize_staged_changed(self, *_args):
+        self._update_optimize_summary()
+
+    def _update_optimize_summary(self):
+        """Show what Apply will do before it is pressed."""
+        if not hasattr(self, "optimize_summary"):
+            return
+        actions = self._staged_optimize_actions()
+        self._set_button_text(
+            self.optimize_apply,
+            "Apply {} Change{}".format(len(actions), "" if len(actions) == 1 else "s")
+            if actions else "Apply Changes")
+        if actions:
+            self.optimize_summary.set_text(
+                "Will apply: " + " · ".join(label for label, _func, _args in actions))
+        else:
+            self.optimize_summary.set_text("No pending changes — Apply will do nothing.")
+
+    def on_run_cleanup(self, _btn):
+        """One-shot cleanup action, deliberately outside the staged Apply model."""
+        if self._confirm("Run system cleanup?",
+                         "Runs apt autoremove/autoclean and removes unused Flatpak runtimes."):
+            self.submit(system_backend.run_cleanup, name="Running system cleanup")
+
+    def on_run_optimize(self, _btn):
+        actions = self._staged_optimize_actions()
         if not actions:
             self._notify("Nothing to apply. Your settings already match.", "info")
             return
         risks = []
-        if opts["cleanup"]:
-            risks.append("Cleanup removes unused packages and Flatpak runtimes.")
-        if not opts["swap"] and self.baseline.get("swap"):
+        if any(func is perf_backend.disable_swapfile for _label, func, _args in actions):
             risks.append("The active /swapfile will be disabled and permanently removed.")
-        if not opts["zram"] and self.baseline.get("zram"):
+        if any(func is perf_backend.disable_zram for _label, func, _args in actions):
             risks.append("Preen-managed ZRAM will be stopped and its configuration removed.")
-        if ufw_baseline and not opts["ufw"]:
+        ufw_action = next((action for action in actions if action[0] == "Firewall (UFW)"), None)
+        if ufw_action is not None and not ufw_action[2][0]:
             risks.append("The firewall will be disabled; unsolicited incoming connections "
                          "will no longer be blocked.")
         if risks and not self._confirm("Apply system changes?", "\n".join(risks)):
@@ -3079,22 +3193,23 @@ class MainWindow(Gtk.ApplicationWindow):
                           False, False, 0)
         page.pack_start(extras_frame, False, False, 0)
 
-        page.pack_start(self._flow(
-            self._button("Apply Look Changes", self.on_apply_look,
-                         "Apply staged changes; desktop-wide changes require confirmation", primary=True,
-                         icon="object-select-symbolic"),
-            self._button("Reload Current Look", self._refresh_look_settings,
-                         "Re-read Preen and desktop look settings"),
-        ), False, False, 0)
+        self.look_summary = self._hint("No pending changes — Apply will do nothing.")
+        page.pack_start(self.look_summary, False, False, 0)
+        self.look_apply = self._button("Apply Look Changes", self.on_apply_look,
+                                       "Apply staged changes; desktop-wide changes require confirmation",
+                                       primary=True, icon="object-select-symbolic")
+        self.look_reload = self._button("Refresh", self._refresh_look_settings,
+                                        "Re-read Preen and desktop look settings")
+        page.pack_start(self._flow(self.look_apply, self.look_reload), False, False, 0)
+        self.cmb_theme.connect("changed", self._on_look_staged_changed)
+        self.chk_round.connect("notify::active", self._on_look_staged_changed)
+        self.cmb_scaling.connect("changed", self._on_look_staged_changed)
+        self._update_look_summary()
 
-    def _theme_mode(self):
-        index = self.cmb_theme.get_active()
-        modes = settings_backend.VALID_APPEARANCE
-        return modes[index] if 0 <= index < len(modes) else None
-
-    def on_apply_look(self, _btn):
-        mode = self._theme_mode()
+    def _staged_look_actions(self):
+        """The (label, func, args) list the look Apply button would run now."""
         actions = []
+        mode = self._theme_mode()
         if mode is not None and mode != self.baseline.get("theme"):
             actions.append(("Theme", ui_backend.apply_theme_mode, (mode,)))
         if self.chk_round.get_active() != self.baseline.get("round"):
@@ -3105,6 +3220,33 @@ class MainWindow(Gtk.ApplicationWindow):
             scaling = self.SCALING_OPTIONS[index][1]
             if abs(scaling - self.baseline["scaling"]) > 0.000001:
                 actions.append(("Text size", ui_backend.set_text_scaling, (scaling,)))
+        return actions
+
+    def _on_look_staged_changed(self, *_args):
+        self._update_look_summary()
+
+    def _update_look_summary(self):
+        """Show what Apply Look Changes will do before it is pressed."""
+        if not hasattr(self, "look_summary"):
+            return
+        actions = self._staged_look_actions()
+        self._set_button_text(
+            self.look_apply,
+            "Apply {} Change{}".format(len(actions), "" if len(actions) == 1 else "s")
+            if actions else "Apply Look Changes")
+        if actions:
+            self.look_summary.set_text(
+                "Will apply: " + " · ".join(label for label, _func, _args in actions))
+        else:
+            self.look_summary.set_text("No pending changes — Apply will do nothing.")
+
+    def _theme_mode(self):
+        index = self.cmb_theme.get_active()
+        modes = settings_backend.VALID_APPEARANCE
+        return modes[index] if 0 <= index < len(modes) else None
+
+    def on_apply_look(self, _btn):
+        actions = self._staged_look_actions()
         if not actions:
             self._notify("Nothing to apply. Your look already matches.", "info")
             return
@@ -3174,7 +3316,7 @@ class MainWindow(Gtk.ApplicationWindow):
         scroller.add(self.clean_rows)
         page.pack_start(scroller, True, True, 0)
 
-        self.clean_counter = self._counter("No items selected")
+        self.clean_counter = self._counter("No selection")
         self.clean_counter.set_xalign(0)
         page.pack_start(self.clean_counter, False, False, 0)
         self.clean_button = self._button("Clean Selected", self.on_clean_selected,
@@ -3237,7 +3379,7 @@ class MainWindow(Gtk.ApplicationWindow):
     def _update_clean_counter(self, *_args):
         selected = self._selected_clean_items()
         if not selected:
-            self.clean_counter.set_text("No items selected")
+            self.clean_counter.set_text("No selection")
         else:
             total = deepclean_backend.total_size(selected)
             unknown = any(item.get("size") is None for item in selected)
@@ -3334,6 +3476,10 @@ class MainWindow(Gtk.ApplicationWindow):
         if unknown:
             summary += " · {} size(s) unavailable".format(unknown)
         self.clean_summary.set_text(summary)
+        measured = [item for item in items if (item.get("size") or 0) > 0]
+        self.suggestion_data["clean_bytes"] = sum(item["size"] for item in measured)
+        self.suggestion_data["clean_items"] = len(measured)
+        self._rebuild_suggestions()
         self._update_clean_counter()
 
     def on_scan_cleanable(self, _btn=None):
@@ -3485,6 +3631,7 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self.services_count = self._hint("Loading services…")
         self._services_available = None
+        self._services_failed = 0
         services_inner.pack_start(self.services_count, False, False, 0)
 
         self.services_listbox = Gtk.ListBox()
@@ -3510,8 +3657,8 @@ class MainWindow(Gtk.ApplicationWindow):
         page.pack_start(self._flow(*self.service_buttons.values()), False, False, 0)
         self._update_service_actions()
         page.pack_start(self._hint(
-            "Green means running, red means failed, grey means stopped. Only change "
-            "services you understand, since some are needed for sound, networking or the desktop."),
+            "Failed services are listed first. Only change services you understand, "
+            "since some are needed for sound, networking or the desktop."),
             False, False, 0)
 
     def _on_services_filter_changed(self, _widget=None):
@@ -3522,8 +3669,11 @@ class MainWindow(Gtk.ApplicationWindow):
         visible = sum(1 for row in self.services_listbox.get_children()
                       if self._services_filter(row, None))
         total = len(self.services_listbox.get_children())
-        self.services_count.set_text(
-            "Showing {} of {} service(s)".format(visible, total))
+        summary = "Showing {} of {} service(s)".format(visible, total)
+        failed = getattr(self, "_services_failed", 0)
+        if failed:
+            summary += " · {} failed".format(failed)
+        self.services_count.set_text(summary)
 
     def _services_filter(self, row, _data):
         if not hasattr(row, "search_text"):
@@ -3538,9 +3688,35 @@ class MainWindow(Gtk.ApplicationWindow):
         self._update_service_actions()
 
     def _update_service_actions(self):
+        """Only valid transitions for the selected unit are clickable."""
         if hasattr(self, "service_buttons"):
-            for button in self.service_buttons.values():
-                button.set_sensitive(not self._busy and self.selected_service_row is not None)
+            row = self.selected_service_row
+            for action, button in self.service_buttons.items():
+                available = row is not None and self._service_action_available(row, action)
+                button.set_sensitive(not self._busy and available)
+
+    @staticmethod
+    def _service_action_available(row, action):
+        active = getattr(row, "is_running", False)
+        state = (getattr(row, "unit_state", "") or "").lower()
+        if action == "start":
+            return not active
+        if action in ("stop", "restart"):
+            return active
+        if action == "enable":
+            # static and masked unit files refuse manual enabling anyway
+            return state not in ("enabled", "static", "masked")
+        if action == "disable":
+            return state.startswith("enabled") or state in ("linked", "")
+        return False
+
+    _SERVICE_ACTION_BLOCKED = {
+        "start": "it is already running",
+        "stop": "it is not running",
+        "restart": "it is not running",
+        "enable": "it is already enabled at boot",
+        "disable": "it is not enabled at boot",
+    }
 
     def _apply_services(self, entries):
         self._services_available = isinstance(entries, list)
@@ -3551,10 +3727,19 @@ class MainWindow(Gtk.ApplicationWindow):
         if not self._services_available:
             self._on_services_filter_changed()
             return
+        # Failures are the thing a user came to look for: surface them first.
+        entries = sorted(
+            entries,
+            key=lambda entry: (0 if entry.get("active") == "failed"
+                               else 1 if entry.get("active") == "active" else 2,
+                               entry.get("unit", "")))
+        self._services_failed = sum(1 for entry in entries
+                                    if entry.get("active") == "failed")
         for entry in entries:
             row = Gtk.ListBoxRow()
             row.unit = entry["unit"]
             row.is_running = entry["active"] == "active"
+            row.unit_state = entry.get("unit_state", "")
             row.search_text = (entry["unit"] + " " + entry["description"]).lower()
             row.get_style_context().add_class("app-row")
             line = Gtk.Box(spacing=10)
@@ -3584,6 +3769,9 @@ class MainWindow(Gtk.ApplicationWindow):
             row.add(line)
             self.services_listbox.add(row)
         self.services_listbox.show_all()
+        self.suggestion_data["failed_services"] = sum(
+            1 for entry in entries if entry.get("active") == "failed")
+        self._rebuild_suggestions()
         self._on_services_filter_changed(None)
 
     def _apply_boot(self, info):
@@ -3597,15 +3785,36 @@ class MainWindow(Gtk.ApplicationWindow):
             ("firmware", "loader", "kernel", "userspace") if info.get(key))
         self.lbl_boot.set_text(
             "Total boot: {}  ·  {}".format(info["total"], phases or "phase breakdown unavailable"))
-        for unit, seconds in info.get("blame", []):
+        blame = info.get("blame") or []
+        parsed = []
+        slowest = 0.0
+        for unit, seconds in blame:
+            try:
+                value = float(str(seconds).rstrip("s"))
+            except (TypeError, ValueError):
+                value = None
+            if value is not None and value > 0:
+                slowest = max(slowest, value)
+            parsed.append((unit, seconds, value))
+        for unit, seconds, value in parsed:
             line = Gtk.Box(spacing=8)
             name = Gtk.Label(label=unit.replace(".service", ""))
             name.set_xalign(0)
             name.set_hexpand(True)
             name.set_ellipsize(Pango.EllipsizeMode.END)
+            name.set_tooltip_text(unit)
+            # A proportional bar makes "what slowed my boot" readable without
+            # comparing numbers by eye.
+            bar = Gtk.ProgressBar()
+            bar.set_show_text(False)
+            bar.set_valign(Gtk.Align.CENTER)
+            bar.set_size_request(140, -1)
+            if value is not None and slowest > 0:
+                bar.set_fraction(max(0.02, min(1.0, value / slowest)))
             time_chip = Gtk.Label(label=seconds)
             time_chip.get_style_context().add_class("chip")
             line.pack_start(name, True, True, 0)
+            line.pack_start(bar, False, False, 0)
             line.pack_start(time_chip, False, False, 0)
             self.boot_blame.pack_start(line, False, False, 0)
         self.boot_blame.show_all()
@@ -3620,6 +3829,12 @@ class MainWindow(Gtk.ApplicationWindow):
         row = getattr(self, "selected_service_row", None)
         if row is None:
             self._notify("Select a service first.", "warning")
+            return
+        if not self._service_action_available(row, action):
+            self._notify("Cannot {} {}: {}.".format(
+                action, row.unit,
+                self._SERVICE_ACTION_BLOCKED.get(action, "its state does not allow this")),
+                "warning")
             return
         unit = row.unit
         if action in ("stop", "disable", "restart"):
@@ -3639,7 +3854,7 @@ class MainWindow(Gtk.ApplicationWindow):
             "drivers", "Drivers", "Drivers",
             "Devices detected by ubuntu-drivers with the driver packages that fit them. "
             "Recommended packages are pre-marked; installing applies after one "
-            "administrator prompt.")
+            "administrator prompt, and a reboot is usually required afterwards.")
 
         toolbar = Gtk.Box(spacing=8)
         self.drivers_search = Gtk.SearchEntry()
@@ -3647,7 +3862,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.drivers_search.set_hexpand(True)
         self.drivers_search.connect("search-changed", self._on_drivers_search_changed)
         toolbar.pack_start(self.drivers_search, True, True, 0)
-        toolbar.pack_start(self._button("Rescan", self.on_rescan_drivers,
+        toolbar.pack_start(self._button("Refresh", self.on_rescan_drivers,
                                         "Run ubuntu-drivers devices again",
                                         icon="view-refresh-symbolic"), False, False, 0)
         page.pack_start(toolbar, False, False, 0)
@@ -3673,14 +3888,14 @@ class MainWindow(Gtk.ApplicationWindow):
         page.pack_start(self.drivers_empty, False, False, 0)
         page.pack_start(scroller, True, True, 0)
 
-        self.drivers_counter = self._counter("No driver packages selected")
+        self.drivers_counter = self._counter("No selection")
         self.drivers_counter.set_xalign(0)
         page.pack_start(self.drivers_counter, False, False, 0)
         self.drivers_buttons = {
             "install": self._button("Install Selected", self.on_install_drivers,
                                     "Install the selected recommended driver packages",
                                     primary=True),
-            "auto": self._button("Auto Install (recommended)", self.on_autoinstall_drivers,
+            "auto": self._button("Auto-install All Recommended", self.on_autoinstall_drivers,
                                  "Let ubuntu-drivers install the recommended driver "
                                  "for every device"),
         }
@@ -3811,19 +4026,31 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _update_drivers_counter(self):
         count = len(self._selected_driver_packages())
-        self.drivers_counter.set_text("{} selected".format(count) if count else "Nothing selected")
+        self.drivers_counter.set_text("{} selected".format(count) if count else "No selection")
         if hasattr(self, "drivers_buttons"):
             self.drivers_buttons["install"].set_sensitive(not self._busy and count > 0)
             self.drivers_buttons["auto"].set_sensitive(
                 not self._busy and getattr(self, "_drivers_available", False))
 
+    @staticmethod
+    def _driver_risk_note(picks):
+        """Honest risk line for the one operation that can black-screen a desktop."""
+        note = ("Driver installs can take several minutes and may require a reboot. "
+                "Graphics drivers can briefly affect the display while they are replaced.")
+        if any("nvidia" in name.lower() for name in picks):
+            note += (" NVIDIA drivers may drop you to a text console until the new "
+                     "driver is active; save your work first.")
+        return note
+
     def on_install_drivers(self, _btn):
         picks = self._selected_driver_packages()
         if not picks:
-            self._notify("Tick at least one device with a recommended driver first.", "warning")
+            self._notify("Select at least one device with a recommended driver first.", "warning")
             return
-        if not self._confirm("Install {} driver package(s)?".format(len(picks)),
-                             "\n".join("• " + name for name in picks)):
+        if not self._confirm(
+                "Install {} driver package(s)?".format(len(picks)),
+                "\n".join("• " + name for name in picks)
+                + "\n\n" + self._driver_risk_note(picks)):
             return
         self.submit(drivers_backend.install_driver, picks,
                     done=lambda _r: self.on_rescan_drivers(), name="Installing drivers")
@@ -3831,7 +4058,8 @@ class MainWindow(Gtk.ApplicationWindow):
     def on_autoinstall_drivers(self, _btn):
         if not self._confirm("Auto install recommended drivers?",
                              "ubuntu-drivers picks the recommended driver for every device "
-                             "that needs one. This applies after one administrator prompt."):
+                             "that needs one. This applies after one administrator prompt.\n\n"
+                             + self._driver_risk_note([])):
             return
         self.submit(drivers_backend.autoinstall,
                     done=lambda _r: self.on_rescan_drivers(), name="Auto-installing drivers")
@@ -3852,7 +4080,7 @@ class MainWindow(Gtk.ApplicationWindow):
                          "Create a Timeshift snapshot (needs Timeshift installed)"),
             self._button("Open Timeshift", self.on_open_timeshift,
                          "Launch the Timeshift graphical interface"),
-            self._button("Refresh List", self.on_refresh_snapshots,
+            self._button("Refresh", self.on_refresh_snapshots,
                          "List saved Timeshift snapshots with administrator authorisation",
                          icon="view-refresh-symbolic"),
         ), False, False, 0)
@@ -3865,7 +4093,7 @@ class MainWindow(Gtk.ApplicationWindow):
         snapshot_scroller.set_min_content_height(130)
         snapshot_scroller.add(self.snapshot_listbox)
         snap.pack_start(snapshot_scroller, True, True, 0)
-        snap.pack_start(self._hint("Timeshift is a separate package. Refresh List may ask for "
+        snap.pack_start(self._hint("Timeshift is a separate package. Refresh may ask for "
                                    "administrator access; install it first if missing."), False, False, 0)
         page.pack_start(snap_frame, True, True, 0)
 
@@ -3878,8 +4106,9 @@ class MainWindow(Gtk.ApplicationWindow):
                          "Restore ~/.config from an archive"),
         ), False, False, 0)
         config.pack_start(self._hint(
-            "Import overwrites matching files in ~/.config. Export first if you are unsure."),
-            False, False, 0)
+            "Export archives the whole ~/.config folder, including saved browser logins and "
+            "account tokens — treat the archive like a password. Import overwrites matching "
+            "files in ~/.config."), False, False, 0)
         page.pack_start(config_frame, False, False, 0)
 
     def on_refresh_snapshots(self, _btn=None):
@@ -3896,7 +4125,7 @@ class MainWindow(Gtk.ApplicationWindow):
         if not isinstance(snapshots, list):
             self.snapshot_empty.set_text(
                 "Snapshots unavailable. Timeshift may be missing or require administrator access; "
-                "use Refresh List, see Logs, or open Timeshift.")
+                "use Refresh, see Logs, or open Timeshift.")
             self.snapshot_empty.show()
             return
         if snapshots:
@@ -3928,7 +4157,7 @@ class MainWindow(Gtk.ApplicationWindow):
     def on_snapshot(self, _btn):
         def finished(result):
             if isinstance(result, utils.Outcome) and result.ok and not utils.is_simulate():
-                self._notify("Snapshot requested. Use Refresh List to update the list.", "info")
+                self._notify("Snapshot requested. Use Refresh to update the list.", "info")
         # Never trigger a second, automatic polkit prompt after creating one.
         self.submit(backup_backend.timeshift_snapshot, done=finished, name="Creating snapshot")
 
@@ -3958,6 +4187,29 @@ class MainWindow(Gtk.ApplicationWindow):
         return path if response == Gtk.ResponseType.OK else None
 
     def on_export_config(self, _btn):
+        # Measure first: the confirm dialog must show the real scope (and any
+        # credential folders) before the user picks a destination.
+        self.submit(backup_backend.summarize_config,
+                    done=self._confirm_config_export, name="Measuring settings folder")
+
+    def _confirm_config_export(self, summary):
+        if not isinstance(summary, dict):
+            self._notify("Could not measure ~/.config, so nothing was exported. See Logs for details.",
+                         "warning")
+            return
+        size = deepclean_backend.format_size(summary["bytes"]) if summary["bytes"] else "0 B"
+        message = ("Preen archives the entire ~/.config folder: {} file(s) ({}) across "
+                   "{} application folder(s), including: {}.".format(
+                       summary["count"], size, summary["dir_count"],
+                       ", ".join(summary.get("largest_dirs") or []) or "system settings"))
+        sensitive = summary.get("sensitive") or []
+        if sensitive:
+            message += ("\n\nIt will contain saved logins and account tokens ({}). "
+                        "Treat the archive like a password: do not share or email it."
+                        .format(", ".join(sensitive[:6])
+                                + ("…" if len(sensitive) > 6 else "")))
+        if not self._confirm("Export everything in ~/.config?", message):
+            return
         path = self._save_dialog("Save settings archive", "preen-config-backup.tar.xz")
         if path:
             self.submit(backup_backend.export_configs, path, name="Exporting settings")
@@ -4086,6 +4338,17 @@ class MainWindow(Gtk.ApplicationWindow):
             content.pack_start(line, False, False, 0)
             return switch
 
+        appearance_box = Gtk.Box(spacing=8)
+        appearance_box.pack_start(Gtk.Label(label="Appearance:"), False, False, 0)
+        appearance_combo = Gtk.ComboBoxText()
+        for text in ("Follow system", "Light", "Dark"):
+            appearance_combo.append_text(text)
+        appearance_combo.set_active({"system": 0, "light": 1, "dark": 2}.get(
+            self.settings.get("appearance_mode", "system"), 0))
+        appearance_combo.set_tooltip_text("Changes Preen only; does not change GNOME or other apps")
+        appearance_box.pack_start(appearance_combo, False, False, 0)
+        content.pack_start(appearance_box, False, False, 0)
+
         source_box = Gtk.Box(spacing=8)
         source_box.pack_start(Gtk.Label(label="Preferred package source:"), False, False, 0)
         source_combo = Gtk.ComboBoxText()
@@ -4129,13 +4392,15 @@ class MainWindow(Gtk.ApplicationWindow):
                                  "Warn at startup when flatpak, polkit or gsettings is missing",
                                  bool(self.settings.get("show_dependency_warnings", True)))
         content.pack_start(self._hint(
-            "Source and safety options apply immediately. Startup and refresh "
-            "options apply after a restart."), False, False, 0)
+            "Appearance, source and safety options apply immediately. Startup and "
+            "refresh options apply after a restart."), False, False, 0)
         dialog.show_all()
         response = dialog.run()
         if response == Gtk.ResponseType.OK:
             startup_index = max(0, page_combo.get_active())
+            appearance = ("system", "light", "dark")[max(0, appearance_combo.get_active())]
             values = {
+                "appearance_mode": ("system", "light", "dark")[max(0, appearance_combo.get_active())],
                 "default_source": "apt" if source_combo.get_active() == 1 else "flatpak",
                 "auto_refresh_seconds": refresh_values[max(0, refresh_combo.get_active())],
                 "page_on_startup": page_ids[startup_index],
@@ -4145,6 +4410,7 @@ class MainWindow(Gtk.ApplicationWindow):
             }
             if settings_backend.update(values):
                 self.settings = settings_backend.load()
+                self._apply_theme_setting(appearance)  # keeps the Customize page in sync
                 self.install_source.set_active(0 if values["default_source"] == "flatpak" else 1)
                 self._notify("Preferences saved. Startup and refresh options apply after a restart.",
                              "info")

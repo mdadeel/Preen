@@ -22,13 +22,15 @@ VALID_PAGES = ("dashboard", "install", "manage", "appimages", "optimize",
                "customize", "backup", "logs", "deepclean", "services", "drivers")
 
 DEFAULTS: Dict[str, Any] = {
-    "simulate_on_startup": False,
+    # A system-tuning tool starts with every action previewed, not applied.
+    "simulate_on_startup": True,
     "default_source": "flatpak",
     "appearance_mode": "system",
     "confirm_destructive": True,
     "show_dependency_warnings": True,
     "auto_refresh_seconds": 15,
     "page_on_startup": "dashboard",
+    "onboarded": False,
 }
 
 # A preference update may be requested by the worker while the Preferences
@@ -46,7 +48,7 @@ def validate(values: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(values, dict):
         return clean
     for key in ("simulate_on_startup", "confirm_destructive",
-                "show_dependency_warnings"):
+                "show_dependency_warnings", "onboarded"):
         if key in values:
             clean[key] = bool(values[key])
     source = values.get("default_source")

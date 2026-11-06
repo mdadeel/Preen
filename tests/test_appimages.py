@@ -390,23 +390,28 @@ class RightClickIntegrationTest(AppImagesTestBase):
         self.assertTrue(row["managed"])
 
     def test_filemanager_scripts_roundtrip(self):
-        self.assertFalse(appimages.filemanager_scripts_installed())
-        outcome = appimages.set_filemanager_scripts(True)
-        self.assertTrue(outcome.ok, outcome.message)
-        self.assertTrue(appimages.filemanager_scripts_installed())
-        scripts_dir = appimages.nautilus_scripts_dir()
-        install_script = os.path.join(scripts_dir, appimages.FM_SCRIPT_INSTALL)
-        self.assertEqual(stat.S_IMODE(os.stat(install_script).st_mode) & 0o111, 0o111)
-        with open(install_script, encoding="utf-8") as handle:
-            content = handle.read()
-        self.assertIn("--appimage-handler", content)
-        self.assertIn("preen", content)
-        with open(os.path.join(scripts_dir, appimages.FM_SCRIPT_RUN),
-                  encoding="utf-8") as handle:
-            self.assertIn("--appimage-run", handle.read())
-        outcome = appimages.set_filemanager_scripts(False)
-        self.assertTrue(outcome.ok, outcome.message)
-        self.assertFalse(appimages.filemanager_scripts_installed())
+        # The generated scripts embed $APPIMAGE when Preen itself runs as an
+        # AppImage. A host that is an AppImage (a sandboxed runner, for
+        # example) would otherwise leak its own path into this assertion.
+        with mock.patch.dict(os.environ):
+            os.environ.pop("APPIMAGE", None)
+            self.assertFalse(appimages.filemanager_scripts_installed())
+            outcome = appimages.set_filemanager_scripts(True)
+            self.assertTrue(outcome.ok, outcome.message)
+            self.assertTrue(appimages.filemanager_scripts_installed())
+            scripts_dir = appimages.nautilus_scripts_dir()
+            install_script = os.path.join(scripts_dir, appimages.FM_SCRIPT_INSTALL)
+            self.assertEqual(stat.S_IMODE(os.stat(install_script).st_mode) & 0o111, 0o111)
+            with open(install_script, encoding="utf-8") as handle:
+                content = handle.read()
+            self.assertIn("--appimage-handler", content)
+            self.assertIn("preen", content)
+            with open(os.path.join(scripts_dir, appimages.FM_SCRIPT_RUN),
+                      encoding="utf-8") as handle:
+                self.assertIn("--appimage-run", handle.read())
+            outcome = appimages.set_filemanager_scripts(False)
+            self.assertTrue(outcome.ok, outcome.message)
+            self.assertFalse(appimages.filemanager_scripts_installed())
 
     def test_filemanager_scripts_simulate_makes_nothing(self):
         utils.set_simulate(True)

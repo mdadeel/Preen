@@ -29,7 +29,9 @@ class SettingsTest(unittest.TestCase):
 
     def test_defaults_are_returned_when_no_file_exists(self):
         values = settings.load()
-        self.assertFalse(values["simulate_on_startup"])
+        # A tuning tool must preview, not apply, until the user opts out.
+        self.assertTrue(values["simulate_on_startup"])
+        self.assertFalse(values["onboarded"])
         self.assertEqual(values["default_source"], "flatpak")
         self.assertEqual(values["appearance_mode"], "system")
         self.assertTrue(values["confirm_destructive"])

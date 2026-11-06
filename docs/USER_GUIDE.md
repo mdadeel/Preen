@@ -72,14 +72,15 @@ they are installed. The Dashboard and `--doctor` report available capabilities.
 
 ## 2. Your first five minutes
 
-1. Launch Preen. You land on the **Dashboard**.
+1. Launch Preen. You land on the **Dashboard**. On the first launch Simulate
+   is already on and a notice explains it: every action is previewed in Logs
+   until you switch Simulate off.
 2. Read the **Tool availability** panel and install anything you need.
-3. Turn on **Simulate**. An amber pill appears in the window.
-4. Open **Install Apps**, search for something such as `vlc`, tick it and
+3. Open **Install Apps**, search for something such as `vlc`, tick it and
    press **Install Selected**.
-5. Open **Logs**. You will see the exact command prefixed with
+4. Open **Logs**. You will see the exact command prefixed with
    `[simulate] would run:`, proof that nothing was installed.
-6. When you are happy, switch Simulate off and repeat the action for real.
+5. When you are happy, switch Simulate off and repeat the action for real.
    Privileged commands use polkit and may prompt for authentication.
 
 ---
@@ -103,11 +104,15 @@ and **Escape** dismisses a notice banner.
 
 - A hero card with your operating system, kernel, uptime, power profile and
   load average.
-- Four live metric cards for CPU, memory, disk and swap. Readings that cannot
-  be measured are shown as unavailable, not as zero. The refresh interval
-  is configurable in Preferences.
-- Suggested next steps and a **Tool availability** panel when tools are missing.
-- Shortcuts: **Refresh Status**, **Run Cleanup** and **Open Logs**.
+- Four live metric cards for CPU, memory, disk and swap. The bar changes
+  colour as a resource comes under pressure (amber above 80%, red above 92%).
+  Readings that cannot be measured are shown as unavailable, not as zero. The
+  refresh interval is configurable in Preferences.
+- **Suggested next steps** are computed from what the scans actually measured:
+  reclaimable space, catalogue updates and failed services each become a
+  numbered entry when they exist, and the card falls back to the generic
+  entry points while everything is quiet.
+- Shortcuts: **Refresh**, **Run Cleanup** and **Open Logs**.
 
 ### Install Apps
 
@@ -135,11 +140,13 @@ and **Escape** dismisses a notice banner.
   the list.
 - After each scan Preen checks for updates (APT from the cached package
   index; Flatpak and Snap contact their stores). Matching rows show
-  **Update available**; pressing **Update Selected** with nothing ticked
-  selects those rows for you. Store checks can fail offline — the badge is
-  best-effort and the Logs page says why.
-- Search, then **Update Selected** or **Uninstall Selected**. A scan warning
-  means the list may be incomplete; see Logs for the cause.
+  **Update available**, and the **Update Flagged (N)** button counts them.
+  Store checks can fail offline — the badge is best-effort and the Logs page
+  says why.
+- Search, then **Update Selected** or **Uninstall Selected**. Update Selected
+  never guesses: with nothing ticked it asks for a selection instead of
+  quietly updating everything. A scan warning means the list may be
+  incomplete; see Logs for the cause.
 - Rows marked **protected** are core desktop packages. Their checkboxes are
   disabled and the backend also blocks their removal.
 
@@ -168,42 +175,53 @@ previewed without touching the system while Simulate is on.
 
 ### Optimize System
 
-- **Cleanup and desktop behaviour:** autoremove and autoclean packages,
-  remove unused Flatpak runtimes, disable GNOME animations, and manage
-  startup applications through a dedicated dialog.
+- **Cleanup and desktop behaviour:** **Run Cleanup Now…** performs autoremove,
+  autoclean and unused-Flatpak-runtime removal after a confirmation — it is a
+  one-shot action, deliberately separate from the staged settings. Disable
+  GNOME animations and manage startup applications through a dedicated
+  dialog.
+- **Staged settings:** only rows that differ from the detected baseline are
+  applied. Before you press Apply, the button shows how many changes are
+  staged (**Apply 2 Changes**) and a line underneath names them ("Will
+  apply: GNOME animations · Swapfile"). Reloading optimization settings does
+  not discard staged changes on Customize Look.
 - **Security:** a **Firewall (UFW)** toggle. Enabling blocks unsolicited
   incoming connections (this can affect file sharing or SSH). Like the other
-  Optimize System rows, the change is staged and applied with **Apply
-  Changes**; disabling the firewall asks for confirmation there. The row is
-  disabled when ufw is missing or its state cannot be read.
+  staged rows, the change is applied with **Apply Changes**; disabling the
+  firewall asks for confirmation there. The row is disabled when ufw is
+  missing or its state cannot be read.
 - **Memory and power:** create or remove a swapfile with a selectable size
   (1, 2, 4 or 8 GB), enable ZRAM, and choose a power profile. The profile
   and animation controls are disabled if their current state cannot be read.
 - An existing inactive `/swapfile` is never reformatted. Preen leaves custom
   or edited ZRAM configuration alone; it only removes the configuration it
   created (including the unchanged format from older Preen versions).
-- Only settings that differ from the detected baseline are applied. Reloading
-  optimization settings does not discard staged changes on Customize Look.
 
 ### Services
 
 - **Boot time** card with the firmware, loader, kernel and userspace
-  breakdown plus the slowest units.
+  breakdown plus the slowest units, each with a bar proportional to its
+  share of the boot.
 - Searchable list of systemd services with status chips: green for running,
-  red for failed, grey for stopped. Use **Running only** to shrink the list,
-  and the counter shows how many rows match.
+  red for failed, grey for stopped. Failed services are listed first and the
+  counter reports how many failed. Use **Running only** to shrink the list.
 - **Start**, **Stop**, **Restart**, **Enable** and **Disable** act on the
-  selected unit. Stop, restart and disable ask for confirmation, and unit
-  names are validated before they reach `systemctl`.
+  selected unit, and only transitions that make sense for its current state
+  are clickable (Start is dimmed while a service runs, Enable is dimmed
+  while it is already enabled). Stop, restart and disable ask for
+  confirmation, and unit names are validated before they reach `systemctl`.
 
 ### Drivers
 
 - Runs `ubuntu-drivers devices` and lists the hardware it offers driver
   packages for, with every candidate package named on the row and the
   **recommended** one badged. Search filters the rows.
-- Tick devices and press **Install Selected**, or use **Auto Install
-  (recommended)** to let ubuntu-drivers choose. Both ask for confirmation
-  and one administrator prompt. The list is rescanned afterwards.
+- Tick devices and press **Install Selected**, or use **Auto-install All
+  Recommended** to let ubuntu-drivers choose. Both ask for confirmation,
+  name the risk (a reboot is usually required, and graphics drivers can
+  briefly affect the display — NVIDIA drivers may drop you to a text console
+  until they are active) and use one administrator prompt. The list is
+  refreshed afterwards.
 - The page says so when `ubuntu-drivers` is not installed (the
   `ubuntu-drivers-common` package provides it) and when detection reports
   errors; see Logs for details.
@@ -236,13 +254,15 @@ previewed without touching the system while Simulate is on.
 ### Backup & Restore
 
 - **Create Snapshot** requests an on-demand Timeshift snapshot, **Open
-  Timeshift** launches its own window, and **Refresh List** requests
+  Timeshift** launches its own window, and **Refresh** requests
   administrator authorization to show saved snapshots. The startup check
   never prompts; it may show unavailable until you refresh. A refresh is not
   run in Simulate mode.
-- **Export Settings** saves regular files under `~/.config` to a `.tar.xz`
-  archive, skipping named caches and links. The archive can include credentials
-  and private settings; Preen does not encrypt it. Store and share it carefully.
+- **Export Settings** first shows what it is about to archive — file count,
+  measured size and the largest application folders under `~/.config` — and
+  warns by name when credential folders (browser profiles, GNOME Online
+  Accounts tokens and similar) are included. The archive skips named caches
+  and links and is not encrypted: treat it like a password.
 - **Import Settings** inspects the archive in the background and asks before
   overwriting matching files. Unsafe entries or existing destination symlinks
   are refused; export first if you are unsure. A disk or permission error
@@ -266,15 +286,16 @@ Preferences are saved to `~/.config/preen/settings.json`.
 
 | Setting | Default | Meaning |
 |---|---|---|
+| Appearance | Follow system | Preen's own light/dark look; Light and Dark stay fixed |
 | Preferred package source | Flatpak | Pre-selected source on the Install page |
 | Dashboard auto-refresh | 15 s | `Off` stops the periodic refresh |
 | Page shown on startup | Dashboard | Any sidebar page can open first |
-| Start in Simulate mode | Off | Turn on to start future sessions in Simulate mode |
-| Confirm full package updates | On | Ask before Update All; cleanup, uninstall and restore always require confirmation |
+| Start in Simulate mode | On | A tuning tool previews first; turn off to apply immediately at launch |
+| Confirm full package updates | On | Ask before Update All and before enabling automatic maintenance; uninstall and restore always ask |
 | Show dependency warnings | On | Startup banner when a tool is missing |
 
-Source and safety options apply immediately. Startup and refresh options
-apply after a restart. A corrupted settings file is reset to defaults
+Source, appearance and safety options apply immediately. Startup and refresh
+options apply after a restart. A corrupted settings file is reset to defaults
 instead of crashing the app.
 
 ---
@@ -311,7 +332,7 @@ reported as warnings.
 | Swapfile or ZRAM change failed | Check Logs and install `systemd-zram-generator` if needed. Preen refuses to overwrite an existing inactive swapfile or a custom ZRAM configuration. |
 | Preen appearance did not change | Turn off Simulate and apply the desired Preen appearance. Follow system needs readable GNOME appearance settings; otherwise it falls back to dark. Other apps are intentionally unchanged. |
 | Preen's AppImage has a generic dock icon on Wayland | Integrate the AppImage with your desktop's AppImage integration tool so the shell can find its launcher. The Debian package installs the launcher and icon. |
-| Snapshot list is unavailable | Install Timeshift and choose **Refresh List** to authorize the read, or open Timeshift directly. Simulate mode does not refresh it. |
+| Snapshot list is unavailable | Install Timeshift and choose **Refresh** to authorize the read, or open Timeshift directly. Simulate mode does not refresh it. |
 | An action failed | Read the banner and open Logs for the full stderr, then use **Save Log**. |
 | I want to undo a look change | Select Follow system for Preen. For desktop-wide changes, set the previous text size/icon theme and switch off rounded corners; confirm the changes. |
 

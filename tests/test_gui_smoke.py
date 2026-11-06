@@ -70,7 +70,7 @@ class GuiImportTest(unittest.TestCase):
                          "on_snapshot", "on_open_timeshift", "on_import_config",
                          "on_toggle_simulate", "_build_dashboard_page",
                          "_build_appimages_page", "on_rescan_appimages",
-                         "on_appimage_install", "on_appimage_uninstall",
+                         "_on_appimage_row_action", "_on_appimage_row_activated",
                          "_handle_dropped_files", "on_manage_select_all",
                          "on_manage_select_none", "on_toggle_fm_scripts",
                          "on_set_default_appimage", "_accel_refresh"):

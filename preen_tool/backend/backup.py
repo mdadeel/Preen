@@ -19,10 +19,78 @@ from .utils import Outcome, fail, has_command, is_simulate, ok, run_cmd
 CONFIG_DIR = os.path.expanduser("~/.config")
 SKIP_DIR_NAMES = {"Cache", "cache", "CachedData", "GPUCache", "ShaderCache", "Crash Reports"}
 
+# Top-level ~/.config folders that hold credentials or live session tokens.
+# A "settings backup" that quietly includes them hands out working logins to
+# anyone who obtains the archive, so the export dialog names them explicitly.
+SENSITIVE_CONFIG_DIRS = {
+    "goa-1.0": "GNOME Online Accounts tokens",
+    "evolution": "Evolution mail account data",
+    "epiphany": "Web browser saved logins",
+    "google-chrome": "Chrome saved logins and sessions",
+    "google-chrome-beta": "Chrome Beta saved logins and sessions",
+    "google-chrome-unstable": "Chrome Unstable saved logins and sessions",
+    "chromium": "Chromium saved logins and sessions",
+    "chromium-browser": "Chromium saved logins and sessions",
+    "BraveSoftware": "Brave saved logins and sessions",
+    "microsoft-edge": "Edge saved logins and sessions",
+    "opera": "Opera saved logins and sessions",
+    "vivaldi": "Vivaldi saved logins and sessions",
+    "Signal": "Signal Desktop session keys",
+    "slack": "Slack session tokens",
+    "discord": "Discord session tokens",
+}
+
 
 # ---------------------------------------------------------------------------
 # Export / import
 # ---------------------------------------------------------------------------
+def summarize_config(log=None):
+    """Measure what ``export_configs`` would archive, without writing anything.
+
+    Walks ~/.config with the same rules as the export filter (cache folders
+    skipped, regular files and directories only) so the counts shown before an
+    export match the archive that is actually produced. Returns ``None`` when
+    the folder cannot be read.
+    """
+    if not os.path.isdir(CONFIG_DIR):
+        return None
+    count = 0
+    total = 0
+    dir_sizes = {}
+    sensitive = set()
+    try:
+        for root, dirs, files in os.walk(CONFIG_DIR):
+            rel = os.path.relpath(root, CONFIG_DIR)
+            top = rel.split(os.sep)[0] if rel != "." else ""
+            if top in SKIP_DIR_NAMES:
+                dirs[:] = []
+                continue
+            dirs[:] = [d for d in dirs if d not in SKIP_DIR_NAMES]
+            for name in files:
+                try:
+                    info = os.lstat(os.path.join(root, name))
+                except OSError:
+                    continue
+                if not stat.S_ISREG(info.st_mode):
+                    continue  # export also refuses links, sockets and devices
+                count += 1
+                total += info.st_size
+                if top:
+                    dir_sizes[top] = dir_sizes.get(top, 0) + info.st_size
+                    if top in SENSITIVE_CONFIG_DIRS:
+                        sensitive.add(SENSITIVE_CONFIG_DIRS[top])
+    except OSError as exc:
+        if log:
+            log.append("[warning] Could not measure {}: {}\n".format(CONFIG_DIR, exc))
+        return None
+    largest = sorted(dir_sizes.items(), key=lambda item: item[1], reverse=True)
+    return {
+        "count": count,
+        "bytes": total,
+        "dir_count": len(dir_sizes),
+        "largest_dirs": [name for name, _size in largest[:8]],
+        "sensitive": sorted(sensitive),
+    }
 def export_configs(dest_tar: str, log=None) -> Outcome:
     dest_tar = os.path.abspath(os.path.expanduser(dest_tar))
     if not os.path.isdir(CONFIG_DIR):

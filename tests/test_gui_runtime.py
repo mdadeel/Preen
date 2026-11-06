@@ -729,13 +729,22 @@ class GuiRuntimeTest(unittest.TestCase):
         self.assertEqual(rows["gnome-shell"].status_label.get_text(), "Protected")
         self.assertFalse(rows["gnome-shell"].entry.get("updatable", False))
         self.assertEqual(rows["com.spotify.Client"].status_label.get_text(), "Installed")
-        # Update with nothing ticked selects the flagged rows (never protected ones).
+        # Update with nothing ticked no longer guesses; it asks for a selection.
         with mock.patch.object(window, "submit") as submit:
             window.on_update_scanned(None)
+        self.assertFalse(submit.called)
+        self.assertEqual(window._banner_level, "warning")
+        self.assertFalse(rows["vlc"].chk.get_active())
+        # Update Flagged explicitly picks every flagged (never protected) row.
+        self.assertTrue(window.manage_buttons["update_flagged"].get_sensitive())
+        with mock.patch.object(window, "submit") as submit:
+            window.on_update_flagged(None)
         self.assertTrue(submit.called)
         picked = submit.call_args[0][1]
         self.assertEqual([entry["id"] for entry in picked], ["vlc"])
         self.assertTrue(rows["vlc"].chk.get_active())
+        self.assertFalse(rows["gnome-shell"].chk.get_active())
+        self.assertEqual(window._flagged_updates, 1)
 
     def test_snapshot_refresh_keeps_export_and_import_controls(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
@@ -788,6 +797,15 @@ class GuiRuntimeTest(unittest.TestCase):
         self.assertFalse(window.stat_bars["cpu"][1].get_visible())
         window._apply_stats({"cpu_percent": "12.5", "cpu_cores": "2"})
         self.assertTrue(window.stat_bars["cpu"][1].get_visible())
+
+    def test_stat_bars_change_colour_under_pressure(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_stats({"cpu_percent": "30", "mem_percent": "85", "disk_percent": "95"})
+        self.assertNotIn("stat-warning", window.stat_bars["cpu"][1].get_style_context().classes)
+        self.assertIn("stat-warning", window.stat_bars["mem"][1].get_style_context().classes)
+        self.assertIn("stat-critical", window.stat_bars["disk"][1].get_style_context().classes)
+        window._apply_stats({"mem_percent": "10"})
+        self.assertNotIn("stat-warning", window.stat_bars["mem"][1].get_style_context().classes)
 
     def test_environment_forced_simulation_stays_visible_and_locked(self):
         with mock.patch.dict("os.environ", {utils.SIMULATE_ENV: "1"}):
@@ -1030,31 +1048,107 @@ class GuiRuntimeTest(unittest.TestCase):
             window.on_apply_look(None)
             self.assertEqual([action[0] for action in submit.call_args.args[1]], ["Theme"])
 
-    def test_optimize_builds_only_requested_actions_and_confirms_cleanup(self):
+    def test_optimize_builds_only_requested_actions_and_skips_confirm_without_risks(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
         window._apply_settings({"animations_off": False, "swap": False, "zram": False,
                                 "power": "balanced", "theme": "light", "round": False,
                                 "scaling": 1.0, "warnings": []})
-        window.chk_cleanup.set_active(True)
         window.chk_animations.set_active(True)
         window.chk_swap.set_active(True)
         window.cmb_swap_size.set_active(2)  # 4 GB
         window.chk_zram.set_active(True)
         window.cmb_power.set_active(self.gui.perf_backend.POWER_PROFILES.index("performance"))
         with mock.patch.object(window, "submit") as submit, \
-                mock.patch.object(window, "_confirm", return_value=True) as confirm:
+                mock.patch.object(window, "_confirm") as confirm:
             window.on_run_optimize(None)
-            confirm.assert_called_once()
+            # Enabling swap/ZRAM is not destructive, so no confirm is due.
+            confirm.assert_not_called()
             actions = submit.call_args.args[1]
+        # Cleanup is a separate button now, never smuggled into Apply.
         self.assertEqual([item[0] for item in actions],
-                         ["System cleanup", "GNOME animations", "Power profile", "Swapfile", "ZRAM"])
-        self.assertEqual(actions[1][2], (False,))
-        self.assertEqual(actions[2][2], ("performance",))
-        self.assertEqual(actions[3][2], (4,))
+                         ["GNOME animations", "Power profile", "Swapfile", "ZRAM"])
+        self.assertEqual(actions[0][2], (False,))
+        self.assertEqual(actions[1][2], ("performance",))
+        self.assertEqual(actions[2][2], (4,))
+
+    def test_cleanup_button_runs_its_own_confirmed_task(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        with mock.patch.object(window, "submit") as submit, \
+                mock.patch.object(window, "_confirm", return_value=True) as confirm:
+            window.on_run_cleanup(None)
+        self.assertIn("cleanup", confirm.call_args.args[0].lower())
+        self.assertEqual(submit.call_args.args[0], self.gui.system_backend.run_cleanup)
         with mock.patch.object(window, "submit") as submit, \
                 mock.patch.object(window, "_confirm", return_value=False):
-            window.on_run_optimize(None)
-            submit.assert_not_called()
+            window.on_run_cleanup(None)
+        self.assertFalse(submit.called)
+
+    def test_apply_buttons_and_summaries_show_the_staged_diff_before_apply(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_settings({"animations_off": False, "swap": False, "zram": False,
+                                "power": "balanced", "ufw": True, "theme": "light",
+                                "round": False, "scaling": 1.0, "warnings": []})
+        self.assertEqual(window._staged_optimize_actions(), [])
+        self.assertIn("No pending changes", window.optimize_summary.get_text())
+        window.chk_animations.set_active(True)
+        window.chk_ufw.set_active(False)
+        self.assertEqual([label for label, _f, _a in window._staged_optimize_actions()],
+                         ["GNOME animations", "Firewall (UFW)"])
+        window._update_optimize_summary()
+        self.assertIn("Will apply", window.optimize_summary.get_text())
+        self.assertIn("GNOME animations", window.optimize_summary.get_text())
+        self.assertIn("Firewall (UFW)", window.optimize_summary.get_text())
+        # The look page exposes the same contract.
+        self.assertEqual(window._staged_look_actions(), [])
+        window.chk_round.set_active(True)
+        self.assertEqual([label for label, _f, _a in window._staged_look_actions()],
+                         ["Rounded corners"])
+        window._update_look_summary()
+        self.assertIn("Rounded corners", window.look_summary.get_text())
+
+    def test_dashboard_suggestions_come_from_measured_data(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        # The startup chain already ran real scans inside the fake; clear the
+        # counters to test the card's behaviour at each stage.
+        window.suggestion_data.update({"clean_bytes": 0, "clean_items": 0,
+                                       "updates": 0, "failed_services": 0})
+        # Before any scan lands, the card shows generic entry points.
+        self.assertEqual(window._suggestion_entries()[0][1], "Look for cleanable files")
+        # A cleanup scan with measurable space leads the card with a number.
+        window._apply_clean_scan([
+            {"key": "apt_cache", "label": "APT cache", "detail": "", "size": 900},
+            {"key": "journal", "label": "Journal", "detail": "", "size": 100},
+            {"key": "trash", "label": "Trash", "detail": "", "size": 0},
+        ])
+        self.assertEqual(window.suggestion_data["clean_bytes"], 1000)
+        self.assertEqual(window.suggestion_data["clean_items"], 2)
+        entries = window._suggestion_entries()
+        self.assertIn("Reclaim up to", entries[0][1])
+        self.assertEqual(entries[0][3], "deepclean")
+        # Catalogue statuses feed the update suggestion.
+        window._apply_status({app_id: "Update available" for app_id in
+                              ("vlc", "git")})
+        entries = window._suggestion_entries()
+        self.assertIn("Update 2 installed apps", [entry[1] for entry in entries])
+        # Failed services surface as a suggestion too.
+        window._apply_services([
+            {"unit": "broken.service", "active": "failed", "sub": "failed",
+             "description": "Broken", "unit_state": "disabled"},
+            {"unit": "fine.service", "active": "active", "sub": "running",
+             "description": "Fine", "unit_state": "enabled"},
+        ])
+        entries = window._suggestion_entries()
+        self.assertIn("Review 1 failed service", entries[-1][1])
+        self.assertEqual(entries[-1][3], "services")
+
+    def test_startup_settings_include_the_ufw_baseline(self):
+        """_apply_settings must not drop ufw, or the firewall toggle stays dead."""
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_settings({"animations_off": False, "swap": False, "zram": False,
+                                "power": "balanced", "ufw": False, "theme": "light",
+                                "round": False, "scaling": 1.0, "warnings": []})
+        self.assertIs(window.baseline.get("ufw"), False)
+        self.assertTrue(window.chk_ufw.get_sensitive())
 
     def test_disabling_swap_confirmation_names_the_file_to_be_removed(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
@@ -1147,8 +1241,17 @@ class GuiRuntimeTest(unittest.TestCase):
     def test_service_actions_confirm_stop_restart_disable_and_queue_start_enable(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
         window._apply_services([{"unit": "demo.service", "active": "active", "sub": "running",
-                                 "description": "Demo", "unit_state": "enabled"}])
-        window._on_service_row_selected(window.services_listbox, window.services_listbox.get_children()[0])
+                                 "description": "Demo", "unit_state": "enabled"},
+                                {"unit": "idle.service", "active": "inactive", "sub": "dead",
+                                 "description": "Idle", "unit_state": "disabled"}])
+        rows = {row.unit: row for row in window.services_listbox.get_children()
+                if getattr(row, "unit", None)}
+        # On a running, enabled unit only stop/restart/disable are offered.
+        window._on_service_row_selected(window.services_listbox, rows["demo.service"])
+        self.assertFalse(window.service_buttons["start"].get_sensitive())
+        self.assertFalse(window.service_buttons["enable"].get_sensitive())
+        self.assertTrue(window.service_buttons["stop"].get_sensitive())
+        self.assertTrue(window.service_buttons["disable"].get_sensitive())
         with mock.patch.object(window, "submit") as submit, \
                 mock.patch.object(window, "_confirm", return_value=False) as confirm:
             for action in ("stop", "restart", "disable"):
@@ -1157,8 +1260,23 @@ class GuiRuntimeTest(unittest.TestCase):
             submit.assert_not_called()
             for action in ("start", "enable"):
                 window.on_service_action(action)
-            self.assertEqual(submit.call_count, 2)
+            submit.assert_not_called()
+        # On a stopped, disabled unit only start/enable are offered.
+        window._on_service_row_selected(window.services_listbox, rows["idle.service"])
+        self.assertTrue(window.service_buttons["start"].get_sensitive())
+        self.assertTrue(window.service_buttons["enable"].get_sensitive())
+        self.assertFalse(window.service_buttons["stop"].get_sensitive())
+        self.assertFalse(window.service_buttons["disable"].get_sensitive())
+        with mock.patch.object(window, "submit") as submit, \
+                mock.patch.object(window, "_confirm") as confirm:
+            for action in ("start", "enable"):
+                window.on_service_action(action)
             self.assertEqual([c.args[2] for c in submit.call_args_list], ["start", "enable"])
+            confirm.assert_not_called()
+        with mock.patch.object(window, "submit") as submit:
+            for action in ("stop", "restart"):
+                window.on_service_action(action)
+            submit.assert_not_called()
 
     def test_partial_scans_and_unknown_cleanup_sizes_are_not_reported_as_zero(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
@@ -1310,8 +1428,6 @@ class GuiRuntimeTest(unittest.TestCase):
             window._update_clean_counter,
             # new AppImages page
             window.on_rescan_appimages,
-            window.on_appimage_install,
-            window.on_appimage_uninstall,
             window.on_pick_appimage,
             window.on_set_default_appimage,
         ]
@@ -1345,11 +1461,11 @@ class GuiRuntimeTest(unittest.TestCase):
             {"key": "thumbnails", "label": "Thumbnails", "detail": "", "size": 1024, "root": False},
             {"key": "trash", "label": "Trash", "detail": "", "size": 3 * 1024 ** 2, "root": False},
         ])
-        self.assertIn("No items selected", window.clean_counter.get_text())
+        self.assertIn("No selection", window.clean_counter.get_text())
         window.on_clean_select_all(None)
         self.assertIn("2 selected", window.clean_counter.get_text())
         window.on_clean_select_none(None)
-        self.assertIn("No items selected", window.clean_counter.get_text())
+        self.assertIn("No selection", window.clean_counter.get_text())
 
     def test_manage_select_all_and_clear_honor_search_and_protection(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
@@ -1433,41 +1549,42 @@ class GuiRuntimeTest(unittest.TestCase):
         apps = Path(os.environ["XDG_DATA_HOME"]) / "applications"
         return list(apps.glob("preen-appimage-*.desktop"))
 
-    def test_appimages_page_installs_selected_download(self):
+    def test_appimages_page_installs_from_row_action(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
         self._sandbox_stub()
         window.on_rescan_appimages()
         downloads = [r for r in window.appimage_list.get_children()
                      if getattr(r, "kind", None) == "download"]
         self.assertEqual(len(downloads), 1)
-        downloads[0].chk.set_active(True)
-        window._update_appimage_counter()  # the fake emits no toggled signal
-        self.assertTrue(window.appimage_buttons["install"].get_sensitive())
+        self.assertTrue(downloads[0].action_button.get_sensitive())
         with mock.patch.object(utils, "_simulate", False):
-            window.on_appimage_install(None)
+            window._on_appimage_row_activated(window.appimage_list, downloads[0])
         installed = [r for r in window.appimage_list.get_children()
                      if getattr(r, "kind", None) == "installed"]
         self.assertEqual(len(installed), 1)
         self.assertEqual(len(self._installed_entries()), 1)
         self.assertTrue(installed[0].entry.get("managed"))
 
-    def test_appimages_uninstall_removes_selected_install(self):
+    def test_appimages_row_action_removes_install_and_keeps_download(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
         stub = self._sandbox_stub()
         window.on_rescan_appimages()
-        [r for r in window.appimage_list.get_children()
-         if getattr(r, "kind", None) == "download"][0].chk.set_active(True)
-        window._update_appimage_counter()
+        downloads = [r for r in window.appimage_list.get_children()
+                     if getattr(r, "kind", None) == "download"]
         with mock.patch.object(utils, "_simulate", False):
-            window.on_appimage_install(None)
+            window._on_appimage_row_action(downloads[0].entry)
         installed = [r for r in window.appimage_list.get_children()
                      if getattr(r, "kind", None) == "installed"]
         self.assertEqual(len(installed), 1)
-        installed[0].chk.set_active(True)
-        window._update_appimage_counter()
+        # A declined confirmation never queues the removal.
+        with mock.patch.object(utils, "_simulate", False):
+            with mock.patch.object(window, "_confirm", return_value=False) as confirm:
+                window._on_appimage_row_action(installed[0].entry)
+        self.assertEqual(len(self._installed_entries()), 1)
+        self.assertIn("Downloads", confirm.call_args.args[1])
         with mock.patch.object(utils, "_simulate", False):
             with mock.patch.object(window, "_confirm", return_value=True):
-                window.on_appimage_uninstall(None)
+                window._on_appimage_row_action(installed[0].entry)
         installed = [r for r in window.appimage_list.get_children()
                      if getattr(r, "kind", None) == "installed"]
         self.assertEqual(installed, [])
@@ -1706,6 +1823,27 @@ class GuiRuntimeTest(unittest.TestCase):
         self.assertEqual(len(visible), 1)
         self.assertEqual(visible[0].unit, "running.service")
         self.assertIn("Showing 1 of 2", window.services_count.get_text())
+
+    def test_failed_services_sort_first_and_boot_blame_gets_proportional_bars(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_services([
+            {"unit": "zebra.service", "active": "inactive", "sub": "dead",
+             "description": "Zebra", "unit_state": "disabled"},
+            {"unit": "broken.service", "active": "failed", "sub": "failed",
+             "description": "Broken", "unit_state": "disabled"},
+            {"unit": "alive.service", "active": "active", "sub": "running",
+             "description": "Alive", "unit_state": "enabled"},
+        ])
+        units = [row.unit for row in window.services_listbox.get_children()
+                 if getattr(row, "unit", None)]
+        self.assertEqual(units[0], "broken.service")  # failures first
+        self.assertIn("1 failed", window.services_count.get_text())
+        # Boot blame: each row gets a bar scaled against the slowest unit.
+        window._apply_boot({"total": "1min 30s", "firmware": "1.2s", "kernel": "2.0s",
+                            "userspace": "1min 20s",
+                            "blame": [("slow.service", "4.000s"), ("quick.service", "1.000s"),
+                                      ("mystery.service", "not-a-number")]})
+        self.assertEqual(len(window.boot_blame.get_children()), 3)
 
 
 if __name__ == "__main__":

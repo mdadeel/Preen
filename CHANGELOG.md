@@ -4,6 +4,59 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Trust and clarity fixes from a second, harsher design review.
+
+### Added
+
+- **Export transparency**: Export Settings first measures `~/.config` and
+  shows the file count, size and largest application folders before any
+  archive is written, and warns by name when the archive will contain
+  credential folders (browser profiles, GNOME Online Accounts tokens).
+- **Live staged diff**: the Apply buttons on Optimize System and Customize
+  Look show how many changes are staged ("Apply 2 Changes") and a line
+  underneath names exactly what will run before anything is pressed.
+- **Update Flagged (N)** on Manage Apps counts detected updates on the
+  button itself, where the count survives the next task.
+- Dashboard **Suggested next steps** are now computed from measured data:
+  reclaimable space, catalogue updates and failed services each become a
+  numbered entry; the static link list is the fallback.
+- Boot-time blame rows show a bar proportional to each unit's share of the
+  boot; failed services sort first and the Services counter reports them.
+- Stat cards change colour under resource pressure (amber above 80%, red
+  above 92%).
+- An **Appearance** choice (Follow system / Light / Dark) in Preferences,
+  kept in sync with Customize Look.
+- First launch shows a welcome notice explaining Simulate, and **Simulate is
+  now on by default** for new configurations (`simulate_on_startup`).
+
+### Changed
+
+- **AppImages actions moved onto rows**: each download row carries Install or
+  Update and each installed row carries Remove, replacing the shared
+  selection with two ambiguous batch buttons.
+- **Service actions are state-aware**: Start is dimmed while a unit runs,
+  Enable while it is already enabled, and invalid transitions are explained
+  instead of failing at `systemctl`.
+- **One refresh verb**: Scan Installed, Rescan, Refresh Status, Refresh List
+  and Reload Current Settings/Look are all **Refresh** now; Scan Now remains
+  where a scan measures.
+- Cleanup on Optimize System is the **Run Cleanup Now…** action with its own
+  confirmation; it can no longer sneak into the staged Apply as a toggle
+  that never reset.
+- Drivers: the second action reads **Auto-install All Recommended** instead
+  of competing with "recommended"; both confirm dialogs state the reboot and
+  display risks, with an NVIDIA-specific warning when it applies.
+- Counters and notices share one grammar ("No selection", "Select at least
+  one…"), replacing four variants of "Nothing selected" and "Tick…".
+
+### Fixed
+
+- The firewall baseline was never applied on startup (the startup settings
+  read dropped the `ufw` key), leaving the toggle insensitive until a manual
+  refresh of the Optimize page.
+
 ## [0.7.1] - 2026-10-31
 
 Interface consistency and feedback fixes from a full design review.
