@@ -2513,7 +2513,6 @@ class MainWindow(Gtk.ApplicationWindow):
             "Double-click offers Install or Run; the right-click menu stays available"))
         page.pack_start(integration_frame, False, False, 0)
         self._setup_downloads_monitor()
-        self._update_appimage_counter()
 
     @staticmethod
     def _scan_appimages_worker(log=None):

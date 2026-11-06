@@ -56,6 +56,10 @@ Trust and clarity fixes from a second, harsher design review.
 - The firewall baseline was never applied on startup (the startup settings
   read dropped the `ufw` key), leaving the toggle insensitive until a manual
   refresh of the Optimize page.
+- A leftover AppImages initialization call crashed the window on startup
+  (caught on-device immediately after installing 0.7.2); the GUI test double
+  now rejects missing private methods, so this class of bug cannot pass the
+  suite silently again.
 
 ## [0.7.1] - 2026-10-31
 

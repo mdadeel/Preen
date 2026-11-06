@@ -15,6 +15,8 @@ preen (0.7.2) stable; urgency=medium
     colour under resource pressure.
   * One Refresh verb across all pages; Appearance joins Preferences;
     Simulate defaults on for first runs.
+  * Fixed a leftover AppImages initialization call that crashed the window
+    on startup; the GUI test double now rejects missing private methods.
 
  -- Preen contributors <64582744+mdadeel@users.noreply.github.com>  Sat, 07 Nov 2026 12:00:00 +0000
 

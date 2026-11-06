@@ -326,8 +326,26 @@ class FakeStack(Widget):
         return self._visible_child_name
 
 
+class FakeApplicationWindow(Widget):
+    """Like Widget, but private MainWindow methods must really exist.
+
+    The catch-all ``Widget.__getattr__`` no-op would otherwise silently
+    absorb calls to MainWindow methods that were deleted or renamed (this
+    exact hole let a leftover ``self._update_appimage_counter()`` pass the
+    whole suite and then crash the real GUI at startup). Window-level calls
+    on the real Gtk.ApplicationWindow API are all public, so refusing
+    single-underscore lookups only catches genuine bugs.
+    """
+
+    def __getattr__(self, name):
+        if name.startswith("_") and not name.startswith("__"):
+            raise AttributeError(
+                "MainWindow method or private attribute not found: " + name)
+        return lambda *_args, **_kwargs: None
+
+
 class FakeGtk:
-    ApplicationWindow = Widget
+    ApplicationWindow = FakeApplicationWindow
     Application = Widget
     Box = Widget
     Button = Widget
