@@ -690,6 +690,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self._build_services_page()
         self._build_drivers_page()
         self._build_backup_page()
+        self._build_organizer_page()
         self._build_logs_page()
         self._populate_sidebar()
         self._install_accelerators()
@@ -4238,6 +4239,95 @@ class MainWindow(Gtk.ApplicationWindow):
             # The backend revalidates after confirmation in case either the
             # archive or destination changed while the dialog was open.
             self.submit(backup_backend.import_configs, path, name="Restoring settings")
+
+    # ------------------------------------------------------------------
+    # Logs page
+    # ------------------------------------------------------------------
+    def _build_organizer_page(self):
+        page = self._page(
+            "organizer", "Folder Organizer", "Folder Organizer",
+            "Choose a folder and click organize to move files into categorized subfolders.",
+            icon="folder-symbolic")
+
+        # Main container
+        container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        page.pack_start(container, True, True, 0)
+
+        # Folder selection row
+        folder_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        folder_label = Gtk.Label(label="Select Folder:")
+        folder_label.set_xalign(0)
+        folder_row.pack_start(folder_label, False, False, 0)
+
+        self.organizer_folder_btn = Gtk.FileChooserButton(title="Select Folder to Organize")
+        self.organizer_folder_btn.set_action(Gtk.FileChooserAction.SELECT_FOLDER)
+        folder_row.pack_start(self.organizer_folder_btn, True, True, 0)
+
+        container.pack_start(folder_row, False, False, 0)
+
+        # Controls row
+        controls_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        
+        self.organizer_simulate_switch = Gtk.Switch()
+        self.organizer_simulate_switch.set_active(True)
+        self.organizer_simulate_switch.set_tooltip_text("Simulate mode: only log actions, do not move files")
+        controls_row.pack_start(Gtk.Label(label="Simulate:"), False, False, 0)
+        controls_row.pack_start(self.organizer_simulate_switch, False, False, 0)
+
+        organize_btn = self._button("Organize", self.on_organizer_clicked,
+                                    "Group files into categorized subfolders",
+                                    icon="view-list-symbolic")
+        controls_row.pack_start(organize_btn, False, False, 0)
+
+        container.pack_start(controls_row, False, False, 0)
+
+        # Log display (similar to logs page but specific to organizer)
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroller.get_style_context().add_class("log-surface")
+        
+        # Use the existing log buffer or create a new one for organizer
+        # We'll use a separate text view for organizer logs to avoid mixing with system logs
+        self.organizer_log_view = Gtk.TextView()
+        self.organizer_log_view.set_editable(False)
+        self.organizer_log_view.set_cursor_visible(False)
+        self.organizer_log_view.set_wrap_mode(Gtk.WrapMode.WORD)
+        self.organizer_log_buf = self.organizer_log_view.get_buffer()
+        
+        scroller.add(self.organizer_log_view)
+        container.pack_start(scroller, True, True, 0)
+
+    def _log_organizer(self, message):
+        """Append a message to the organizer log view."""
+        # Run on UI thread
+        GLib.idle_add(self._append_organizer_log, message)
+
+    def _append_organizer_log(self, message):
+        end_iter = self.organizer_log_buf.get_end_iter()
+        self.organizer_log_buf.insert(end_iter, message + "\n")
+        # Auto-scroll to bottom
+        mark = self.organizer_log_buf.create_mark(None, end_iter, False)
+        self.organizer_log_view.scroll_to_mark(mark, 0.0, False, 0.0, 1.0)
+
+    def on_organizer_clicked(self, _btn):
+        """Handle the Organize button click."""
+        folder_path = self.organizer_folder_btn.get_filename()
+        if not folder_path:
+            self._notify("Please select a folder first.", "warning")
+            return
+
+        simulate = self.organizer_simulate_switch.get_active()
+        mode = "Simulating" if simulate else "Organizing"
+        self._log_organizer(f"--- {mode} folder: {folder_path} ---")
+
+        # Run in background thread to avoid freezing UI
+        self.submit(
+            preen_tool.backend.organizer.organize_folder,
+            folder_path,
+            simulate=simulate,
+            log_callback=self._log_organizer,
+            name=f"{mode} folder"
+        )
 
     # ------------------------------------------------------------------
     # Logs page

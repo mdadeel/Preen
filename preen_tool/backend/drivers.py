@@ -14,7 +14,7 @@ from . import utils
 from .utils import Report, fail, format_cmd, has_command, is_simulate, ok, run_cmd
 
 PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]*$")
-_SECTION_RE = re.compile(r"^==\s*(.+?)\s*==$")
+_SECTION_RE = re.compile(r"^==\s*(.+?)\s*==")
 _FIELD_RE = re.compile(r"^([a-z]+):\s*(.*)$")
 
 
@@ -36,9 +36,12 @@ def parse_devices(text: str) -> List[Dict]:
     current: Optional[Dict] = None
     for raw in (text or "").splitlines():
         line = raw.strip()
+        if not line:
+            continue
         section = _SECTION_RE.match(line)
         if section:
-            current = {"modalias": "", "vendor": "", "model": section.group(1),
+            model = section.group(1) or "Unknown device"
+            current = {"modalias": "", "vendor": "", "model": model,
                        "packages": []}
             devices.append(current)
             continue
