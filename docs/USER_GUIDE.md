@@ -75,13 +75,35 @@ they are installed. The Dashboard and `--doctor` report available capabilities.
 1. Launch Preen. You land on the **Dashboard**. On the first launch Simulate
    is already on and a notice explains it: every action is previewed in Logs
    until you switch Simulate off.
-2. Read the **Tool availability** panel and install anything you need.
-3. Open **Install Apps**, search for something such as `vlc`, tick it and
+2. The first-run **setup wizard** (below) appears over the Dashboard; walk
+   through it or press **Skip setup**.
+3. Read the **Tool availability** panel and install anything you need.
+4. Open **Install Apps**, search for something such as `vlc`, tick it and
    press **Install Selected**.
-4. Open **Logs**. You will see the exact command prefixed with
+5. Open **Logs**. You will see the exact command prefixed with
    `[simulate] would run:`, proof that nothing was installed.
-5. When you are happy, switch Simulate off and repeat the action for real.
+6. When you are happy, switch Simulate off and repeat the action for real.
    Privileged commands use polkit and may prompt for authentication.
+
+### The first-run setup wizard
+
+On the very first launch a **Welcome to Preen** window appears over the
+Dashboard with the post-install checklist in guided form:
+
+- **Apps and updates** — check pending APT, Flatpak and snap updates and
+  apply everything that was found.
+- **Drivers** — install the driver `ubuntu-drivers` marks as recommended.
+- **Firewall** — turn on UFW when it is disabled.
+- **Automatic maintenance** — install the systemd timer (daily, weekly or
+  monthly) that runs the cleanup tasks in the background.
+- **Flatpak & media codecs** — enable the Flathub app source and install
+  `ubuntu-restricted-extras`.
+
+Every step is optional. **Back** and **Next** move between steps, **Skip
+setup** closes the window without changing anything, and the wizard honours
+Simulate mode exactly like the pages do. Everything it offers stays
+available afterwards on its own page, and the wizard never returns once you
+have finished or skipped it.
 
 ---
 

@@ -4,6 +4,21 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **First-run setup wizard**: on the first launch a guided window offers the
+  post-install checklist — pending app updates, recommended drivers, the UFW
+  firewall, the automatic-maintenance timer, and Flathub plus media codecs.
+  Every step is optional, skipping changes nothing, and Simulate mode gates
+  all of it.
+
+### Changed
+
+- The first-launch welcome notice moved into the wizard's first step; the
+  wizard replaces the notice as the one-shot first-run experience.
+
 ## [0.7.2] - 2026-11-07
 
 Trust and clarity fixes from a second, harsher design review.
