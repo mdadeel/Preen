@@ -529,6 +529,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.clean_checkbuttons = {}
         self.selected_service_row = None
         self._downloads_pending = False
+        self._setup_dialog = None  # the first-run wizard, built once per install
         self.baseline = {
             "animations_off": None, "swap": False, "zram": False,
             "power": None, "theme": None, "round": False, "scaling": None,
@@ -706,21 +707,470 @@ class MainWindow(Gtk.ApplicationWindow):
         self.log_buf.append("[info] {} {} ready. Simulate is {}.\n".format(
             APP_NAME, __version__, "ON" if utils.is_simulate() else "OFF"))
         if not self.settings.get("onboarded"):
-            self._show_welcome()
+            self._run_first_run_flow()
         self._watch_desktop_appearance()
         self._start_initial_tasks()
 
-    def _show_welcome(self):
-        """First launch: make the safety model visible on the very first screen."""
+    def _run_first_run_flow(self):
+        """First launch: the trust banner plus the guided setup wizard.
+
+        Every wizard action goes through the same simulate-gated queue as the
+        pages, so the first run is preview-safe. The one-shot ``onboarded``
+        mark is written immediately (not on dialog close) so a crashed or
+        closed dialog can never trap the user in the wizard; a read-only
+        config directory simply shows it again next launch, as before.
+        """
         tail = ("Actions are previewed in Logs until you switch Simulate off "
                 "(top right)." if utils.is_simulate() else
                 "Turn on Simulate (top right) to preview any action before it runs.")
         self._notify("Welcome to Preen — system setup, cleaning and tuning. " + tail, "info")
         try:
+            self._build_setup_dialog()
+        except Exception:
+            self.log_buf.append("[warn] the setup wizard could not be shown\n")
+        self._mark_onboarded()
+
+    def _mark_onboarded(self):
+        try:
             settings_backend.update({"onboarded": True})
             self.settings = settings_backend.load()
         except Exception:
             pass  # a read-only config directory must not break the first run
+
+    # ------------------------------------------------------------------
+    # First-run setup wizard
+    # ------------------------------------------------------------------
+    WIZARD_STEPS = ("welcome", "updates", "drivers", "firewall", "maintenance",
+                    "system", "finish")
+
+    def _build_setup_dialog(self):
+        """Build and show the first-run wizard as a modal over this window.
+
+        Each step mirrors a page that already exists and reuses its backend;
+        the state lines are filled by one queued read, and every action
+        button goes through ``submit`` so Simulate mode gates it.
+        """
+        self._wizard_summary = []   # (label, ok) entries rendered on the finish step
+        self._wizard_state = {}     # probe results: maintenance/flathub/codecs
+        self._wizard_updates = {}
+
+        dialog = Gtk.Dialog(transient_for=self, modal=True)
+        dialog.set_title("Welcome to Preen")
+        dialog.set_default_size(620, 480)
+        dialog.set_position(Gtk.WindowPosition.CENTER_ON_PARENT)
+        self._setup_dialog = dialog
+        content = dialog.get_content_area()
+        content.set_spacing(10)
+        content.set_border_width(12)
+
+        intro = self._hint("Optional setup for a fresh system. Each step can be "
+                           "skipped and everything here also lives on its own page.")
+        content.pack_start(intro, False, False, 0)
+
+        self.wizard_stack = Gtk.Stack()
+        self.wizard_stack.set_vexpand(True)
+        for name, (card, inner) in (
+                ("welcome", self._wizard_welcome_step()),
+                ("updates", self._wizard_updates_step()),
+                ("drivers", self._wizard_drivers_step()),
+                ("firewall", self._wizard_firewall_step()),
+                ("maintenance", self._wizard_maintenance_step()),
+                ("system", self._wizard_system_step()),
+                ("finish", self._wizard_finish_step())):
+            self.wizard_stack.add_titled(card, name, name)
+        content.pack_start(self.wizard_stack, True, True, 0)
+
+        nav = Gtk.Box(spacing=8)
+        self.wizard_skip = self._button("Skip setup", self._on_wizard_skip,
+                                        "Close the wizard; nothing is changed", lock=False)
+        nav.pack_start(self.wizard_skip, False, False, 0)
+        self.wizard_back = self._button("Back", self._on_wizard_back, None, lock=False)
+        self.wizard_back.set_sensitive(False)
+        nav.pack_start(self.wizard_back, False, False, 0)
+        self.wizard_next = self._button("Next", self._on_wizard_next, None, lock=False)
+        nav.pack_end(self.wizard_next, False, False, 0)
+        content.pack_start(nav, False, False, 0)
+
+        self.submit(self._read_wizard_state, done=self._apply_wizard_state,
+                    name="Reading setup state")
+        dialog.show_all()
+
+    def _wizard_welcome_step(self):
+        card, inner = self._frame("Welcome to Preen")
+        inner.pack_start(self._hint(
+            "Preen keeps a fresh Zorin (or Ubuntu) install tidy: updates, drivers, "
+            "firewall, automatic maintenance and the Flatpak app source — the "
+            "post-install checklist, in one place."), False, False, 0)
+        if utils.is_simulate():
+            inner.pack_start(self._hint(
+                "Simulate is ON: every action is only previewed in the Logs until "
+                "you switch it off (top right). Keep it on while you explore."),
+            False, False, 0)
+        else:
+            inner.pack_start(self._hint(
+                "Turn on Simulate (top right) to preview any action in the Logs "
+                "before it runs."), False, False, 0)
+        inner.pack_start(self._hint(
+            "All steps are optional. Changes that need it ask for your password "
+            "once, via the system's own permission prompt."), False, False, 0)
+        return card, inner
+
+    def _wizard_updates_step(self):
+        card, inner = self._frame("Apps and updates")
+        self.wizard_updates_state = self._hint(
+            "Press Check for updates to see what is pending.")
+        inner.pack_start(self.wizard_updates_state, False, False, 0)
+        self.wizard_check_btn = self._button(
+            "Check for updates", self.on_wizard_check_updates,
+            "Read pending APT, Flatpak and snap updates")
+        inner.pack_start(self.wizard_check_btn, False, False, 0)
+        self.wizard_update_btn = self._button(
+            "Update all", self.on_wizard_update_all,
+            "Update every app whose source reports a newer version")
+        self.wizard_update_btn.set_sensitive(False)
+        inner.pack_start(self.wizard_update_btn, False, False, 0)
+        inner.pack_start(self._hint(
+            "Package upgrades can take a while. The Manage Apps page does this "
+            "per-app with more control."), False, False, 0)
+        return card, inner
+
+    def _wizard_drivers_step(self):
+        card, inner = self._frame("Drivers")
+        self.wizard_drivers_state = self._hint(
+            "The device scan from startup is used here.")
+        inner.pack_start(self.wizard_drivers_state, False, False, 0)
+        self.wizard_drivers_btn = self._button(
+            "Install recommended drivers", self.on_wizard_install_drivers,
+            "Install the driver ubuntu-drivers marks as recommended")
+        self.wizard_drivers_btn.set_sensitive(False)
+        inner.pack_start(self.wizard_drivers_btn, False, False, 0)
+        inner.pack_start(self._hint(
+            "The Drivers page lists every device and driver individually."),
+            False, False, 0)
+        return card, inner
+
+    def _wizard_firewall_step(self):
+        card, inner = self._frame("Firewall")
+        self.wizard_firewall_state = self._hint("Checking the firewall state…")
+        inner.pack_start(self.wizard_firewall_state, False, False, 0)
+        self.wizard_firewall_btn = self._button(
+            "Enable firewall (UFW)", self.on_wizard_enable_firewall,
+            "Turn on the uncomplicated firewall; blocks unsolicited incoming traffic")
+        self.wizard_firewall_btn.set_sensitive(False)
+        inner.pack_start(self.wizard_firewall_btn, False, False, 0)
+        inner.pack_start(self._hint(
+            "The firewall never blocks your own connections — it drops incoming "
+            "connection attempts. The Optimize page has the toggle later."),
+            False, False, 0)
+        return card, inner
+
+    def _wizard_maintenance_step(self):
+        card, inner = self._frame("Automatic maintenance")
+        self.wizard_maintenance_state = self._hint("Checking the schedule…")
+        inner.pack_start(self.wizard_maintenance_state, False, False, 0)
+        self.wizard_maintenance_combo = Gtk.ComboBoxText()
+        self._accessible_name(self.wizard_maintenance_combo, "Wizard maintenance frequency")
+        for label in ("Daily", "Weekly", "Monthly"):
+            self.wizard_maintenance_combo.append_text(label)
+        self.wizard_maintenance_combo.set_active(1)  # Weekly
+        self.wizard_maintenance_combo.set_tooltip_text(
+            "How often automatic maintenance runs")
+        inner.pack_start(self._value_row("Frequency", self.wizard_maintenance_combo),
+                         False, False, 0)
+        self.wizard_maintenance_btn = self._button(
+            "Enable maintenance", self.on_wizard_enable_maintenance,
+            "Install a systemd timer that runs the cleanup tasks on the schedule")
+        self.wizard_maintenance_btn.set_sensitive(False)
+        inner.pack_start(self.wizard_maintenance_btn, False, False, 0)
+        inner.pack_start(self._hint(
+            "Runs the root-level cleanup (package cache, unused packages, journal, "
+            "unused Flatpak runtimes) even when Preen is closed."), False, False, 0)
+        return card, inner
+
+    def _wizard_system_step(self):
+        card, inner = self._frame("Flatpak & media codecs")
+        self.wizard_flathub_state = self._hint("Checking Flathub…")
+        inner.pack_start(self.wizard_flathub_state, False, False, 0)
+        self.wizard_flathub_btn = self._button(
+            "Enable Flathub", self.on_wizard_enable_flathub,
+            "Add flathub.org, the main store of Flatpak apps")
+        self.wizard_flathub_btn.set_sensitive(False)
+        inner.pack_start(self.wizard_flathub_btn, False, False, 0)
+        self.wizard_codecs_state = self._hint("Checking media codecs…")
+        inner.pack_start(self.wizard_codecs_state, False, False, 0)
+        self.wizard_codecs_btn = self._button(
+            "Install media codecs", self.on_wizard_install_codecs,
+            "Install ubuntu-restricted-extras for common audio and video formats")
+        self.wizard_codecs_btn.set_sensitive(False)
+        inner.pack_start(self.wizard_codecs_btn, False, False, 0)
+        inner.pack_start(self._hint(
+            "Flathub is where the Install Apps page finds most Flatpak apps; media "
+            "codecs let the default player open common formats."), False, False, 0)
+        return card, inner
+
+    def _wizard_finish_step(self):
+        card, inner = self._frame("All set")
+        self.wizard_finish_state = self._hint("")
+        inner.pack_start(self.wizard_finish_state, False, False, 0)
+        return card, inner
+
+    # Wizard navigation ------------------------------------------------
+    def _on_wizard_skip(self, _btn):
+        if self._setup_dialog is not None:
+            self._setup_dialog.destroy()
+
+    def _on_wizard_next(self, _btn):
+        self._wizard_goto(1)
+
+    def _on_wizard_back(self, _btn):
+        self._wizard_goto(-1)
+
+    def _wizard_goto(self, delta):
+        index = self._wizard_index()
+        target = min(max(index + delta, 0), len(self.WIZARD_STEPS) - 1)
+        self.wizard_stack.set_visible_child_name(self.WIZARD_STEPS[target])
+        self._sync_wizard_nav()
+
+    def _wizard_index(self):
+        name = self.wizard_stack.get_visible_child_name()
+        return self.WIZARD_STEPS.index(name) if name in self.WIZARD_STEPS else 0
+
+    def _sync_wizard_nav(self):
+        index = self._wizard_index()
+        last = len(self.WIZARD_STEPS) - 1
+        self.wizard_back.set_sensitive(index > 0)
+        self._set_button_text(self.wizard_next,
+                              "Finish" if index == last else "Next")
+        self._sync_wizard_step(self.WIZARD_STEPS[index])
+
+    def _sync_wizard_controls(self):
+        """Re-sync the visible step's buttons; cheap no-op without the dialog."""
+        if self._setup_dialog is None:
+            return
+        self._sync_wizard_step(self.WIZARD_STEPS[self._wizard_index()])
+
+    def _sync_wizard_step(self, name):
+        sync = {
+            "drivers": self._sync_wizard_drivers,
+            "firewall": self._sync_wizard_firewall,
+            "maintenance": self._sync_wizard_maintenance,
+            "system": self._sync_wizard_system,
+            "finish": self._sync_wizard_finish,
+        }
+        handler = sync.get(name)
+        if handler is not None:
+            handler()
+
+    # Wizard state -----------------------------------------------------
+    @staticmethod
+    def _read_wizard_state():
+        """One queued read for every wizard state line (all unprivileged)."""
+        return {
+            "maintenance": maintenance_backend.get_schedule(),
+            "flathub": utils.flathub_present(),
+            "codecs": system_backend.has_restricted_extras(),
+        }
+
+    def _apply_wizard_state(self, state):
+        if isinstance(state, dict):
+            self._wizard_state = state
+        self._sync_wizard_controls()
+
+    def _refresh_wizard_state(self):
+        self.submit(self._read_wizard_state, done=self._apply_wizard_state,
+                    name="Reading setup state")
+
+    @staticmethod
+    def _outcome_ok(result):
+        if isinstance(result, bool):
+            return result
+        return bool(getattr(result, "ok", False))
+
+    def _wizard_note(self, label, result):
+        self._wizard_summary.append((label, self._outcome_ok(result)))
+
+    # Wizard actions ---------------------------------------------------
+    def on_wizard_check_updates(self, _btn):
+        self.submit(apps_backend.list_updates, done=self._apply_wizard_updates,
+                    name="Checking for updates")
+
+    def _apply_wizard_updates(self, updates):
+        if isinstance(updates, dict):
+            self._wizard_updates = updates
+        counts = {key: len(value) for key, value in self._wizard_updates.items()
+                  if isinstance(value, (list, set, tuple))}
+        total = sum(counts.values())
+        if total:
+            self.wizard_updates_state.set_text(
+                "{} update(s): {} APT, {} Flatpak, {} snap.".format(
+                    total, counts.get("apt", 0), counts.get("flatpak", 0),
+                    counts.get("snap", 0)))
+        else:
+            self.wizard_updates_state.set_text(
+                "No pending updates found. Use Refresh to re-check later.")
+        self._set_button_text(self.wizard_update_btn, "Update all ({})".format(total))
+        self.wizard_update_btn.set_sensitive(total > 0 and not self._busy)
+
+    def on_wizard_update_all(self, _btn):
+        updates = self._wizard_updates
+        snaps = [{"source": "snap", "id": snap_id}
+                 for snap_id in sorted(updates.get("snap") or ())]
+        actions = []
+        if updates.get("apt"):
+            actions.append(("APT package updates", apps_backend.update_all, ("apt",)))
+        if updates.get("flatpak"):
+            actions.append(("Flatpak updates", apps_backend.update_all, ("flatpak",)))
+        if snaps:
+            actions.append(("Snap updates", apps_backend.update_installed, (snaps,)))
+        if not actions:
+            self._notify("No updates were found. Use Check for updates first.", "warning")
+            return
+        if not self._confirm(
+                "Update all apps?",
+                "APT package upgrades can take a while; Flatpak and snap updates "
+                "download in the background. Simulate mode previews this without "
+                "changing anything."):
+            return
+        self.submit(utils.run_actions, actions,
+                    done=lambda result: (self._wizard_note("App updates", result),
+                                         self.on_wizard_check_updates(None)),
+                    name="Updating apps")
+
+    def on_wizard_install_drivers(self, _btn):
+        picks = self._wizard_recommended_drivers()
+        if not picks:
+            self._notify("No recommended driver was detected.", "warning")
+            return
+        if not self._confirm(
+                "Install {} recommended driver package(s)?".format(len(picks)),
+                "\n".join("• " + name for name in picks)
+                + "\n\n" + self._driver_risk_note(picks)):
+            return
+        self.submit(drivers_backend.install_driver, picks,
+                    done=lambda result: (self._wizard_note("Recommended drivers", result),
+                                         self.on_rescan_drivers()),
+                    name="Installing drivers")
+
+    def _wizard_recommended_drivers(self):
+        picks = []
+        for row in self.drivers_list.get_children():
+            device = getattr(row, "device", None)
+            for package in (device or {}).get("packages", []):
+                name = package.get("name")
+                if package.get("recommended") and name and name not in picks:
+                    picks.append(name)
+        return picks
+
+    def on_wizard_enable_firewall(self, _btn):
+        if not self._confirm(
+                "Enable the UFW firewall?",
+                "The firewall blocks unsolicited incoming connections and never "
+                "blocks your own. This applies immediately after one administrator "
+                "prompt."):
+            return
+        self.submit(firewall_backend.set_ufw, True,
+                    done=lambda result: (self._wizard_note("Firewall (UFW)", result),
+                                         self._refresh_optimize_settings()),
+                    name="Enabling the firewall")
+
+    def on_wizard_enable_maintenance(self, _btn):
+        index = self.wizard_maintenance_combo.get_active()
+        if isinstance(index, int) and 0 <= index < len(self.MAINTENANCE_FREQUENCIES):
+            frequency = self.MAINTENANCE_FREQUENCIES[index]
+        else:
+            frequency = "weekly"
+        if not self._confirm(
+                "Enable automatic maintenance?",
+                "Preen installs a systemd timer that runs the root-level cleanup tasks "
+                "on the chosen schedule. This applies immediately."):
+            return
+        self.submit(maintenance_backend.set_schedule, True, frequency,
+                    done=lambda result: (self._wizard_note("Automatic maintenance", result),
+                                         self._refresh_wizard_state()),
+                    name="Updating maintenance schedule")
+
+    def on_wizard_enable_flathub(self, _btn):
+        self.submit(utils.ensure_flathub,
+                    done=lambda result: (self._wizard_note("Flathub", result),
+                                         self._refresh_wizard_state()),
+                    name="Enabling Flathub")
+
+    def on_wizard_install_codecs(self, _btn):
+        self.submit(system_backend.install_restricted_extras,
+                    done=lambda result: (self._wizard_note("Media codecs", result),
+                                         self._refresh_wizard_state()),
+                    name="Installing media codecs")
+
+    # Wizard per-step syncs --------------------------------------------
+    def _sync_wizard_drivers(self):
+        picks = self._wizard_recommended_drivers()
+        if not getattr(self, "_drivers_available", False):
+            text = ("ubuntu-drivers is not installed; the Drivers page explains "
+                    "how to add it.")
+        elif picks:
+            text = "Recommended: {}.".format(", ".join(picks))
+        else:
+            text = "No devices needing extra drivers were detected."
+        self.wizard_drivers_state.set_text(text)
+        self.wizard_drivers_btn.set_sensitive(bool(picks) and not self._busy)
+
+    def _sync_wizard_firewall(self):
+        enabled = self.baseline.get("ufw")
+        if enabled is None:
+            text = "UFW is not installed or its state could not be read."
+        elif enabled:
+            text = "The firewall is already enabled."
+        else:
+            text = "The firewall is currently disabled."
+        self.wizard_firewall_state.set_text(text)
+        self.wizard_firewall_btn.set_sensitive(enabled is False and not self._busy)
+
+    def _sync_wizard_maintenance(self):
+        schedule = self._wizard_state.get("maintenance")
+        if not isinstance(schedule, dict) or not schedule:
+            text = "Checking the schedule…"
+            known = False
+        elif schedule.get("enabled"):
+            text = "Automatic maintenance is on ({}).".format(
+                schedule.get("calendar") or schedule.get("frequency") or "scheduled")
+            known = True
+        else:
+            text = "Automatic maintenance is off."
+            known = True
+        self.wizard_maintenance_state.set_text(text)
+        self.wizard_maintenance_btn.set_sensitive(known and not self._busy)
+
+    def _sync_wizard_system(self):
+        flathub = self._wizard_state.get("flathub")
+        if flathub is None:
+            self.wizard_flathub_state.set_text("Checking Flathub…")
+        elif flathub:
+            self.wizard_flathub_state.set_text("Flathub is already enabled.")
+        else:
+            self.wizard_flathub_state.set_text("Flathub is not configured yet.")
+        self.wizard_flathub_btn.set_sensitive(flathub is False and not self._busy)
+        codecs = self._wizard_state.get("codecs")
+        if codecs is None:
+            self.wizard_codecs_state.set_text(
+                "Could not check (the dpkg query is unavailable).")
+        elif codecs:
+            self.wizard_codecs_state.set_text("Media codecs are already installed.")
+        else:
+            self.wizard_codecs_state.set_text("Media codecs are not installed.")
+        self.wizard_codecs_btn.set_sensitive(codecs is False and not self._busy)
+
+    def _sync_wizard_finish(self):
+        if not self._wizard_summary:
+            self.wizard_finish_state.set_text(
+                "Nothing was changed. Everything in this wizard stays available on "
+                "its own page: updates in Manage Apps, drivers in Drivers, the "
+                "firewall in Optimize, maintenance in Deep Clean, Flathub and codecs "
+                "in Install Apps.")
+            return
+        lines = ["{}: {}".format("Done" if ok else "Failed", label)
+                 for label, ok in self._wizard_summary]
+        lines.append("Every step is also available later on its own page.")
+        self.wizard_finish_state.set_text("\n".join(lines))
 
     # ------------------------------------------------------------------
     # Small UI factories
@@ -1369,6 +1819,7 @@ class MainWindow(Gtk.ApplicationWindow):
             self._sync_maintenance_control()
             self._on_swap_toggle(None)
             self._update_drivers_counter()
+            self._sync_wizard_controls()
         return False
 
     def _finish(self, result, done):

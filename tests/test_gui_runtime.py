@@ -326,6 +326,30 @@ class FakeStack(Widget):
         return self._visible_child_name
 
 
+class FakeDialog(Widget):
+    """Dialog fake with a real content area so wizard tests exercise its layout.
+
+    The generic Widget would return None from get_content_area(), which the
+    wizard's crash-guard try/except would silently absorb — a FakeDialog
+    keeps a broken wizard build from hiding behind that catch-all.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.destroyed = False
+
+    def get_content_area(self):
+        # __dict__, not getattr(): the inherited no-op __getattr__ returns a
+        # truthy lambda for any missing name, so getattr's default never fires.
+        area = self.__dict__.get("_content_area")
+        if area is None:
+            area = self._content_area = Widget()
+        return area
+
+    def destroy(self):
+        self.destroyed = True
+
+
 class FakeApplicationWindow(Widget):
     """Like Widget, but private MainWindow methods must really exist.
 
@@ -352,7 +376,7 @@ class FakeGtk:
     ToggleButton = FakeToggleButton
     CheckButton = Widget
     ComboBoxText = FakeComboBoxText
-    Dialog = Widget
+    Dialog = FakeDialog
     FileChooserDialog = Widget
     Grid = Widget
     HeaderBar = Widget
@@ -390,6 +414,7 @@ class FakeGtk:
     PolicyType = SimpleNamespace(NEVER=0, AUTOMATIC=1, ALWAYS=2)
     Align = SimpleNamespace(CENTER=3, START=0)
     StackTransitionType = SimpleNamespace(CROSSFADE=0)
+    WindowPosition = SimpleNamespace(NONE=0, CENTER=1, CENTER_ON_PARENT=3)
     MessageType = SimpleNamespace(INFO=0, WARNING=1, ERROR=2)
     ButtonsType = SimpleNamespace(CLOSE=1, OK_CANCEL=2)
     ResponseType = SimpleNamespace(OK=-5, CANCEL=-6, CLOSE=-7, APPLY=-10)
@@ -494,6 +519,20 @@ class GuiRuntimeTest(unittest.TestCase):
             return_value={"devices": [], "warnings": [], "available": False})
         drivers_patch.start()
         self.addCleanup(drivers_patch.stop)
+        # The setup wizard probes maintenance/flathub/codecs when it builds;
+        # keep those reads hermetic like the scans above.
+        schedule_patch = mock.patch.object(
+            self.gui.maintenance_backend, "get_schedule",
+            return_value={"enabled": False, "installed": False})
+        schedule_patch.start()
+        self.addCleanup(schedule_patch.stop)
+        flathub_patch = mock.patch.object(utils, "flathub_present", return_value=False)
+        flathub_patch.start()
+        self.addCleanup(flathub_patch.stop)
+        codecs_patch = mock.patch.object(
+            self.gui.system_backend, "has_restricted_extras", return_value=False)
+        codecs_patch.start()
+        self.addCleanup(codecs_patch.stop)
 
     def test_window_builds_and_all_pages_exist(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
@@ -1448,6 +1487,17 @@ class GuiRuntimeTest(unittest.TestCase):
             window.on_rescan_appimages,
             window.on_pick_appimage,
             window.on_set_default_appimage,
+            # first-run setup wizard
+            window.on_wizard_check_updates,
+            window.on_wizard_update_all,
+            window.on_wizard_install_drivers,
+            window.on_wizard_enable_firewall,
+            window.on_wizard_enable_maintenance,
+            window.on_wizard_enable_flathub,
+            window.on_wizard_install_codecs,
+            window._on_wizard_next,
+            window._on_wizard_back,
+            window._on_wizard_skip,
         ]
         for handler in handlers:
             with self.subTest(handler=handler.__name__):
@@ -1785,6 +1835,141 @@ class GuiRuntimeTest(unittest.TestCase):
         with mock.patch.object(window, "submit") as submit:
             window.on_install_drivers(None)
         self.assertFalse(submit.called)  # nothing selectable, nothing submitted
+
+    # ------------------------------------------------------------------
+    # First-run setup wizard
+    # ------------------------------------------------------------------
+    def test_wizard_is_shown_on_first_run_and_marks_onboarded(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        self.assertIsNotNone(window._setup_dialog)
+        self.assertTrue(settings_backend.load()["onboarded"])
+
+    def test_wizard_never_returns_once_onboarded(self):
+        settings_backend.update({"onboarded": True})
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        self.assertIsNone(window._setup_dialog)
+
+    def test_wizard_navigation_walks_every_step_and_skip_closes(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        for _ in range(len(window.WIZARD_STEPS) - 1):
+            window._on_wizard_next(None)
+        self.assertEqual(window.wizard_stack.get_visible_child_name(), "finish")
+        self.assertIn("Nothing was changed", window.wizard_finish_state.get_text())
+        window._on_wizard_back(None)
+        self.assertEqual(window.wizard_stack.get_visible_child_name(), "system")
+        window._on_wizard_next(None)
+        window._on_wizard_skip(None)
+        self.assertTrue(window._setup_dialog.destroyed)
+
+    def test_wizard_back_stops_at_the_first_step(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._on_wizard_back(None)
+        self.assertEqual(window.wizard_stack.get_visible_child_name(), "welcome")
+        self.assertFalse(window.wizard_back.get_sensitive())
+
+    def test_wizard_updates_step_reports_counts_and_gates_apply(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        with mock.patch.object(window, "submit") as submit:
+            window.on_wizard_check_updates(None)
+            self.assertEqual(submit.call_args.args[0], self.gui.apps_backend.list_updates)
+        window._apply_wizard_updates(
+            {"apt": {"vlc", "git"}, "flatpak": {"org.videolan.VLC"}, "snap": set()})
+        self.assertEqual(window.wizard_updates_state.get_text(),
+                         "3 update(s): 2 APT, 1 Flatpak, 0 snap.")
+        self.assertTrue(window.wizard_update_btn.get_sensitive())
+        window._apply_wizard_updates({})
+        self.assertIn("No pending updates", window.wizard_updates_state.get_text())
+        self.assertFalse(window.wizard_update_btn.get_sensitive())
+
+    def test_wizard_update_all_submits_only_sources_with_updates(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_wizard_updates({"apt": {"vlc"}, "flatpak": set(), "snap": {"firefox"}})
+        window._confirm = lambda *args, **kwargs: True
+        with mock.patch.object(window, "submit") as submit:
+            window.on_wizard_update_all(None)
+            self.assertEqual(submit.call_args.args[0], self.gui.utils.run_actions)
+            actions = submit.call_args.args[1]
+            self.assertEqual([action[0] for action in actions],
+                             ["APT package updates", "Snap updates"])
+        window._confirm = lambda *args, **kwargs: False
+        with mock.patch.object(window, "submit") as submit:
+            window.on_wizard_update_all(None)
+        self.assertFalse(submit.called)
+
+    def test_wizard_drivers_step_picks_recommended_and_installs(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._fill_drivers_rows({"available": True, "warnings": [], "devices": [
+            {"modalias": "pci:v000010DE", "vendor": "NVIDIA Corporation",
+             "model": "GP104 [GeForce GTX 1070]", "packages": [
+                 {"name": "nvidia-driver-535", "recommended": True,
+                  "note": "distro non-free recommended"}]},
+        ]})
+        window._sync_wizard_drivers()
+        self.assertIn("nvidia-driver-535", window.wizard_drivers_state.get_text())
+        self.assertTrue(window.wizard_drivers_btn.get_sensitive())
+        window._confirm = lambda *args, **kwargs: True
+        with mock.patch.object(window, "submit") as submit:
+            window.on_wizard_install_drivers(None)
+        self.assertEqual(submit.call_args.args[0], self.gui.drivers_backend.install_driver)
+        self.assertEqual(submit.call_args.args[1], ["nvidia-driver-535"])
+
+    def test_wizard_firewall_step_only_offers_enable_when_disabled(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window.baseline["ufw"] = False
+        window._sync_wizard_firewall()
+        self.assertTrue(window.wizard_firewall_btn.get_sensitive())
+        window.baseline["ufw"] = True
+        window._sync_wizard_firewall()
+        self.assertFalse(window.wizard_firewall_btn.get_sensitive())
+        window.baseline["ufw"] = None
+        window._sync_wizard_firewall()
+        self.assertFalse(window.wizard_firewall_btn.get_sensitive())
+        window.baseline["ufw"] = False
+        window._confirm = lambda *args, **kwargs: True
+        with mock.patch.object(window, "submit") as submit:
+            window.on_wizard_enable_firewall(None)
+        self.assertEqual(submit.call_args.args[0], self.gui.firewall_backend.set_ufw)
+        self.assertEqual(submit.call_args.args[1:], (True,))
+
+    def test_wizard_maintenance_step_enables_with_chosen_frequency(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_wizard_state({"maintenance": {"enabled": False, "installed": False},
+                                    "flathub": False, "codecs": False})
+        window._sync_wizard_maintenance()
+        self.assertEqual(window.wizard_maintenance_state.get_text(),
+                         "Automatic maintenance is off.")
+        self.assertTrue(window.wizard_maintenance_btn.get_sensitive())
+        window._confirm = lambda *args, **kwargs: True
+        with mock.patch.object(window, "submit") as submit:
+            window.on_wizard_enable_maintenance(None)
+        self.assertEqual(submit.call_args.args[0], self.gui.maintenance_backend.set_schedule)
+        self.assertEqual(submit.call_args.args[1:], (True, "weekly"))
+        window.wizard_maintenance_combo.set_active(0)
+        with mock.patch.object(window, "submit") as submit:
+            window.on_wizard_enable_maintenance(None)
+        self.assertEqual(submit.call_args.args[1:], (True, "daily"))
+
+    def test_wizard_system_step_gates_flathub_and_codecs(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._apply_wizard_state({"maintenance": {}, "flathub": True, "codecs": False})
+        window._sync_wizard_system()
+        self.assertFalse(window.wizard_flathub_btn.get_sensitive())
+        self.assertTrue(window.wizard_codecs_btn.get_sensitive())
+        with mock.patch.object(window, "submit") as submit:
+            window.on_wizard_enable_flathub(None)
+            self.assertEqual(submit.call_args.args[0], self.gui.utils.ensure_flathub)
+            window.on_wizard_install_codecs(None)
+            self.assertEqual(submit.call_args.args[0],
+                             self.gui.system_backend.install_restricted_extras)
+
+    def test_wizard_finish_step_summarizes_outcomes(self):
+        window = self.gui.MainWindow(self.gui.PreenApp())
+        window._wizard_note("Firewall (UFW)", True)
+        window._wizard_note("App updates", False)
+        window._sync_wizard_finish()
+        text = window.wizard_finish_state.get_text()
+        self.assertIn("Done: Firewall (UFW)", text)
+        self.assertIn("Failed: App updates", text)
 
     def test_sidebar_search_filters_rows_and_hides_headers(self):
         window = self.gui.MainWindow(self.gui.PreenApp())
