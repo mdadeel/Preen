@@ -31,6 +31,39 @@ def run_cleanup(log=None) -> Outcome:
 
 
 # ---------------------------------------------------------------------------
+# Media codecs (first-run setup)
+# ---------------------------------------------------------------------------
+RESTRICTED_EXTRAS_PACKAGE = "ubuntu-restricted-extras"
+
+
+def has_restricted_extras() -> Optional[bool]:
+    """True/False when dpkg can answer about the package; None when it cannot."""
+    if not has_command("dpkg-query"):
+        return None
+    result = run_cmd(
+        ["dpkg-query", "-W", "-f=${Status}", RESTRICTED_EXTRAS_PACKAGE], quiet=True)
+    if not result.ok:
+        return False
+    return "install ok installed" in result.out
+
+
+def install_restricted_extras(log=None) -> Outcome:
+    """Install the media-codec metapackage via the polkit-gated apt path."""
+    if is_simulate():
+        if log:
+            log.append("[simulate] would install: {}\n".format(RESTRICTED_EXTRAS_PACKAGE))
+        return ok("Would install {}.".format(RESTRICTED_EXTRAS_PACKAGE))
+    report = Report(log)
+    script = "DEBIAN_FRONTEND=noninteractive " + format_cmd(
+        ["apt-get", "install", "-y", RESTRICTED_EXTRAS_PACKAGE])
+    report.run(["bash", "-c", script], use_pkexec=True, mutate=True)
+    return report.finish(
+        "Media codecs installed ({}).".format(RESTRICTED_EXTRAS_PACKAGE),
+        "Codec installation finished with errors",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Animations
 # ---------------------------------------------------------------------------
 def are_animations_enabled() -> Optional[bool]:

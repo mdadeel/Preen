@@ -490,6 +490,20 @@ def safe_tar_members(tar, strip_prefixes: Sequence[str] = ()) -> Tuple[List, Lis
     return allowed, rejected
 
 
+def flathub_present(log=None) -> bool:
+    """Read-only check whether a flathub remote is already configured.
+
+    ``ensure_flathub(mutate=False)`` cannot serve as this check: when the
+    remote is missing it returns True after merely simulating the add.
+    """
+    if not has_command("flatpak"):
+        return False
+    result = run_cmd(["flatpak", "remotes", "--columns=name"], log=log, quiet=True)
+    if not result.ok:
+        return False
+    return any(line.strip() == "flathub" for line in result.out.splitlines())
+
+
 def ensure_flathub(log=None, mutate: bool = True) -> bool:
     """Make sure a flathub remote exists. Tries system scope, then user scope."""
     if not has_command("flatpak"):

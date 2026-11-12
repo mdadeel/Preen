@@ -739,6 +739,49 @@ class BackendTestCase(unittest.TestCase):
         self.assertEqual(content.count("X-GNOME-Autostart-enabled="), 1)
         self.assertTrue(system.list_startup_apps()[0]["enabled"])
 
+    # ------------------------------------------------------------------
+    # Media codecs + flathub detection (first-run setup)
+    # ------------------------------------------------------------------
+    def test_install_restricted_extras_runs_one_polkit_apt_install(self):
+        outcome = system.install_restricted_extras(log=self.log)
+        self.assertTrue(outcome.ok)
+        commands = self.fake.mutating_commands()
+        self.assertEqual(len(commands), 1)
+        script = commands[0]["args"][2]
+        self.assertIn("DEBIAN_FRONTEND=noninteractive", script)
+        self.assertIn("apt-get install -y ubuntu-restricted-extras", script)
+
+    def test_install_restricted_extras_simulates_without_commands(self):
+        utils.set_simulate(True)
+        self.addCleanup(utils.set_simulate, False)
+        outcome = system.install_restricted_extras(log=self.log)
+        self.assertTrue(outcome.ok)
+        self.assertEqual(self.fake.mutating_commands(), [])
+        self.assertIn("[simulate] would install", self.log.text())
+
+    def test_has_restricted_extras_reflects_dpkg_status(self):
+        with mock.patch.object(system, "run_cmd",
+                               return_value=utils.CommandResult(0, "install ok installed", "")):
+            self.assertTrue(system.has_restricted_extras())
+        with mock.patch.object(system, "run_cmd",
+                               return_value=utils.CommandResult(1, "", "")):
+            self.assertFalse(system.has_restricted_extras())
+        with mock.patch.object(system, "has_command", return_value=False):
+            self.assertIsNone(system.has_restricted_extras())
+
+    def test_flathub_present_reads_the_remote_list(self):
+        with mock.patch.object(utils, "run_cmd",
+                               return_value=utils.CommandResult(0, "flathub\n", "")):
+            self.assertTrue(utils.flathub_present())
+        with mock.patch.object(utils, "run_cmd",
+                               return_value=utils.CommandResult(0, "fedora-cisco\n", "")):
+            self.assertFalse(utils.flathub_present())
+        with mock.patch.object(utils, "run_cmd",
+                               return_value=utils.CommandResult(1, "", "boom")):
+            self.assertFalse(utils.flathub_present())
+        with mock.patch.object(utils, "has_command", return_value=False):
+            self.assertFalse(utils.flathub_present())
+
     def test_config_export_import_roundtrip_with_symlinks_present(self):
         """An exported archive must always be restorable by this same tool."""
         (self.config_dir / "settings.ini").write_text("original\n", encoding="utf-8")
